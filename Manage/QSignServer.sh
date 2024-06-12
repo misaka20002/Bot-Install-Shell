@@ -44,7 +44,7 @@ Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
 if [ "${Address}" = "CN" ]
 then
   GitMirror="gitee.com"
-  GithubMirror="https://mirrors.chenby.cn/"
+  GithubMirror="https://github.moeyy.xyz/"
 else
   GitMirror="github.com"
   GithubMirror=""
