@@ -12,7 +12,7 @@ URL="https://ipinfo.io"
 Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
 if [ "${Address}" = "CN" ]
 then
-    GitHubMirror="https://mirrors.chenby.cn/"
+    GitHubMirror="https://github.moeyy.xyz/"
 fi
 
 if [ -d /usr/local/node/bin ];then
@@ -959,7 +959,7 @@ do
           ;;
         69)
           Name="米游社手动验证"
-          Git="https://gitee.com/Yummy-cookie/GT-Manual.git"
+          Git="https://gitee.com/haanxuan/GT-Manual"
           PluginFolder="GT-Manual"
           PluginInstall
           ;;
