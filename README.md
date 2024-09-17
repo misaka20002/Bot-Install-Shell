@@ -1,4 +1,4 @@
-<a href='https://gitee.com/baihu433/Yunzai-Bot-Shell/stargazers'><img src='https://gitee.com/baihu433/Yunzai-Bot-Shell/badge/star.svg?theme=dark' alt='star'></img></a>
+<a href='https://gitee.com/Misaka21011/Yunzai-Bot-Shell/stargazers'><img src='https://gitee.com/Misaka21011/Yunzai-Bot-Shell/badge/star.svg?theme=dark' alt='star'></img></a>
 <h1 align="center">白狐-Script</h1>
 <hr/>
 
@@ -36,9 +36,9 @@
 
 <details markdown='1'><summary>展开/收起</summary>
 
-![展示1](https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/img/展示1.jpg)
+![展示1](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/展示1.jpg)
 
-![展示2](https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/img/展示2.jpg)
+![展示2](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/展示2.jpg)
 
 </details>
 <hr/>
@@ -60,7 +60,7 @@
 
 > ###### `注意:` 如果您`已经`使用其他脚本部署过机器人,那么安装白狐脚本后,请第一时间执行`bh SWPKG`来检查软件包依赖,防止出现某些错误
 
-安装即`同意`[用户协议](https://gitee.com/baihu433/Yunzai-Bot-Shell/blob/master/Manage/用户协议.txt)
+安装即`同意`[用户协议](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Manage/用户协议.txt)
 
 <details markdown='1'><summary>①服务器安装方法</summary>
 
@@ -71,7 +71,7 @@ su
 ```
 
 ```
-bash <(curl -sL https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/install.sh)
+bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/install.sh)
 ```
 
 </details>
@@ -81,8 +81,8 @@ bash <(curl -sL https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/install.s
 ##### 安卓手机
 
  ###### 按照此文档部署
->[部署文档地址](https://gitee.com/baihu433/Yunzai-Bot-Shell/blob/master/Markdown/Tmoe.md)
->[文件管理文档地址](https://gitee.com/baihu433/Yunzai-Bot-Shell/blob/master/Markdown/MT-Termux.md)
+>[部署文档地址](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Markdown/Tmoe.md)
+>[文件管理文档地址](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Markdown/MT-Termux.md)
 
 </details>
 <br/>
@@ -92,13 +92,13 @@ bash <(curl -sL https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/install.s
 ###### 注意:除非您知道您在干什么,否则请不要使用该项!!!
 
 ```
-bash <(curl -sL https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/install.sh)
+bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/install.sh)
 ```
 
 </details>
 <br>
 
-> ###### [快捷命令帮助](https://gitee.com/baihu433/Yunzai-Bot-Shell/blob/master/wiki.md)[必看!!]
+> ###### [快捷命令帮助](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/wiki.md)[必看!!]
 
 <hr>
 
@@ -116,7 +116,7 @@ bh help
 ```
 >修复白狐脚本打不开的命令
 ```
-bash <(curl -sL https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/install.sh)
+bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/install.sh)
 ```
 >删除白狐脚本的命令
 ```
@@ -130,12 +130,12 @@ rm /usr/local/bin/bh
 >插件安装脚本: [适配Linux和Windows]<br>
 >Linux请使用Terminal[终端]执行<br>window请使用Git Bash执行
 ```
-bash <(curl -sL https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/Manage/BOT-PlugIn.sh)
+bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/BOT-PlugIn.sh)
 ```
 >签名服务器部署: [仅适配Linux]<br>
 >Linux请使用Terminal[终端]执行
 ```
-bash <(curl -sL https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/Manage/QSignServer.sh)
+bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/QSignServer.sh)
 ```
 
 <hr/>
@@ -203,6 +203,6 @@ bash <(curl -sL https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/Manage/QS
 2. 严禁用于任何`商业用途`和`非法行为`<br>
 3. 如果你是脚本作者,想外调本仓库内的脚本,请联系白狐<br>
 4. 白狐没有开通爱发电，所以欢迎通过赞助码打赏<br>
-5. 赞助备注:QQ号+你的QQ名称[戳我跳转赞助码](https://gitee.com/baihu433/Yunzai-Bot-Shell/blob/master/img/赞助码.jpg)<br>
-6. [戳这里可以不花一分钱赞助](https://gitee.com/baihu433/Yunzai-Bot-Shell/blob/master/Markdown/sponsor.md)<br>
+5. 赞助备注:QQ号+你的QQ名称[戳我跳转赞助码](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/img/赞助码.jpg)<br>
+6. [戳这里可以不花一分钱赞助](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Markdown/sponsor.md)<br>
 <hr>

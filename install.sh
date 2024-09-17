@@ -98,10 +98,10 @@ function Script_Install(){
       if [ "${Address}" = "CN" ]
       then
           GitMirror="gitee.com"
-          URL="https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/version"
+          URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
       else 
           GitMirror="raw.githubusercontent.com"
-          URL="https://raw.githubusercontent.com/baihu433/Yunzai-Bot-Shell/master/version"
+          URL="https://raw.githubusercontent.com/Misaka21011/Yunzai-Bot-Shell/master/version"
       fi
     fi
     version_date=$(curl ${URL})
@@ -113,7 +113,7 @@ function Script_Install(){
     echo -e ${red}" "白狐 ${yellow}BOT ${green}Install ${cyan}Script ${background}
     echo -e "  "————"  "————"  "————"  "————"  "
     echo -e ${green}" "版本:" "v${version} ${cyan}\(${date}\) ${background}
-    echo -e ${green}" "作者:" "${cyan}白狐"   "\(baihu433\) ${background}
+    echo -e ${green}" "作者:" "${cyan}白狐"   "\(Misaka21011\) ${background}
     echo -e ${white}=========================${background}
     echo
     echo -e ${white}=========================${background}
@@ -125,11 +125,11 @@ function Script_Install(){
     case ${Choice} in 
         1)
             export Git_Mirror=gitee.com
-            URL="https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/Manage/Main.sh"
+            URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/Main.sh"
             ;;
         2)
             export Git_Mirror=github
-            URL="https://raw.githubusercontent.com/baihu433/Yunzai-Bot-Shell/master/Manage/Main.sh"
+            URL="https://raw.githubusercontent.com/Misaka21011/Yunzai-Bot-Shell/master/Manage/Main.sh"
             ;;
         *)
             echo -e ${red}输入错误${background}
@@ -165,7 +165,7 @@ echo -e ${cyan}白狐 Script ${yellow}不会执行任何恶意命令${background
 echo -e ${cyan}如果您同意安装 请输入 ${green}同意安装${background}
 echo -e ${cyan}注意：同意安装即同意本项目的用户协议${background}
 echo -e ${cyan}用户协议链接: ${background}
-echo -e ${cyan}https://gitee.com/baihu433/Yunzai-Bot-Shell/blob/master/Manage/用户协议.txt${background}
+echo -e ${cyan}https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Manage/用户协议.txt${background}
 echo -e ${white}"=========================="${background}
 echo -en ${green}请输入:${background};read yn
 if [  "${yn}" == "同意安装" ]

@@ -1,10 +1,10 @@
 #!/bin/env bash
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
-  URL="https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/Linux/Bot-Install-"
+  URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Linux/Bot-Install-"
 elif ping -c 1 github.com > /dev/null 2>&1
 then
-  URL="https://raw.githubusercontent.com/baihu433/Yunzai-Bot-Shell/master/Linux/Bot-Install-"
+  URL="https://raw.githubusercontent.com/Misaka21011/Yunzai-Bot-Shell/master/Linux/Bot-Install-"
 fi
 Arch_Script="${URL}ArchLinux.sh"
 Kernel_Script="${URL}CentOS.sh"

@@ -120,7 +120,7 @@ then
 fi
 }
 
-Git="https://${GitMirror}/baihu433/QSignServer"
+Git="https://${GitMirror}/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/psign.sh"
 ScriptVersion="1.1.1"
 config=$HOME/QSignServer/config.yaml
 

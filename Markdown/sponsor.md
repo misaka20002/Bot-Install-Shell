@@ -4,10 +4,10 @@
 
 #### 下面是本站的红包二维码，请使用支付宝扫完下面的红包二维码
 
-![红包码](https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/img/红包码.jpg)
+![红包码](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/红包码.jpg)
 
 #### 再扫下面的商家二维码，红包多少金额，你就支付多少金额，`不需要你花一分钱`！
 
-![红包码](https://gitee.com/baihu433/Yunzai-Bot-Shell/raw/master/img/商家码.jpg)
+![红包码](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/商家码.jpg)
 
 ### 值得注意的就是格式 `QQ号+你的QQ名称`

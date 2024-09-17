@@ -29,7 +29,7 @@ fi
 if ! dpkg -s chromium-browser >/dev/null 2>&1
     then
         echo -e ${yellow}安装chromium浏览器${background}
-        until bash <(curl -sL https://gitee.com/baihu433/chromium/raw/master/chromium.sh)
+        until bash <(curl -sL https://gitee.com/Misaka21011/chromium/raw/master/chromium.sh)
         do
             echo -e ${red}安装失败 3秒后重试${background}
             sleep 3s
