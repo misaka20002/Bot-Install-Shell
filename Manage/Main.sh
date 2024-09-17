@@ -56,7 +56,7 @@ if [ ${Address} = "CN" ]
 then
     export GitMirror="gitee.com"
 else 
-    export GitMirror="raw.githubusercontent.com"
+    export GitMirror="gitee.com"
 fi
 }
 ##############################
@@ -285,7 +285,7 @@ if [ "${new_version}" != "${old_version}" ];then
     fi
 fi
 }
-old_version="1.1.3"
+old_version="1.1.4"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -293,8 +293,8 @@ then
   UPDATE
 elif ping -c 1 github.com > /dev/null 2>&1
 then
-  VersionURL="https://raw.githubusercontent.com/Misaka21011/Yunzai-Bot-Shell/master/version"
-  URL="https://raw.githubusercontent.com/Misaka21011/Yunzai-Bot-Shell/master/Manage/Main.sh"
+  VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
+  URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/Main.sh"
   UPDATE
 fi
 ##############################
@@ -467,9 +467,9 @@ case $1 in
     Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
     if [ ${Address} = "CN" ]
     then
-        bash <(curl -sL https://mirrors.chenby.cn/https://raw.githubusercontent.com/Misaka21011/Yunzai-Bot-Shell/master/Manage/BOT-PlugIn.sh)
+        bash <(curl -sL https://mirrors.chenby.cn/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
     else 
-        bash <(curl -sL https://raw.githubusercontent.com/Misaka21011/Yunzai-Bot-Shell/master/Manage/BOT-PlugIn.sh)
+        bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/BOT-PlugIn.sh)
     fi
     ;;
 esac
@@ -601,7 +601,7 @@ then
   URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
 elif ping -c 1 github.com > /dev/null 2>&1
 then
-  URL="https://raw.githubusercontent.com/Misaka21011/Yunzai-Bot-Shell/master/Manage"
+  URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
 fi
 for command in ${command_all}
 do
