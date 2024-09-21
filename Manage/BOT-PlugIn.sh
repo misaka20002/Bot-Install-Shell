@@ -36,7 +36,7 @@ Install_GIT_Plugin(){
 EchoPluginPage(){
 echo
 echo
-echo -e ${white}"#######"${green}白狐-Plug-In${white}"#######"${background}
+echo -e ${white}"#######"${green}呆毛版-Plug-In${white}"#######"${background}
 echo -e 1.  ${cyan}miao-plugin"               "喵喵插件${background}
 echo -e 2.  ${cyan}xiaoyao-cvs-plugin"        "逍遥图鉴${background}
 echo -e 3.  ${cyan}Guoba-Plugin"              "锅巴插件${background}
@@ -114,7 +114,7 @@ echo -e 73. ${cyan}Lain-plugin"              "喵崽适配器插件${background}
 
 DWPluginPage(){
         if (${dialog_whiptail} \
-        --title "白狐-Bot-Plugin" \
+        --title "呆毛版-Bot-Plugin" \
         --yes-button "单选" \
         --no-button "多选" \
         --yesno "           请选择Git插件安装方式" \
@@ -131,7 +131,7 @@ DWPluginPage(){
             tips="[空格选择 回车确定 空选取消]"
         fi
         if ! number=$(${dialog_whiptail} \
-        --title "白狐-QQ群:705226976" \
+        --title "呆毛版-QQ群:285744328" \
         --${checklist_menu} "选择您喜欢的插件吧! ${tips}" \
         26 60 20 \
         "1" "miao-plugin                    喵喵插件" ${OFF} \
@@ -454,7 +454,7 @@ Plugin_name
 dialog_whiptail_page(){
 if [ "${Single_Choice}" = "false" ]
 then
-  if ! ${dialog_whiptail} --title "白狐-Bot-Plugin" \
+  if ! ${dialog_whiptail} --title "呆毛版-Bot-Plugin" \
   --yesno "将会为您安装\n[${Name} ]" \
   20 50
   then
@@ -462,7 +462,7 @@ then
     backmain
   fi
 else
-  if ! ${dialog_whiptail} --title "白狐-Bot-Plugin" \
+  if ! ${dialog_whiptail} --title "呆毛版-Bot-Plugin" \
   --yesno "是否安装 ${Name}" \
   8 50
   then
@@ -1168,7 +1168,7 @@ Delete_GIT_Plugin(){
         done
         options="${options} 0. 返回 OFF"
         Number=$(${dialog_whiptail} \
-        --title "白狐" \
+        --title "呆毛版" \
         --checklist "请选择要删除的GIT插件" \
         28 45 20 ${options} \
         3>&1 1>&2 2>&3)
@@ -1237,7 +1237,7 @@ Delete_JS_Plugin(){
         done
         options="${options} 0. 返回 OFF"
         Number=$(${dialog_whiptail} \
-        --title "白狐" \
+        --title "呆毛版" \
         --checklist "请选择要删除的GIT插件" \
         28 45 20 ${options} \
         3>&1 1>&2 2>&3)
@@ -1297,8 +1297,8 @@ Delete_JS_Plugin(){
 function main(){
 function dialog_whiptail_page(){
 number=$(${dialog_whiptail} \
---title "白狐" \
---menu "白狐的QQ群:705226976" \
+--title "呆毛版" \
+--menu "呆毛版的QQ群:285744328" \
 20 40 10 \
 "1" "安装GIT插件" \
 "2" "安装JS插件" \
@@ -1313,7 +1313,7 @@ feedback
 function echo_page(){
     echo
     echo
-    echo -e ${white}"#####"${green}白狐-Yunzai-Bot${white}"#####"${background}
+    echo -e ${white}"#####"${green}呆毛版-Yunzai-Bot${white}"#####"${background}
     echo -e ${blue}请选择您要为哪一个bot管理插件${background}
     echo "#########################"
     echo -e ${green}1.  ${cyan}安装GIT插件${background}
@@ -1323,7 +1323,7 @@ function echo_page(){
     echo -e ${green}5.  ${cyan}删除JS插件${background}
     echo -e ${green}0.  ${cyan}返回\/退出${background}
     echo "#########################"
-    echo -e ${green}QQ群:${cyan}狐狸窝:705226976${background}
+    echo -e ${green}QQ群:${cyan}狐狸窝:285744328${background}
     echo "#########################"
     echo
     echo -en ${green}请输入您的选项: ${background};read number
@@ -1352,7 +1352,7 @@ fi
 function choose_path(){
 function dialog_whiptail_page(){ 
 number=$(${dialog_whiptail} \
---title "白狐 QQ群:705226976" \
+--title "呆毛版 QQ群:285744328" \
 --menu "请选择您要为哪一个bot管理插件" \
 20 40 10 \
 "1" "Yunzai-Bot" \
@@ -1369,7 +1369,7 @@ feedback
 function echo_page(){
     echo
     echo
-    echo -e ${white}"#####"${green}白狐-Yunzai-Bot${white}"#####"${background}
+    echo -e ${white}"#####"${green}呆毛版-Yunzai-Bot${white}"#####"${background}
     echo -e ${blue}请选择您要为哪一个bot管理插件${background}
     echo "#########################"
     echo -e ${green}1.  ${cyan}Yunzai-Bot${background}
@@ -1379,7 +1379,7 @@ function echo_page(){
     echo -e ${green}5.  ${cyan}Yxy-Bot${background}
     echo -e ${green}0.  ${cyan}退出${background}
     echo "#########################"
-    echo -e ${green}QQ群:${cyan}狐狸窝:705226976${background}
+    echo -e ${green}QQ群:${cyan}狐狸窝:285744328${background}
     echo "#########################"
     echo
     echo -en ${green}请输入您的选项: ${background};read number
@@ -1443,7 +1443,7 @@ elif [ -d "/root/TRSS_AllBot/${Bot_Name}/node_modules" ];then
     cd ${Plugin_Path}
 else
     function dialog_whiptail_page(){
-        ${dialog_whiptail} --title "白狐≧▽≦" \
+        ${dialog_whiptail} --title "呆毛版≧▽≦" \
         --msgbox "自动判断路径失败 \n请进入${Bot_Name}目录后 使用本脚本" 10 43
         exit
     }

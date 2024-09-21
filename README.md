@@ -1,5 +1,5 @@
 <a href='https://gitee.com/Misaka21011/Yunzai-Bot-Shell/stargazers'><img src='https://gitee.com/Misaka21011/Yunzai-Bot-Shell/badge/star.svg?theme=dark' alt='star'></img></a>
-<h1 align="center">白狐-Script</h1>
+<h1 align="center">呆毛版-Script</h1>
 <hr/>
 
 #### 国外服务器
@@ -47,7 +47,7 @@
 
 <details markdown='1'><summary>展开/收起</summary>
 
-[戳我跳转QQ(大佬群)(①群)](http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=WtGelvZbOVQ4yYYZswm9ZZ5kPHkD4H8o&authKey=xz1zyGxWG7bz5X%2BgvWunX9qGUsUq%2BDomb4p02FqXIuqXd8hoxTYvdCZozBzLeFOf&noverify=0&group_code=705226976)
+[戳我跳转QQ(大佬群)(①群)](http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=WtGelvZbOVQ4yYYZswm9ZZ5kPHkD4H8o&authKey=xz1zyGxWG7bz5X%2BgvWunX9qGUsUq%2BDomb4p02FqXIuqXd8hoxTYvdCZozBzLeFOf&noverify=0&group_code=285744328)
 
 [戳我跳转QQ(新手群)(②群)](http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=ttH53_Pw6dBkbBimPfEq1M8LdwvNwOeZ&authKey=BUwoqpgofF27nTz4M6JJ4UPvgv3iFcDzl3Po0PgsQf36oxFT6Xch7DbJ4U24s%2BFn&noverify=0&group_code=596660282)
 
@@ -58,7 +58,7 @@
 
 #### 安装方式
 
-> ###### `注意:` 如果您`已经`使用其他脚本部署过机器人,那么安装白狐脚本后,请第一时间执行`bh SWPKG`来检查软件包依赖,防止出现某些错误
+> ###### `注意:` 如果您`已经`使用其他脚本部署过机器人,那么安装呆毛版脚本后,请第一时间执行`bh SWPKG`来检查软件包依赖,防止出现某些错误
 
 安装即`同意`[用户协议](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Manage/用户协议.txt)
 
@@ -106,19 +106,19 @@ bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/instal
 
 <details markdown='1'><summary>展开/收起</summary>
 
->打开白狐脚本的命令
+>打开呆毛版脚本的命令
 ```
 bh
 ```
->获取白狐脚本帮助的命令
+>获取呆毛版脚本帮助的命令
 ```
 bh help
 ```
->修复白狐脚本打不开的命令
+>修复呆毛版脚本打不开的命令
 ```
 bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/install.sh)
 ```
->删除白狐脚本的命令
+>删除呆毛版脚本的命令
 ```
 rm /usr/local/bin/bh
 ```
@@ -190,7 +190,7 @@ bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage
 |焦糖白茶.很吉利喵~|1.23元|
 |汐鸢|1元|
 |承影|1元|
-|百草(白狐准新郎)|0.52元|
+|百草(呆毛版准新郎)|0.52元|
 |宵宫|0.4元|
 |こんにちは|0.1元|
 感谢老板 喵~
@@ -201,8 +201,8 @@ bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage
 
 1. 最后给个star，你的支持是维护本项目的动力<br>
 2. 严禁用于任何`商业用途`和`非法行为`<br>
-3. 如果你是脚本作者,想外调本仓库内的脚本,请联系白狐<br>
-4. 白狐没有开通爱发电，所以欢迎通过赞助码打赏<br>
+3. 如果你是脚本作者,想外调本仓库内的脚本,请联系呆毛版<br>
+4. 呆毛版没有开通爱发电，所以欢迎通过赞助码打赏<br>
 5. 赞助备注:QQ号+你的QQ名称[戳我跳转赞助码](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/img/赞助码.jpg)<br>
 6. [戳这里可以不花一分钱赞助](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Markdown/sponsor.md)<br>
 <hr>

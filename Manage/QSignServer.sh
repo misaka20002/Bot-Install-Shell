@@ -34,7 +34,7 @@ case $(uname -m) in
     ARCH=aarch64   
 ;;
 *)
-    echo ${red}您的框架为${yellow}$(uname -m)${red},快让白狐做适配.${background}
+    echo ${red}您的框架为${yellow}$(uname -m)${red},快让呆毛版做适配.${background}
     exit
 ;;
 esac
@@ -125,7 +125,7 @@ ScriptVersion="1.1.1"
 config=$HOME/QSignServer/config.yaml
 
 ModifyVersion(){
-echo -e ${white}"====="${green}白狐-QSignServer${white}"====="${background}
+echo -e ${white}"====="${green}呆毛版-QSignServer${white}"====="${background}
 echo -e ${cyan}请选择签名服务器适配的QQ共享库版本${background}
 echo -e  ${green} 1.  ${cyan}HD: 8.9.58${background}
 echo -e  ${green} 2.  ${cyan}HD: 8.9.63${background}
@@ -347,7 +347,7 @@ else
 fi
 }
 echo
-echo -e ${white}"====="${green}白狐-QSignServer${white}"====="${background}
+echo -e ${white}"====="${green}呆毛版-QSignServer${white}"====="${background}
 echo -e ${cyan}请选择启动方式${background}
 echo -e  ${green}1.  ${cyan}前台启动${background}
 echo -e  ${green}2.  ${cyan}TMUX后台启动${background}
@@ -476,7 +476,7 @@ file=$HOME/QSignServer/txlib/${LibraryVersion}/config.json
 Port=$(grep -E port ${file} | awk '{print $2}' | sed 's/"//g' | sed "s/://g")
 Key=$(grep -E key ${file} | awk '{print $2}' | sed 's/"//g' | sed "s/,//g")
 Host=$(grep -E host ${file} | awk '{print $2}' | sed 's/"//g' | sed "s/,//g")
-echo -e ${white}"====="${green}白狐-QSignServer${white}"====="${background}
+echo -e ${white}"====="${green}呆毛版-QSignServer${white}"====="${background}
 echo -e ${cyan}版本: ${green}${LibraryVersion}${background}
 echo -e ${cyan}端口: ${green}${Port}${background}
 echo -e ${cyan}key值: ${green}${Key}${background}
@@ -488,7 +488,7 @@ echo -en ${yellow}回车返回${background};read
 function config_QSignServer(){
 LibraryVersion=$(grep "LibraryVersion" ${config} | sed 's/LibraryVersion: //g')
 file=$HOME/QSignServer/txlib/${LibraryVersion}/config.json
-echo -e ${white}"====="${green}白狐-QSignServer${white}"====="${background}
+echo -e ${white}"====="${green}呆毛版-QSignServer${white}"====="${background}
 echo -e  ${green} 1.  ${cyan}修改端口${background}
 echo -e  ${green} 2.  ${cyan}修改key值${background}
 echo -e  ${green} 3.  ${cyan}修改共享库版本${background}
@@ -583,7 +583,7 @@ else
     condition="${red}[未部署]"
 fi
 
-echo -e ${white}"====="${green}白狐-QSignServer${white}"====="${background}
+echo -e ${white}"====="${green}呆毛版-QSignServer${white}"====="${background}
 echo -e  ${green} 1.  ${cyan}安装签名服务器${background}
 echo -e  ${green} 2.  ${cyan}启动签名服务器${background}
 echo -e  ${green} 3.  ${cyan}关闭签名服务器${background}
@@ -597,7 +597,7 @@ echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}签名服务器脚本版本: ${Version}${background}
 echo -e ${green}签名服务器适配版本: ${condition}${background}
-echo -e ${green}QQ群:${cyan}狐狸窝:705226976${background}
+echo -e ${green}QQ群:${cyan}狐狸窝:285744328${background}
 echo "========================="
 echo
 echo -en ${green}请输入您的选项: ${background};read number

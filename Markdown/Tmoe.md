@@ -351,7 +351,7 @@ apt install git curl wget -y
 
 <hr/>
 
-然后安装白狐脚本
+然后安装呆毛版脚本
 ![bh.png](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/bh/bh.png)
 
 ```sh
@@ -365,7 +365,7 @@ bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/instal
 
 安装完成后
 
-使用 `bh` 命令打开白狐脚本
+使用 `bh` 命令打开呆毛版脚本
 
 <hr/>
 

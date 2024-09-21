@@ -61,7 +61,7 @@ case $(uname -m) in
     ARCH2=arm64
 ;;
 *)
-    echo ${red}您的框架为${yellow}$(uname -m)${red},快让白狐做适配.${background}
+    echo ${red}您的框架为${yellow}$(uname -m)${red},快提issue做适配.${background}
     exit
 ;;
 esac

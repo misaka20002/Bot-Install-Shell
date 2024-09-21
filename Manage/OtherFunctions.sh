@@ -43,7 +43,7 @@ if [ ! -e ${file} ];then
     return
 fi
 #1:安卓手机、 2:aPad 、 3:安卓手表、 4:MacOS 、 5:iPad 、 6:Tim
-echo -e ${white}"====="${green}白狐-Device${white}"====="${background}
+echo -e ${white}"====="${green}呆毛版-Device${white}"====="${background}
 echo -e ${green}请选择您的登录设备${background}
 echo -e  ${green} 1. ${cyan}安卓手机${background}
 echo -e  ${green} 2. ${cyan}aPad${background}
@@ -102,7 +102,7 @@ sed -i "${line}s/.*/${NewAdminAccount}/g" ${file}
 OpenPluginLink(){
 i=1
 plugin=$(ls plugins -I example -I other -I system -I genshin)
-echo -e ${white}"====="${green}白狐-Script${white}"====="${background}
+echo -e ${white}"====="${green}呆毛版-Script${white}"====="${background}
 echo -e ${green}请选择您要打开链接的插件[${Bot_Name}]${background}
 for file in ${plugin}
 do
@@ -179,7 +179,7 @@ read
 }
 
 InstallThePackage(){
-echo -e ${white}"====="${green}白狐-Script${white}"====="${background}
+echo -e ${white}"====="${green}呆毛版-Script${white}"====="${background}
 echo -en ${green}请输入将要安装的依赖名称: ${background};read Package
 pnpm install
 pnpm install ${Package} -w
@@ -341,7 +341,7 @@ cp -rf config $HOME/BotBackup/config
 
 }
 
-echo -e ${white}"====="${green}白狐-Script${white}"====="${background}
+echo -e ${white}"====="${green}呆毛版-Script${white}"====="${background}
 echo -e ${green}请选择您的操作[${Bot_Name}]${background}
 echo -e  ${green} 1. ${cyan}修改登录账号${background}
 echo -e  ${green} 2. ${cyan}修改登录设备${background}

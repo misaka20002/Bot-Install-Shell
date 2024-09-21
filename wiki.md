@@ -1,17 +1,17 @@
-<h1 align="center">白狐-Script-Wiki<h1/>
+<h1 align="center">呆毛版-Script-Wiki<h1/>
 <hr/>
-<h6>ps:可怜的白狐终于想起要写wiki了<h6/>
+<h6>ps:可怜的呆毛版终于想起要写wiki了<h6/>
 <hr/>
 
 ##### ~~PS: 实在看不懂的可以拿这个文档去群里问人~~
 
 ### 快捷命令使用方法
 ```bash
-bh #打开白狐脚本
+bh #打开呆毛版脚本
 ```
 
 ```bash
-bh help #获取白狐脚本快捷命令帮助
+bh help #获取呆毛版脚本快捷命令帮助
 ```
 
 ```bash

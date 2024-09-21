@@ -169,8 +169,8 @@ fi
 ##############################
 function help(){
 echo -e ${green}===============================${background}
-echo -e ${cyan} bh"        | "${blue}白狐脚本${background}
-echo -e ${cyan} bh help"   | "${blue}白狐脚本帮助${background}
+echo -e ${cyan} bh"        | "${blue}呆毛版脚本${background}
+echo -e ${cyan} bh help"   | "${blue}呆毛版脚本帮助${background}
 echo -e ${cyan} bh PI"     | "${blue}插件管理脚本${background}
 echo -e ${cyan} bh SWPKG"  | "${blue}修复软件包依赖${background}
 echo -e ${cyan} bh QS"     | "${blue}签名服务器管理脚本${background}
@@ -180,7 +180,7 @@ echo -e ${cyan} bh mz ${blue}Miao-Yunzai根目录${background}
 echo -e ${cyan} bh tz ${blue}TRSS-Yunzai根目录${background}
 echo -e ${green}===============================${background}
 echo -e ${yellow} 脚本完全免费 打击倒卖 从你我做起${background}
-echo -e ${green} QQ群:${cyan}狐狸窝:705226976${background}
+echo -e ${green} QQ群:${cyan}狐狸窝:285744328${background}
 echo -e ${green}=============================${background}
 }
 case $1 in
@@ -331,7 +331,7 @@ do
     backmain
     return 1
   fi
-done | ${DialogWhiptail} --title "白狐-script" \
+done | ${DialogWhiptail} --title "呆毛版-script" \
 --gauge "正在${RunningState}${BotName}" 8 50 0
 return 0
 }
@@ -345,7 +345,7 @@ TmuxAttach(){
 if ! tmux attach -t ${TmuxName} > /dev/null 2>&1
 then
   error=$(tmux attach -t ${TmuxName} 2>&1)
-  ${DialogWhiptail} --title "白狐-Script" --msgbox "窗口打开错误\n原因: ${error}" 10 60
+  ${DialogWhiptail} --title "呆毛版-Script" --msgbox "窗口打开错误\n原因: ${error}" 10 60
 fi
 }
 AttachPage(){
@@ -357,7 +357,7 @@ then
   if [ ${res} -eq 1 ];then
     TmuxAttach
   elif [ ${res} -eq 2 ];then
-      ${DialogWhiptail} --title "白狐-Script" --msgbox "${BotName}已在前台运行" 10 60
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName}已在前台运行" 10 60
   elif [ ${res} -eq 3 ];then
     pnpm pm2 log ${BotName}
   fi
@@ -371,7 +371,7 @@ case $1 in
     if [ ${res} -eq 1 ];then
       AttachPage "在TMUX窗口启动" "窗口"
     elif [ ${res} -eq 2 ];then
-      ${DialogWhiptail} --title "白狐-Script" --msgbox "${BotName}已在前台运行" 10 60
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName}已在前台运行" 10 60
     elif [ ${res} -eq 3 ];then
       AttachPage "在Pm2后台启动" "日志"
     else
@@ -379,7 +379,7 @@ case $1 in
       then
         ProgressBar "启动"
       else
-        ${DialogWhiptail} --title "白狐-Script" --msgbox "${BotName} 启动失败" 10 60
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 启动失败" 10 60
       fi
     fi
     ;;
@@ -389,7 +389,7 @@ case $1 in
     if [ ${res} -eq 1 ];then
       AttachPage "在TMUX窗口启动" "窗口"
     elif [ ${res} -eq 2 ];then
-      ${DialogWhiptail} --title "白狐-Script" --msgbox "${BotName}已在前台运行" 10 60
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName}已在前台运行" 10 60
     elif [ ${res} -eq 3 ];then
       AttachPage "在Pm2后台启动" "日志"
     else
@@ -405,23 +405,23 @@ case $1 in
     if [ ${res} -eq 1 ];then
       if tmux kill-session -t ${TmuxName}
       then
-        ${DialogWhiptail} --title "白狐-Script" --msgbox "停止成功" 10 60
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止成功" 10 60
       else
-        ${DialogWhiptail} --title "白狐-Script" --msgbox "停止失败" 10 60
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止失败" 10 60
       fi
     elif [ ${res} -eq 2 ];then
       pnpm pm2 stop ${BotName}
       pnpm pm2 delete ${BotName}
-      ${DialogWhiptail} --title "白狐-Script" --msgbox "停止成功" 10 60
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止成功" 10 60
     elif [ ${res} -eq 3 ];then
       if kill $(ps all | sed /grep/d | grep -q "${BOT_COMMAND}")
       then
-        ${DialogWhiptail} --title "白狐-Script" --msgbox "停止成功" 10 60
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止成功" 10 60
       else
-        ${DialogWhiptail} --title "白狐-Script" --msgbox "停止失败" 10 60
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止失败" 10 60
       fi
     else
-      ${DialogWhiptail} --title "白狐-Script" --msgbox "${BotName} [未启动]" 10 60
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未启动]" 10 60
     fi
     ;;
   restart)
@@ -432,21 +432,21 @@ case $1 in
       then
         tmux new -s ${TmuxName} -d "bh ${BotName} n"
         ProgressBar "启动"
-        ${DialogWhiptail} --title "白狐-Script" --msgbox "重启成功" 10 60
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "重启成功" 10 60
       fi
     elif [ ${res} -eq 2 ];then
       pnpm pm2 stop ${BotName}
       pnpm pm2 delete ${BotName}
       RedisServerStart
       pnpm pm2 start
-      ${DialogWhiptail} --title "白狐-Script" --msgbox "重启成功" 10 60
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "重启成功" 10 60
     elif [ ${res} -eq 3 ];then
       if kill $(ps all | sed /grep/d | grep -q "${BOT_COMMAND}")
       then
         bh ${BotName} n
       fi
     else
-      ${DialogWhiptail} --title "白狐-Script" --msgbox "${BotName} [未启动]" 10 60
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未启动]" 10 60
     fi
     ;;
   log)
@@ -455,11 +455,11 @@ case $1 in
     if [ ${res} -eq 1 ];then
       TmuxAttach
     elif [ ${res} -eq 2 ];then
-      ${DialogWhiptail} --title "白狐-Script" --msgbox "${BotName} [前台运行]\n无法打开日志" 10 60
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [前台运行]\n无法打开日志" 10 60
     elif [ ${res} -eq 3 ];then
       pnpm pm2 log ${BotName}
     else
-      ${DialogWhiptail} --title "白狐-Script" --msgbox "${BotName} [未运行]" 10 60
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未运行]" 10 60
     fi
     ;;
   plugin)
@@ -517,7 +517,7 @@ if [ ${BotName} == "TRSS-Yunzai" ];then
     echo -en ${cyan}回车返回${background};read
     return
 fi
-echo -e ${white}"====="${green}白狐-QSign${white}"====="${background}
+echo -e ${white}"====="${green}呆毛版-QSign${white}"====="${background}
 echo -e ${green}请输入您的新签名服务器链接: ${background};read API
 file=config/config/bot.yaml
 old_sign_api_addr=$(grep sign_api_addr ${file})
@@ -531,7 +531,7 @@ echo -en ${cyan}回车返回${background};read
 }
 
 Number=$(${DialogWhiptail} \
---title "白狐 QQ群:705226976" \
+--title "呆毛版 QQ群:285744328" \
 --menu "${BotName}管理" \
 23 35 15 \
 "1" "启动运行" \
@@ -590,7 +590,7 @@ case $(uname -m) in
     export ARCH=arm64
 ;;
 *)
-    echo ${red}您的框架为${yellow}$(uname -m)${red},快让白狐做适配.${background}
+    echo ${red}您的框架为${yellow}$(uname -m)${red},快提issue做适配.${background}
     exit
 ;;
 esac
@@ -626,7 +626,7 @@ function BotPath(){
         cd ${BotPath}
         Main
     else
-        if ${DialogWhiptail} --title "白狐-Bot" \
+        if ${DialogWhiptail} --title "呆毛版-Bot" \
         --yesno "${BotName}未安装 是否安装 ${BotName}" \
         8 50
         then
@@ -636,7 +636,7 @@ function BotPath(){
 }
 function master(){
 Number=$(${DialogWhiptail} \
---title "白狐 QQ群:705226976" \
+--title "呆毛版 QQ群:285744328" \
 --menu "请选择bot" \
 20 38 10 \
 "1" "Miao-Yunzai" \

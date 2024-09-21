@@ -110,10 +110,10 @@ function Script_Install(){
     echo -e ${cyan}获取成功${background}
     echo
     echo -e ${white}=========================${background}
-    echo -e ${red}" "白狐 ${yellow}BOT ${green}Install ${cyan}Script ${background}
+    echo -e ${red}" "呆毛版 ${yellow}BOT ${green}Install ${cyan}Script ${background}
     echo -e "  "————"  "————"  "————"  "————"  "
     echo -e ${green}" "版本:" "v${version} ${cyan}\(${date}\) ${background}
-    echo -e ${green}" "作者:" "${cyan}白狐"   "\(Misaka21011\) ${background}
+    echo -e ${green}" "作者:" "${cyan}呆毛版"   "\(Misaka21011\) ${background}
     echo -e ${white}=========================${background}
     echo
     echo -e ${white}=========================${background}
@@ -157,11 +157,11 @@ function Script_Install(){
     echo -e ${yellow} - ${cyan}请使用 ${green}bh ${cyan}命令 打开脚本${background}
 }
 
-echo -e ${white}"====="${green}白狐-Script${white}"====="${background}
-echo -e ${cyan}白狐 Script ${green}是完全可信的。${background}
-echo -e ${cyan}白狐 Script ${yellow}不会执行任何恶意命令${background}
-echo -e ${cyan}白狐 Script ${yellow}不会执行任何恶意命令${background}
-echo -e ${cyan}白狐 Script ${yellow}不会执行任何恶意命令${background}
+echo -e ${white}"====="${green}呆毛版-Script${white}"====="${background}
+echo -e ${cyan}呆毛版 Script ${green}是完全可信的。${background}
+echo -e ${cyan}呆毛版 Script ${yellow}不会执行任何恶意命令${background}
+echo -e ${cyan}呆毛版 Script ${yellow}不会执行任何恶意命令${background}
+echo -e ${cyan}呆毛版 Script ${yellow}不会执行任何恶意命令${background}
 echo -e ${cyan}如果您同意安装 请输入 ${green}同意安装${background}
 echo -e ${cyan}注意：同意安装即同意本项目的用户协议${background}
 echo -e ${cyan}用户协议链接: ${background}
