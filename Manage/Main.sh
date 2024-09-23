@@ -278,14 +278,15 @@ if [ "${new_version}" != "${old_version}" ];then
         rm /usr/local/bin/bh
         mv bh /usr/local/bin/bh
         chmod +x /usr/local/bin/bh
-        echo -en ${cyan}更新完成 回车继续${background};read
+        echo -en ${cyan}更新完成 请重新启动${background};read
+        exit
     else
         echo -en ${red}出现错误 跳过更新 ${cyan}回车继续${background};read
         rm bh
     fi
 fi
 }
-old_version="1.1.6"
+old_version="1.1.7"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
