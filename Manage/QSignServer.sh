@@ -584,7 +584,7 @@ else
 fi
 
 echo -e ${white}"====="${green}呆毛版-QSignServer${white}"====="${background}
-echo -e  ${green} 1.  ${cyan}安装签名服务器${background}
+echo -e  ${green} 1.  ${cyan}安装签名服务器（不支持ntqq，不要再安装了）${background}
 echo -e  ${green} 2.  ${cyan}启动签名服务器${background}
 echo -e  ${green} 3.  ${cyan}关闭签名服务器${background}
 echo -e  ${green} 4.  ${cyan}重启签名服务器${background}

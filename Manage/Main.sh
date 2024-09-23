@@ -285,7 +285,7 @@ if [ "${new_version}" != "${old_version}" ];then
     fi
 fi
 }
-old_version="1.1.4"
+old_version="1.1.5"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -463,14 +463,14 @@ case $1 in
     fi
     ;;
   plugin)
-    URL="https://ipinfo.io"
-    Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
-    if [ ${Address} = "CN" ]
-    then
+    # URL="https://ipinfo.io"
+    # Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
+    # if [ ${Address} = "CN" ]
+    # then
         bash <(curl -sL https://mirrors.chenby.cn/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
-    else 
-        bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/BOT-PlugIn.sh)
-    fi
+    # else 
+    #     bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/BOT-PlugIn.sh)
+    # fi
     ;;
 esac
 }
