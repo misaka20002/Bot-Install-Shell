@@ -286,7 +286,7 @@ if [ "${new_version}" != "${old_version}" ];then
     fi
 fi
 }
-old_version="1.1.7"
+old_version="1.1.8"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -476,6 +476,9 @@ case $1 in
   plugin_2)
         bash <(curl -sL https://ghp.ci/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
     ;;
+  plugin_3)
+        bash <(curl -sL https://github.moeyy.xyz/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
+    ;;
 esac
 }
 GitUpdate(){
@@ -543,8 +546,9 @@ Number=$(${DialogWhiptail} \
 "3" "停止运行" \
 "4" "重新启动" \
 "5" "打开日志" \
-"6" "插件管理" \
-"6_2" "插件管理_地址2" \
+"6.1" "插件管理" \
+"6.2" "插件管理_地址2" \
+"6.3" "插件管理_地址3" \
 "7" "全部更新" \
 "8" "填写签名" \
 "9" "其他功能" \
@@ -568,11 +572,14 @@ case ${Number} in
     5)
         BOT log
         ;;
-    6)
+    6.1)
         BOT plugin
         ;;
-    6_2)
+    6.2)
         BOT plugin_2
+        ;;
+    6.3)
+        BOT plugin_3
         ;;
     7)
         GitUpdate
