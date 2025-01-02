@@ -133,7 +133,7 @@ npm install -g npm@latest
 pnpm install -g pnpm@latest
 pnpm install -g pm2@latest
 echo "Y" | pnpm install
-pnpm install puppeteer@19.4.0 -w
+pnpm install puppeteer@13.7.0 -w
 pnpm install icqq@latest -w
 echo -en ${green}安装完成 ${cyan}回车返回${background}
 }
@@ -162,7 +162,7 @@ do
     fi
     i=$((${i}+1))
 done
-pnpm install puppeteer@19.4.0 -w
+pnpm install puppeteer@13.7.0 -w
 pnpm install icqq@latest -w
 echo -e ${cyan}正在安装插件依赖${background}
 plugin=$(ls plugins)
@@ -194,7 +194,7 @@ pnpm install sqlite3@5.1.6 -w
 
 LowerPptr(){
 pnpm uninstall puppeteer
-pnpm install puppeteer@19.4.0 -w
+pnpm install puppeteer@13.7.0 -w
 }
 
 UpdateNodeJS(){
