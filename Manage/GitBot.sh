@@ -12,7 +12,7 @@ fi
 install_Bot(){
   if [ "${BotName}" == "Miao-Yunzai" ]
   then
-    Git=https://${GitMirror}/yoimiya-kokomi/Miao-Yunzai.git
+    Git=https://github.com/misaka20002/Miao-Yunzai.git
   elif [ "${BotName}" == "TRSS-Yunzai" ]
   then
      Git=https://${GitMirror}/TimeRainStarSky/Yunzai.git
