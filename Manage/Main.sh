@@ -286,7 +286,7 @@ if [ "${new_version}" != "${old_version}" ];then
     fi
 fi
 }
-old_version="1.1.9"
+old_version="1.1.12"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -474,10 +474,7 @@ case $1 in
     # fi
     ;;
   plugin_2)
-        bash <(curl -sL https://ghp.ci/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
-    ;;
-  plugin_3)
-        bash <(curl -sL https://github.moeyy.xyz/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
+        bash <(curl -sL https://ghfast.top/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
     ;;
 esac
 }
@@ -548,10 +545,10 @@ Number=$(${DialogWhiptail} \
 "5" "打开日志" \
 "6.1" "插件管理" \
 "6.2" "插件管理_地址2" \
-"6.3" "插件管理_地址3" \
 "7" "全部更新" \
 "8" "填写签名" \
 "9" "其他功能" \
+"10" "重装ffmpeg" \
 "0" "返回" \
 3>&1 1>&2 2>&3)
 feedback=$?
@@ -578,9 +575,6 @@ case ${Number} in
     6.2)
         BOT plugin_2
         ;;
-    6.3)
-        BOT plugin_3
-        ;;
     7)
         GitUpdate
         ;;
@@ -590,6 +584,9 @@ case ${Number} in
     9)
         MirrorCheck
         bash <(curl -sL https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/OtherFunctions.sh)
+        ;;
+    10)
+        OperatingEnvironmentInstall
         ;;
     0)
         return
@@ -634,6 +631,71 @@ do
   done
 done
 BotPath
+}
+function OperatingEnvironmentInstall(){
+  echo -e ${yellow}"确认要重新安装环境吗? 这将重新安装以下依赖( ffmpeg, gzip, redis, tmux, chromium, fonts-wqy-zenhei, node.JS ... ) [y/n]"${background}
+  read -p "" confirm
+  case ${confirm} in
+    y|Y)
+      echo -e ${cyan}"开始重新安装环境..."${background}
+      ;;
+    n|N)
+      echo -e ${cyan}"已取消重新安装环境"${background}
+      Main
+      return
+      ;;
+    *)
+      echo -e ${red}"无效的输入，请输入 y 或 n"${background}
+      Main
+      return
+      ;;
+  esac
+  BotPathCheck
+
+  if sudo rm -f /usr/local/bin/ffmpeg; then
+    echo -e ${green}"Successfully removed /usr/local/bin/ffmpeg"${background}
+  else
+    echo -e ${red}"Failed to remove /usr/local/bin/ffmpeg"${background}
+    echo -e ${yellow}"You may need to manually remove it later"${background}
+  fi
+
+case $(uname -m) in
+    x86_64|amd64)
+    export ARCH=x64
+;;
+    arm64|aarch64)
+    export ARCH=arm64
+;;
+*)
+    echo ${red}您的框架为${yellow}$(uname -m)${red},快提issue做适配.${background}
+    exit
+;;
+esac
+command_all="BOT-PKG.sh BOT_INSTALL.sh BOT-NODE.JS.sh"
+i=1
+if ping -c 1 gitee.com > /dev/null 2>&1
+then
+  URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
+elif ping -c 1 github.com > /dev/null 2>&1
+then
+  URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
+fi
+for command in ${command_all}
+do
+  until bash <(curl -sL ${URL}/${command})
+  do
+    if [ ${i} -eq 3 ]
+    then
+      echo -e ${red}错误次数过多 退出${background}
+      exit
+    fi
+    i=$((${i}+1))
+    echo -en ${red}命令执行失败 ${green}3秒后重试${background}
+    sleep 3s
+    echo
+  done
+done
+Main
 }
 function BotPath(){
     if BotPathCheck

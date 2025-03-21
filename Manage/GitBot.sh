@@ -12,7 +12,7 @@ fi
 install_Bot(){
   if [ "${BotName}" == "Miao-Yunzai" ]
   then
-    Git=https://github.com/misaka20002/Miao-Yunzai.git
+    Git=https://ghfast.top/https://github.com/misaka20002/Miao-Yunzai.git
   elif [ "${BotName}" == "TRSS-Yunzai" ]
   then
      Git=https://${GitMirror}/TimeRainStarSky/Yunzai.git
@@ -25,7 +25,7 @@ install_Bot(){
 }
 install_Miao_Plugin(){
   echo -e ${cyan}正在克隆喵喵插件${background}
-  Git=https://${GitMirror}/yoimiya-kokomi/miao-plugin.git
+  Git=https://ghfast.top/https://github.com/yoimiya-kokomi/miao-plugin.git
   if ! git clone --depth=1 ${Git} $HOME/${BotName}/plugins/miao-plugin;then
     echo -e ${red}克隆失败${background}
     exit
