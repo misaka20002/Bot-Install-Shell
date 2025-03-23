@@ -115,7 +115,7 @@ if [ ! -x "/usr/local/bin/ffmpeg" ];then
   elif [ "${GitMirror}" == "gitee.com" ]
   then
     echo -e ${yellow}安装软件 ffmpeg${background}
-    ffmpeg_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static/b6.0/
+    ffmpeg_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static/b6.0
     wget -O ffmpeg -c ${ffmpeg_URL}/ffmpeg-linux-${ARCH1}
     wget -O ffprobe -c ${ffmpeg_URL}/ffprobe-linux-${ARCH1}
     chmod +x ffmpeg ffprobe

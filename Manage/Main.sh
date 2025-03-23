@@ -286,7 +286,7 @@ if [ "${new_version}" != "${old_version}" ];then
     fi
 fi
 }
-old_version="1.1.12"
+old_version="1.1.13"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -652,13 +652,6 @@ function OperatingEnvironmentInstall(){
   esac
   BotPathCheck
 
-  if sudo rm -f /usr/local/bin/ffmpeg; then
-    echo -e ${green}"Successfully removed /usr/local/bin/ffmpeg"${background}
-  else
-    echo -e ${red}"Failed to remove /usr/local/bin/ffmpeg"${background}
-    echo -e ${yellow}"You may need to manually remove it later"${background}
-  fi
-
 case $(uname -m) in
     x86_64|amd64)
     export ARCH=x64
@@ -671,6 +664,14 @@ case $(uname -m) in
     exit
 ;;
 esac
+
+  if sudo rm -f /usr/local/bin/ffmpeg; then
+    echo -e ${green}"Successfully removed /usr/local/bin/ffmpeg"${background}
+  else
+    echo -e ${red}"Failed to remove /usr/local/bin/ffmpeg"${background}
+    echo -e ${yellow}"You may need to manually remove it later"${background}
+  fi
+
 command_all="BOT-PKG.sh BOT_INSTALL.sh BOT-NODE.JS.sh"
 i=1
 if ping -c 1 gitee.com > /dev/null 2>&1
