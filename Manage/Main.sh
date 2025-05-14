@@ -173,14 +173,14 @@ echo -e ${cyan} bh"        | "${blue}呆毛版脚本${background}
 echo -e ${cyan} bh help"   | "${blue}呆毛版脚本帮助${background}
 echo -e ${cyan} bh PI"     | "${blue}插件管理脚本${background}
 echo -e ${cyan} bh SWPKG"  | "${blue}修复软件包依赖${background}
-echo -e ${cyan} bh QS"     | "${blue}签名服务器管理脚本${background}
+echo -e ${cyan} bh QS"     | "${blue}拉格朗日管理脚本${background}
 echo -e ${green}===============================${background}
 echo -e ${cyan} bh yz ${blue}Yunzai-Bot根目录${background}
 echo -e ${cyan} bh mz ${blue}Miao-Yunzai根目录${background}
 echo -e ${cyan} bh tz ${blue}TRSS-Yunzai根目录${background}
 echo -e ${green}===============================${background}
 echo -e ${yellow} 脚本完全免费 打击倒卖 从你我做起${background}
-echo -e ${green} QQ群:${cyan}狐狸窝:285744328${background}
+echo -e ${green} QQ群:${cyan}呆毛版-QQ群:285744328${background}
 echo -e ${green}=============================${background}
 }
 case $1 in
@@ -193,7 +193,7 @@ bash <(curl -sL https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Man
 exit
 ;;
 QS)
-bash <(curl -sL https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/QSignServer.sh)
+bash <(curl -sL https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/Lagrange_OneBot.sh)
 exit
 ;;
 SWPKG)
@@ -286,7 +286,7 @@ if [ "${new_version}" != "${old_version}" ];then
     fi
 fi
 }
-old_version="1.1.13"
+old_version="1.1.16"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -719,7 +719,7 @@ Number=$(${DialogWhiptail} \
 20 38 10 \
 "1" "Miao-Yunzai" \
 "2" "TRSS-Yunzai" \
-"3" "签名服务器管理" \
+"3" "拉格朗日管理" \
 "0" "退出" \
 3>&1 1>&2 2>&3)
 feedback=$?
@@ -740,7 +740,7 @@ case ${Number} in
     3)
         MirrorCheck
         URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
-        bash <(curl -sL ${URL}/QSignServer.sh)
+        bash <(curl -sL ${URL}/Lagrange_OneBot.sh)
         ;;
           0)
     	        exit 0

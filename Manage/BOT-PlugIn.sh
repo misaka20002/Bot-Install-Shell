@@ -1323,7 +1323,7 @@ function echo_page(){
     echo -e ${green}5.  ${cyan}删除JS插件${background}
     echo -e ${green}0.  ${cyan}返回\/退出${background}
     echo "#########################"
-    echo -e ${green}QQ群:${cyan}狐狸窝:285744328${background}
+    echo -e ${green}QQ群:${cyan}呆毛版-QQ群:285744328${background}
     echo "#########################"
     echo
     echo -en ${green}请输入您的选项: ${background};read number
@@ -1379,7 +1379,7 @@ function echo_page(){
     echo -e ${green}5.  ${cyan}Yxy-Bot${background}
     echo -e ${green}0.  ${cyan}退出${background}
     echo "#########################"
-    echo -e ${green}QQ群:${cyan}狐狸窝:285744328${background}
+    echo -e ${green}QQ群:${cyan}呆毛版-QQ群:285744328${background}
     echo "#########################"
     echo
     echo -en ${green}请输入您的选项: ${background};read number
