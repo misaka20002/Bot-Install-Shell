@@ -1,3 +1,7 @@
+# 因为 Gitee 的限制，将不会调用该文件
+
+
+
 #!/bin/env bash
 export grey="\033[30m"
 export red="\033[31m"

@@ -102,18 +102,7 @@ else
     return 1
 fi
 }
-function tmux_new(){
-Tmux_Name="$1"
-Shell_Command="$2"
-if ! tmux new -s ${Tmux_Name} -d "${Shell_Command}"
-then
-    echo -e ${yellow}QSignServer启动错误"\n"错误原因:${red}${tmux_new_error}${background}
-    echo
-    echo -en ${yellow}回车返回${background};read
-    main
-    exit
-fi
-}
+
 function backmain(){
 echo
 echo -en ${cyan}回车返回${background}
@@ -121,52 +110,7 @@ read
 main
 exit
 }
-##############################
-QSignServer(){
-if [ -e $HOME/QSignServer/bin/unidbg-fetch-qsign ];then
-if [ -d $HOME/QSignServer/JRE ];then
-    export PATH=$PATH:$HOME/QSignServer/JRE/bin
-    export JAVA_HOME=$HOME/QSignServer/JRE
-fi
-QsignConfig=$HOME/QSignServer/config.yaml
-BotConfig=config/config/bot.yaml
-LibraryVersion=$(grep "LibraryVersion" ${QsignConfig} | sed 's/LibraryVersion: //g')
-file=$HOME/QSignServer/txlib/${LibraryVersion}/config.json
-Port=$(grep -E port ${file} | awk '{print $2}' | sed 's/"//g' | sed "s/://g")
-Key=$(grep -E key ${file} | awk '{print $2}' | sed 's/"//g' | sed "s/,//g")
-Host=$(grep -E host ${file} | awk '{print $2}' | sed 's/"//g' | sed "s/,//g")
-QSignLink="http://""${Host}":"${Port}"/sign?key="${Key}"
-if [ -e ${BotConfig} ];then
-  if ! grep -q ${QSignLink} ${BotConfig};then
-    old_sign_api_addr=$(grep sign_api_addr ${BotConfig})
-    new_sign_api_addr="sign_api_addr: ${QSignLink}"
-    sed -i "s|${old_sign_api_addr}|${new_sign_api_addr}|g" ${BotConfig}
-  fi
-fi
-  case $1 in
-  Check)
-  if curl 127.0.0.1:${Port}
-  then
-    echo -e ${cyan}签名服务器${green} 已启动${background}
-  else
-    echo -e ${cyan}签名服务器${red} 未启动${background}
-    QSignServer Start
-  fi
-  ;;
-  Start)
-    tmux_new qsignserver "until sh $HOME/QSignServer/bin/unidbg-fetch-qsign --basePath=$HOME/QSignServer/txlib/${LibraryVersion}; do echo -e ${red}签名服务器关闭 正在重启${background} ; sleep1s ; done"
-    echo -e ${cyan}等待签名服务器启动中${background}
-    until curl 127.0.0.1:${Port} > /dev/null 2>&1
-    do
-      sleep 1s
-    done
-    curl 127.0.0.1:${Port}
-    echo
-  ;;
-  esac
-fi
-}
-##############################
+
 function help(){
 echo -e ${green}===============================${background}
 echo -e ${cyan} bh"        | "${blue}呆毛版脚本${background}
@@ -189,7 +133,7 @@ help
 exit
 ;;
 PI)
-bash <(curl -sL https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/BOT-PlugIn.sh)
+bash <(curl -sL https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
 exit
 ;;
 QS)
@@ -260,7 +204,6 @@ esac
 case $2 in
 n)
 RedisServerStart
-QSignServer Check
 node app
 Runing
 ;;
@@ -286,7 +229,7 @@ if [ "${new_version}" != "${old_version}" ];then
     fi
 fi
 }
-old_version="1.1.16"
+old_version="1.1.17"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -395,7 +338,6 @@ case $1 in
       AttachPage "在Pm2后台启动" "日志"
     else
       RedisServerStart
-      QSignServer Check
       node app
       Runing
     fi

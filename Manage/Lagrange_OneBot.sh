@@ -386,13 +386,15 @@ mkdir -p $TMP_DIR
 echo -e ${yellow}正在解压文件,请耐心等候${background}
 pv lagrange.tar.gz | tar -zxf - -C $TMP_DIR
 
+# 删除特定文件和文件夹,保留其他文件
+echo -e ${yellow}正在删除旧版本文件...${background}
+rm -rf $INSTALL_DIR/lagrange-0-db
+rm -f $INSTALL_DIR/Lagrange.OneBot
+
 # 移动正确的文件到安装目录
 echo -e ${yellow}正在移动可执行文件...${background}
 if [ -f $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/Lagrange.OneBot ]; then
-    # 清空安装目录
-    rm -rf $INSTALL_DIR/*
-    
-    # 复制所有文件到安装目录
+    # 复制所有文件到安装目录,但不覆盖配置文件
     cp -r $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/* $INSTALL_DIR/
     
     # 清理临时文件
@@ -437,8 +439,20 @@ if [ ! -z ${PID} ];then
     kill -9 ${PID}
 fi
 
-echo -e ${yellow}正在删除文件...${background}
-rm -rf $INSTALL_DIR > /dev/null 2>&1
+echo -e ${yellow}正在删除核心文件...${background}
+rm -rf $INSTALL_DIR/lagrange-0-db
+rm -f $INSTALL_DIR/Lagrange.OneBot
+
+echo -en ${yellow}是否保留配置文件? [Y/n]:${background};read keep_config
+case ${keep_config} in
+n|N)
+    echo -e ${yellow}正在删除配置文件...${background}
+    rm -f $CONFIG_FILE
+    ;;
+*)
+    echo -e ${green}已保留配置文件${background}
+    ;;
+esac
 
 echo -e ${green}卸载完成${background}
 echo -en ${cyan}回车返回${background};read
@@ -514,7 +528,7 @@ manage_implementations(){
       port=$(jq -r ".Implementations[$i].Port" $CONFIG_FILE)
       suffix=$(jq -r ".Implementations[$i].Suffix" $CONFIG_FILE)
       echo -e ${green}$((i+1)). ${yellow}类型: ${cyan}$type${background}
-      echo -e ${yellow}   地址: ${cyan}$host:$port$suffix${background}
+      echo -e ${yellow}  地址: ${cyan}$host:$port$suffix${background}
     done
     
     echo "========================="
@@ -528,13 +542,17 @@ manage_implementations(){
       1)
         echo -e ${cyan}请选择连接类型:${background}
         echo -e ${green}1. ${cyan}WebSocket反向连接 \(ReverseWebSocket\)${background}
-        echo -e ${green}2. ${cyan}HTTP连接 \(HTTP\)${background}
+        echo -e ${green}2. ${cyan}HTTP连接 \(Http\)${background}
+        echo -e ${green}3. ${cyan}HTTP POST连接 \(HttpPost\)${background}
+        echo -e ${green}4. ${cyan}WebSocket正向连接 \(ForwardWebSocket\)${background}
         echo -e ${green}0. ${cyan}取消${background}
         echo -en ${green}请输入选项: ${background};read type_option
         
         case $type_option in
           1) conn_type="ReverseWebSocket" ;;
-          2) conn_type="HTTP" ;;
+          2) conn_type="Http" ;;
+          3) conn_type="HttpPost" ;;
+          4) conn_type="ForwardWebSocket" ;;
           0) continue ;;
           *) 
             echo -e ${red}无效选项${background}
@@ -542,37 +560,106 @@ manage_implementations(){
             continue ;;
         esac
         
-        echo -en ${cyan}请输入主机地址 \(默认: 127.0.0.1\): ${background};read host
-        host=${host:-127.0.0.1}
+        echo -e ${cyan}请选择配置方式:${background}
+        echo -e ${green}1. ${cyan}默认配置1: 127.0.0.1:2536/OneBotv11${background}
+        echo -e ${green}2. ${cyan}默认配置2: 127.0.0.1:2956/onebot/v11/ws${background}
+        echo -e ${green}3. ${cyan}自定义配置${background}
+        echo -e ${green}0. ${cyan}取消${background}
+        echo -en ${green}请输入选项: ${background};read preset_option
         
-        echo -en ${cyan}请输入端口 \(默认: 2956\): ${background};read port
-        port=${port:-2956}
+        case $preset_option in
+          1)
+            host="127.0.0.1"
+            port=2536
+            suffix="/OneBotv11"
+            reconnect=5000
+            heartbeat=5000
+            token=""
+            ;;
+          2)
+            host="127.0.0.1"
+            port=2956
+            suffix="/onebot/v11/ws"
+            reconnect=5000
+            heartbeat=5000
+            token=""
+            ;;
+          3)
+            echo -en ${cyan}请输入主机地址 \(默认: 127.0.0.1\): ${background};read host
+            host=${host:-127.0.0.1}
+            
+            echo -en ${cyan}请输入端口 \(默认: 2956\): ${background};read port
+            port=${port:-2956}
+            
+            echo -en ${cyan}请输入路径后缀 \(默认: /onebot/v11/ws\): ${background};read suffix
+            suffix=${suffix:-/onebot/v11/ws}
+            
+            echo -en ${cyan}请输入重连间隔\(ms\) \(默认: 5000\): ${background};read reconnect
+            reconnect=${reconnect:-5000}
+            
+            echo -en ${cyan}请输入心跳间隔\(ms\) \(默认: 5000\): ${background};read heartbeat
+            heartbeat=${heartbeat:-5000}
+            
+            echo -en ${cyan}请输入访问令牌 \(默认为空\): ${background};read token
+            token=${token:-""}
+            ;;
+          0) continue ;;
+          *)
+            echo -e ${red}无效选项${background}
+            sleep 2
+            continue
+            ;;
+        esac
         
-        echo -en ${cyan}请输入路径后缀 \(默认: /onebot/v11/ws\): ${background};read suffix
-        suffix=${suffix:-/onebot/v11/ws}
-        
-        echo -en ${cyan}请输入重连间隔\(ms\) \(默认: 5000\): ${background};read reconnect
-        reconnect=${reconnect:-5000}
-        
-        echo -en ${cyan}请输入心跳间隔\(ms\) \(默认: 5000\): ${background};read heartbeat
-        heartbeat=${heartbeat:-5000}
-        
-        echo -en ${cyan}请输入访问令牌 \(默认为空\): ${background};read token
-        token=${token:-""}
-        
-        # 添加新连接到配置
-        jq --arg type "$conn_type" \
-           --arg host "$host" \
-           --argjson port "$port" \
-           --arg suffix "$suffix" \
-           --argjson reconnect "$reconnect" \
-           --argjson heartbeat "$heartbeat" \
-           --arg token "$token" \
-           '.Implementations += [{"Type": $type, "Host": $host, "Port": $port, "Suffix": $suffix, "ReconnectInterval": $reconnect, "HeartBeatInterval": $heartbeat, "AccessToken": $token}]' \
-           $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
-        
-        echo -e ${green}成功添加新连接: ${cyan}$host:$port$suffix${background}
-        sleep 2
+        # 根据不同类型添加不同的配置
+        if [ -n "$host" ] && [ -n "$port" ]; then
+          case $conn_type in
+            "ReverseWebSocket")
+              jq --arg type "$conn_type" \
+                 --arg host "$host" \
+                 --argjson port "$port" \
+                 --arg suffix "$suffix" \
+                 --argjson reconnect "$reconnect" \
+                 --argjson heartbeat "$heartbeat" \
+                 --arg token "$token" \
+                 '.Implementations += [{"Type": $type, "Host": $host, "Port": $port, "Suffix": $suffix, "ReconnectInterval": $reconnect, "HeartBeatInterval": $heartbeat, "AccessToken": $token}]' \
+                 $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+              ;;
+            "Http")
+              jq --arg type "$conn_type" \
+                 --arg host "$host" \
+                 --argjson port "$port" \
+                 --arg token "$token" \
+                 '.Implementations += [{"Type": $type, "Host": $host, "Port": $port, "AccessToken": $token}]' \
+                 $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+              ;;
+            "HttpPost")
+              jq --arg type "$conn_type" \
+                 --arg host "$host" \
+                 --argjson port "$port" \
+                 --arg suffix "$suffix" \
+                 --argjson heartbeat "$heartbeat" \
+                 --argjson heartbeat_enable "$heartbeat_enable" \
+                 --arg token "$token" \
+                 --arg secret "$secret" \
+                 '.Implementations += [{"Type": $type, "Host": $host, "Port": $port, "Suffix": $suffix, "HeartBeatInterval": $heartbeat, "HeartBeatEnable": $heartbeat_enable, "AccessToken": $token, "Secret": $secret}]' \
+                 $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+              ;;
+            "ForwardWebSocket")
+              jq --arg type "$conn_type" \
+                 --arg host "$host" \
+                 --argjson port "$port" \
+                 --argjson heartbeat "$heartbeat" \
+                 --argjson heartbeat_enable "$heartbeat_enable" \
+                 --arg token "$token" \
+                 '.Implementations += [{"Type": $type, "Host": $host, "Port": $port, "HeartBeatInterval": $heartbeat, "HeartBeatEnable": $heartbeat_enable, "AccessToken": $token}]' \
+                 $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+              ;;
+          esac
+          
+          echo -e ${green}成功添加新连接: ${cyan}$conn_type - $host:$port${background}
+          sleep 2
+        fi
         ;;
         
       2)
