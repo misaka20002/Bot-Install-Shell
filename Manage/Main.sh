@@ -229,7 +229,7 @@ if [ "${new_version}" != "${old_version}" ];then
     fi
 fi
 }
-old_version="1.1.17"
+old_version="1.1.18"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -662,6 +662,7 @@ Number=$(${DialogWhiptail} \
 "1" "Miao-Yunzai" \
 "2" "TRSS-Yunzai" \
 "3" "拉格朗日管理" \
+"4" "NapCat管理" \
 "0" "退出" \
 3>&1 1>&2 2>&3)
 feedback=$?
@@ -683,6 +684,11 @@ case ${Number} in
         MirrorCheck
         URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
         bash <(curl -sL ${URL}/Lagrange_OneBot.sh)
+        ;;
+    3)
+        MirrorCheck
+        URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
+        bash <(curl -sL ${URL}/NapCat.sh)
         ;;
           0)
     	        exit 0
