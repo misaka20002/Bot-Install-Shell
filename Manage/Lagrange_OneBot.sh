@@ -146,15 +146,15 @@ fi
 
 if [ $(command -v apt) ];then
   apt update -y
-  apt install -y tar gzip wget curl unzip git tmux pv
+  apt install -y tar gzip wget curl unzip git tmux pv jq
 elif [ $(command -v yum) ];then
   yum makecache -y
-  yum install -y tar gzip wget curl unzip git tmux pv
+  yum install -y tar gzip wget curl unzip git tmux pv jq
 elif [ $(command -v dnf) ];then
   dnf makecache -y
-  dnf install -y tar gzip wget curl unzip git tmux pv
+  dnf install -y tar gzip wget curl unzip git tmux pv jq
 elif [ $(command -v pacman) ];then
-  pacman -Syy --noconfirm --needed tar gzip wget curl unzip git tmux pv
+  pacman -Syy --noconfirm --needed tar gzip wget curl unzip git tmux pv jq
 else
   echo -e ${red}不受支持的Linux发行版${background}
   exit
@@ -491,6 +491,129 @@ change_lagrange_version(){
     echo -en ${cyan}回车返回${background};read
 }
 
+manage_implementations(){
+  if [ ! -f $CONFIG_FILE ]; then
+    echo -e ${red}配置文件不存在，请先安装拉格朗日签名服务器${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+  fi
+
+  # 备份配置文件
+  cp $CONFIG_FILE $CONFIG_FILE.bak
+
+  while true; do
+    clear
+    echo -e ${white}"====="${green}拉格朗日OneBot连接管理${white}"====="${background}
+    echo -e ${cyan}当前已配置的连接：${background}
+    
+    # 显示当前配置的连接
+    implementations=$(jq -r '.Implementations | length' $CONFIG_FILE)
+    for (( i=0; i<$implementations; i++ )); do
+      type=$(jq -r ".Implementations[$i].Type" $CONFIG_FILE)
+      host=$(jq -r ".Implementations[$i].Host" $CONFIG_FILE)
+      port=$(jq -r ".Implementations[$i].Port" $CONFIG_FILE)
+      suffix=$(jq -r ".Implementations[$i].Suffix" $CONFIG_FILE)
+      echo -e ${green}$((i+1)). ${yellow}类型: ${cyan}$type${background}
+      echo -e ${yellow}   地址: ${cyan}$host:$port$suffix${background}
+    done
+    
+    echo "========================="
+    echo -e ${green}1. ${cyan}添加新连接${background}
+    echo -e ${green}2. ${cyan}删除现有连接${background}
+    echo -e ${green}0. ${cyan}返回${background}
+    echo "========================="
+    echo -en ${green}请输入您的选项: ${background};read option
+    
+    case $option in
+      1)
+        echo -e ${cyan}请选择连接类型:${background}
+        echo -e ${green}1. ${cyan}WebSocket反向连接 \(ReverseWebSocket\)${background}
+        echo -e ${green}2. ${cyan}HTTP连接 \(HTTP\)${background}
+        echo -e ${green}0. ${cyan}取消${background}
+        echo -en ${green}请输入选项: ${background};read type_option
+        
+        case $type_option in
+          1) conn_type="ReverseWebSocket" ;;
+          2) conn_type="HTTP" ;;
+          0) continue ;;
+          *) 
+            echo -e ${red}无效选项${background}
+            sleep 2
+            continue ;;
+        esac
+        
+        echo -en ${cyan}请输入主机地址 \(默认: 127.0.0.1\): ${background};read host
+        host=${host:-127.0.0.1}
+        
+        echo -en ${cyan}请输入端口 \(默认: 2956\): ${background};read port
+        port=${port:-2956}
+        
+        echo -en ${cyan}请输入路径后缀 \(默认: /onebot/v11/ws\): ${background};read suffix
+        suffix=${suffix:-/onebot/v11/ws}
+        
+        echo -en ${cyan}请输入重连间隔\(ms\) \(默认: 5000\): ${background};read reconnect
+        reconnect=${reconnect:-5000}
+        
+        echo -en ${cyan}请输入心跳间隔\(ms\) \(默认: 5000\): ${background};read heartbeat
+        heartbeat=${heartbeat:-5000}
+        
+        echo -en ${cyan}请输入访问令牌 \(默认为空\): ${background};read token
+        token=${token:-""}
+        
+        # 添加新连接到配置
+        jq --arg type "$conn_type" \
+           --arg host "$host" \
+           --argjson port "$port" \
+           --arg suffix "$suffix" \
+           --argjson reconnect "$reconnect" \
+           --argjson heartbeat "$heartbeat" \
+           --arg token "$token" \
+           '.Implementations += [{"Type": $type, "Host": $host, "Port": $port, "Suffix": $suffix, "ReconnectInterval": $reconnect, "HeartBeatInterval": $heartbeat, "AccessToken": $token}]' \
+           $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+        
+        echo -e ${green}成功添加新连接: ${cyan}$host:$port$suffix${background}
+        sleep 2
+        ;;
+        
+      2)
+        if [ $implementations -eq 0 ]; then
+          echo -e ${red}没有可删除的连接${background}
+          sleep 2
+          continue
+        fi
+        
+        echo -en ${cyan}请输入要删除的连接编号 \(1-$implementations\): ${background};read del_num
+        
+        if ! [[ "$del_num" =~ ^[0-9]+$ ]] || [ $del_num -lt 1 ] || [ $del_num -gt $implementations ]; then
+          echo -e ${red}无效的编号${background}
+          sleep 2
+          continue
+        fi
+        
+        idx=$((del_num-1))
+        host=$(jq -r ".Implementations[$idx].Host" $CONFIG_FILE)
+        port=$(jq -r ".Implementations[$idx].Port" $CONFIG_FILE)
+        suffix=$(jq -r ".Implementations[$idx].Suffix" $CONFIG_FILE)
+        
+        # 从配置中删除连接
+        jq "del(.Implementations[$idx])" $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+        
+        echo -e ${green}成功删除连接: ${cyan}$host:$port$suffix${background}
+        sleep 2
+        ;;
+        
+      0)
+        return
+        ;;
+        
+      *)
+        echo -e ${red}无效选项${background}
+        sleep 2
+        ;;
+    esac
+  done
+}
+
 main(){
 if [ -d $INSTALL_DIR ];then
     if tmux_ls lagrangebot > /dev/null 2>&1 
@@ -504,15 +627,16 @@ else
 fi
 
 echo -e ${white}"====="${green}呆毛版-拉格朗日签名服务器${white}"====="${background}
-echo -e  ${green} 1.  ${cyan}安装拉格朗日签名服务器${background}
-echo -e  ${green} 2.  ${cyan}启动拉格朗日签名服务器${background}
-echo -e  ${green} 3.  ${cyan}关闭拉格朗日签名服务器${background}
-echo -e  ${green} 4.  ${cyan}重启拉格朗日签名服务器${background}
-echo -e  ${green} 5.  ${cyan}更新拉格朗日签名服务器${background}
-echo -e  ${green} 6.  ${cyan}卸载拉格朗日签名服务器${background}
-echo -e  ${green} 7.  ${cyan}拉格朗日签名服务器日志${background}
-echo -e  ${green} 8.  ${cyan}重写拉格朗日签名配置${background}
-echo -e  ${green} 9.  ${cyan}更换拉格朗日签名版本${background}
+echo -e  ${green} 1.  ${cyan}安装${background}
+echo -e  ${green} 2.  ${cyan}启动${background}
+echo -e  ${green} 3.  ${cyan}关闭${background}
+echo -e  ${green} 4.  ${cyan}重启${background}
+echo -e  ${green} 5.  ${cyan}更新${background}
+echo -e  ${green} 6.  ${cyan}卸载${background}
+echo -e  ${green} 7.  ${cyan}查看日志${background}
+echo -e  ${green} 8.  ${cyan}重写签名配置${background}
+echo -e  ${green} 9.  ${cyan}更换签名版本${background}
+echo -e  ${green} 10. ${cyan}管理OneBot连接配置${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}拉格朗日状态: ${condition}${background}
@@ -557,6 +681,10 @@ echo -en ${cyan}回车返回${background};read
 9)
 echo
 change_lagrange_version
+;;
+10)
+echo
+manage_implementations
 ;;
 0)
 exit
