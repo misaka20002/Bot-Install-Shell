@@ -541,7 +541,7 @@ manage_implementations(){
     case $option in
       1)
         echo -e ${cyan}请选择连接类型:${background}
-        echo -e ${green}1. ${cyan}WebSocket反向连接 \(ReverseWebSocket\)${background}
+        echo -e ${green}1. ${cyan}WebSocket反向连接 \(ReverseWebSocket\) \(推荐\)${background}
         echo -e ${green}2. ${cyan}HTTP连接 \(Http\)${background}
         echo -e ${green}3. ${cyan}HTTP POST连接 \(HttpPost\)${background}
         echo -e ${green}4. ${cyan}WebSocket正向连接 \(ForwardWebSocket\)${background}
@@ -549,66 +549,128 @@ manage_implementations(){
         echo -en ${green}请输入选项: ${background};read type_option
         
         case $type_option in
-          1) conn_type="ReverseWebSocket" ;;
-          2) conn_type="Http" ;;
-          3) conn_type="HttpPost" ;;
-          4) conn_type="ForwardWebSocket" ;;
-          0) continue ;;
-          *) 
-            echo -e ${red}无效选项${background}
-            sleep 2
-            continue ;;
-        esac
-        
-        echo -e ${cyan}请选择配置方式:${background}
-        echo -e ${green}1. ${cyan}默认配置1: 127.0.0.1:2536/OneBotv11${background}
-        echo -e ${green}2. ${cyan}默认配置2: 127.0.0.1:2956/onebot/v11/ws${background}
-        echo -e ${green}3. ${cyan}自定义配置${background}
-        echo -e ${green}0. ${cyan}取消${background}
-        echo -en ${green}请输入选项: ${background};read preset_option
-        
-        case $preset_option in
-          1)
-            host="127.0.0.1"
-            port=2536
-            suffix="/OneBotv11"
-            reconnect=5000
-            heartbeat=5000
-            token=""
+          1) 
+            conn_type="ReverseWebSocket"
+            
+            # 仅对ReverseWebSocket显示预设配置选项
+            echo -e ${cyan}请选择配置方式:${background}
+            echo -e ${green}1. ${cyan}默认trss配置: 127.0.0.1:2536/OneBotv11${background}
+            echo -e ${green}2. ${cyan}默认lain配置: 127.0.0.1:2956/onebot/v11/ws${background}
+            echo -e ${green}3. ${cyan}自定义配置${background}
+            echo -e ${green}0. ${cyan}取消${background}
+            echo -en ${green}请输入选项: ${background};read preset_option
+            
+            case $preset_option in
+              1)
+                host="127.0.0.1"
+                port=2536
+                suffix="/OneBotv11"
+                reconnect=5000
+                heartbeat=5000
+                token=""
+                ;;
+              2)
+                host="127.0.0.1"
+                port=2956
+                suffix="/onebot/v11/ws"
+                reconnect=5000
+                heartbeat=5000
+                token=""
+                ;;
+              3)
+                echo -en ${cyan}请输入主机地址 \(默认: 127.0.0.1\): ${background};read host
+                host=${host:-127.0.0.1}
+                
+                echo -en ${cyan}请输入端口 \(默认: 2956\): ${background};read port
+                port=${port:-2956}
+                
+                echo -en ${cyan}请输入路径后缀 \(默认: /onebot/v11/ws\): ${background};read suffix
+                suffix=${suffix:-/onebot/v11/ws}
+                
+                echo -en ${cyan}请输入重连间隔\(ms\) \(默认: 5000\): ${background};read reconnect
+                reconnect=${reconnect:-5000}
+                
+                echo -en ${cyan}请输入心跳间隔\(ms\) \(默认: 5000\): ${background};read heartbeat
+                heartbeat=${heartbeat:-5000}
+                
+                echo -en ${cyan}请输入访问令牌 \(默认为空\): ${background};read token
+                token=${token:-""}
+                ;;
+              0) continue ;;
+              *)
+                echo -e ${red}无效选项${background}
+                sleep 2
+                continue
+                ;;
+            esac
             ;;
-          2)
-            host="127.0.0.1"
-            port=2956
-            suffix="/onebot/v11/ws"
-            reconnect=5000
-            heartbeat=5000
-            token=""
-            ;;
-          3)
+          2) 
+            conn_type="Http" 
+            # 对Http类型进行自定义配置
             echo -en ${cyan}请输入主机地址 \(默认: 127.0.0.1\): ${background};read host
             host=${host:-127.0.0.1}
             
             echo -en ${cyan}请输入端口 \(默认: 2956\): ${background};read port
             port=${port:-2956}
             
-            echo -en ${cyan}请输入路径后缀 \(默认: /onebot/v11/ws\): ${background};read suffix
-            suffix=${suffix:-/onebot/v11/ws}
+            echo -en ${cyan}请输入访问令牌 \(默认为空\): ${background};read token
+            token=${token:-""}
+            ;;
+          3) 
+            conn_type="HttpPost" 
+            # 对HttpPost类型进行自定义配置
+            echo -en ${cyan}请输入主机地址 \(默认: 127.0.0.1\): ${background};read host
+            host=${host:-127.0.0.1}
             
-            echo -en ${cyan}请输入重连间隔\(ms\) \(默认: 5000\): ${background};read reconnect
-            reconnect=${reconnect:-5000}
+            echo -en ${cyan}请输入端口 \(默认: 2956\): ${background};read port
+            port=${port:-2956}
+            
+            echo -en ${cyan}请输入路径后缀 \(默认: /onebot/v11/webhook\): ${background};read suffix
+            suffix=${suffix:-/onebot/v11/webhook}
             
             echo -en ${cyan}请输入心跳间隔\(ms\) \(默认: 5000\): ${background};read heartbeat
             heartbeat=${heartbeat:-5000}
+            
+            echo -en ${cyan}请输入是否启用心跳 \(true/false\) \(默认: true\): ${background};read heart_enable
+            if [ "$heart_enable" = "false" ]; then
+              heartbeat_enable=false
+            else
+              heartbeat_enable=true
+            fi
+            
+            echo -en ${cyan}请输入访问令牌 \(默认为空\): ${background};read token
+            token=${token:-""}
+            
+            echo -en ${cyan}请输入Secret \(默认为空\): ${background};read secret
+            secret=${secret:-""}
+            ;;
+          4) 
+            conn_type="ForwardWebSocket" 
+            # 对ForwardWebSocket类型进行自定义配置
+            echo -en ${cyan}请输入主机地址 \(默认: 127.0.0.1\): ${background};read host
+            host=${host:-127.0.0.1}
+            
+            echo -en ${cyan}请输入端口 \(默认: 2956\): ${background};read port
+            port=${port:-2956}
+            
+            echo -en ${cyan}请输入心跳间隔\(ms\) \(默认: 5000\): ${background};read heartbeat
+            heartbeat=${heartbeat:-5000}
+            
+            echo -en ${cyan}请输入是否启用心跳 \(true/false\) \(默认: true\): ${background};read heart_enable
+            if [ "$heart_enable" = "false" ]; then
+              heartbeat_enable=false
+            else
+              heartbeat_enable=true
+            fi
             
             echo -en ${cyan}请输入访问令牌 \(默认为空\): ${background};read token
             token=${token:-""}
             ;;
           0) continue ;;
-          *)
+          *) 
             echo -e ${red}无效选项${background}
             sleep 2
-            continue
-            ;;
+            continue ;;
         esac
         
         # 根据不同类型添加不同的配置
@@ -833,12 +895,12 @@ else
 fi
 
 echo -e ${white}"====="${green}呆毛版-拉格朗日签名服务器${white}"====="${background}
-echo -e  ${green} 1.  ${cyan}安装${background}
-echo -e  ${green} 2.  ${cyan}启动${background}
-echo -e  ${green} 3.  ${cyan}关闭${background}
-echo -e  ${green} 4.  ${cyan}重启${background}
-echo -e  ${green} 5.  ${cyan}更新${background}
-echo -e  ${green} 6.  ${cyan}卸载${background}
+echo -e  ${green} 1.  ${cyan}安装Lagrange${background}
+echo -e  ${green} 2.  ${cyan}启动Lagrange${background}
+echo -e  ${green} 3.  ${cyan}关闭Lagrange${background}
+echo -e  ${green} 4.  ${cyan}重启Lagrange${background}
+echo -e  ${green} 5.  ${cyan}更新Lagrange${background}
+echo -e  ${green} 6.  ${cyan}卸载Lagrange${background}
 echo -e  ${green} 7.  ${cyan}查看日志${background}
 echo -e  ${green} 8.  ${cyan}重写签名配置${background}
 echo -e  ${green} 9.  ${cyan}更换签名版本${background}
@@ -847,7 +909,7 @@ echo -e  ${green} 11. ${cyan}切换并备份QQ账号${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}拉格朗日状态: ${condition}${background}
-echo -e ${green}说明: ${cyan}推荐TMUX启动拉格朗日签名服务器后运行TRSS${background}
+echo -e ${green}说明: ${cyan}安装后“管理OneBot连接配置”（已默认配置trss连接），启动-扫码登录-转后台运行，启动TRSS即可。${background}
 echo -e ${green}呆毛版-QQ群: ${cyan}285744328${background}
 echo "========================="
 echo

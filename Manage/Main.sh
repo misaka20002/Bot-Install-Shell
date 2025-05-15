@@ -229,7 +229,7 @@ if [ "${new_version}" != "${old_version}" ];then
     fi
 fi
 }
-old_version="1.1.18"
+old_version="1.1.19"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -685,7 +685,7 @@ case ${Number} in
         URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
         bash <(curl -sL ${URL}/Lagrange_OneBot.sh)
         ;;
-    3)
+    4)
         MirrorCheck
         URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
         bash <(curl -sL ${URL}/NapCat.sh)

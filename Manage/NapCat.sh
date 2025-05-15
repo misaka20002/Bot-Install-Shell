@@ -143,12 +143,94 @@ start_NapCat() {
     
     check_tmux
     
-    echo -e ${yellow}正在启动${APP_NAME}...${background}
+    echo -e ${yellow}正在准备启动${APP_NAME}...${background}
+    
+    # 选择登录方式
+    echo -e ${cyan}请选择登录方式${background}
+    echo -e ${green}1.  ${cyan}全新登录（直接启动）${background}
+    echo -e ${green}2.  ${cyan}使用已登录的QQ账号${background}
+    echo "========================="
+    echo -en ${green}请输入您的选项: ${background};read login_option
+    
+    case ${login_option} in
+        2)
+            # 使用已登录的QQ账号
+            # 检查配置目录是否存在
+            CONFIG_DIR="/opt/QQ/resources/app/app_launcher/napcat/config"
+            if [ ! -d "$CONFIG_DIR" ]; then
+                echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
+                echo -e ${yellow}请先使用全新登录方式登录QQ账号${background}
+                echo -en ${cyan}回车返回${background};read
+                return 1
+            fi
+            
+            # 查找已登录的QQ账号
+            echo -e ${yellow}正在查找已登录的QQ账号...${background}
+            account_files=$(find "$CONFIG_DIR" -name "napcat_*.json" 2>/dev/null)
+            
+            if [ -z "$account_files" ]; then
+                echo -e ${red}未找到已登录的QQ账号${background}
+                echo -e ${yellow}请先使用全新登录方式登录QQ账号${background}
+                echo -en ${cyan}是否切换到全新登录? [Y/n]${background};read switch_yn
+                case ${switch_yn} in
+                    Y|y|"")
+                        login_option=1
+                        ;;
+                    *)
+                        echo -en ${cyan}回车返回${background};read
+                        return 1
+                        ;;
+                esac
+            else
+                # 提取并显示QQ号码列表
+                echo -e ${green}已找到以下QQ账号:${background}
+                i=1
+                declare -a qq_numbers
+                
+                while IFS= read -r file; do
+                    qq_number=$(basename "$file" | sed -n 's/napcat_\([0-9]*\)\.json/\1/p')
+                    if [ -n "$qq_number" ]; then
+                        qq_numbers+=("$qq_number")
+                        echo -e ${green}$i. ${cyan}$qq_number${background}
+                        i=$((i+1))
+                    fi
+                done <<< "$account_files"
+                
+                echo -e ${green}0. ${cyan}返回并选择全新登录${background}
+                echo
+                
+                # 让用户选择要登录的QQ账号
+                echo -en ${yellow}请选择要登录的QQ账号编号: ${background};read choice
+                
+                if [ "$choice" = "0" ]; then
+                    login_option=1
+                elif ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#qq_numbers[@]} ]; then
+                    echo -e ${red}无效的选择${background}
+                    echo -en ${cyan}回车返回${background};read
+                    return 1
+                else
+                    selected_qq=${qq_numbers[$((choice-1))]}
+                    NAPCAT_CMD="xvfb-run -a qq --no-sandbox -q ${selected_qq}"
+                    echo -e ${yellow}已选择QQ账号: ${cyan}${selected_qq}${background}
+                    sleep 1
+                fi
+            fi
+            ;;
+        *)
+            # 使用默认命令（全新登录）
+            login_option=1
+            ;;
+    esac
+    
+    # 如果选择了全新登录或从其他选项回退到全新登录
+    if [ "$login_option" = "1" ]; then
+        NAPCAT_CMD="xvfb-run -a qq --no-sandbox"
+    fi
     
     # 选择启动方式
     echo -e ${cyan}请选择启动方式${background}
-    echo -e ${green}1.  ${cyan}前台启动（适合首次登录）${background}
-    echo -e ${green}2.  ${cyan}后台启动（推荐日常使用）${background}
+    echo -e ${green}1.  ${cyan}前台启动（首次登录）${background}
+    echo -e ${green}2.  ${cyan}后台启动（推荐）${background}
     echo "========================="
     echo -en ${green}请输入您的选项: ${background};read start_option
     
@@ -157,19 +239,38 @@ start_NapCat() {
             # 前台启动
             echo -e ${yellow}正在前台启动${APP_NAME}...${background}
             echo -e ${cyan}提示: 退出请按 Ctrl+C${background}
-            ${NAPCAT_CMD}
+            # 添加自动重启功能
+            export Boolean=true
+            while ${Boolean}
+            do 
+                ${NAPCAT_CMD}
+                echo -e ${red}${APP_NAME}已关闭，正在重启...${background}
+                sleep 2s
+            done
             echo -en ${cyan}回车返回${background};read
             ;;
         2)
             # 后台启动
             echo -e ${yellow}正在后台启动${APP_NAME}...${background}
-            tmux new-session -d -s ${TMUX_NAME} "${NAPCAT_CMD}"
+            # 使用循环确保自动重启
+            tmux new-session -d -s ${TMUX_NAME} "export Boolean=true; while \${Boolean}; do ${NAPCAT_CMD}; echo -e '${red}${APP_NAME}已关闭，正在重启...${background}'; sleep 2s; done"
             
             # 检查是否成功启动
             sleep 2
             if check_running; then
                 echo -e ${green}${APP_NAME}已成功在后台启动${background}
                 echo -e ${cyan}提示: 使用 '查看日志' 功能可以访问${APP_NAME}界面${background}
+                
+                # 添加是否查看日志的选项
+                echo -en ${green}是否立即查看日志（打开日志后退出请按 Ctrl+B 然后按 D）? [Y/n]:${background}; read view_log_yn
+                case ${view_log_yn} in
+                    Y|y|"")
+                        tmux attach-session -t ${TMUX_NAME}
+                        ;;
+                    *)
+                        echo -e ${green}您可以稍后通过 '查看日志' 选项进入${APP_NAME}界面${background}
+                        ;;
+                esac
             else
                 echo -e ${red}${APP_NAME}启动失败，请检查错误信息${background}
             fi
@@ -191,6 +292,9 @@ stop_NapCat() {
     fi
     
     echo -e ${yellow}正在停止${APP_NAME}...${background}
+    # 将Boolean设置为false以退出自动重启循环
+    tmux send-keys -t ${TMUX_NAME} "Boolean=false" C-m
+    sleep 1
     tmux kill-session -t ${TMUX_NAME}
     
     # 检查是否成功停止
@@ -233,6 +337,7 @@ view_log() {
     
     echo -e ${yellow}正在连接到${APP_NAME}界面...${background}
     echo -e ${cyan}提示: 退出请按 Ctrl+B 然后按 D${background}
+    echo -e ${cyan}按回车键继续${background};read
     sleep 1
     
     tmux attach-session -t ${TMUX_NAME}
@@ -311,7 +416,7 @@ manage_webui_config() {
     fi
     
     # 检查配置文件是否存在
-    WEB_UI_CONFIG="/QQ/resources/app/app_launcher/napcat/config/webui.json"
+    WEB_UI_CONFIG="/opt/QQ/resources/app/app_launcher/napcat/config/webui.json"
     if [ ! -f "$WEB_UI_CONFIG" ]; then
         echo -e ${red}WebUI 配置文件不存在: ${WEB_UI_CONFIG}${background}
         echo -en ${cyan}回车返回${background};read
@@ -355,24 +460,23 @@ manage_webui_config() {
         
         # 显示当前配置
         echo -e ${yellow}当前 WebUI 配置信息:${background}
-        echo -e ${green}1. ${cyan}主机地址 (host): ${yellow}${HOST}${background}
-        echo -e ${green}2. ${cyan}端口 (port): ${yellow}${PORT}${background}
-        echo -e ${green}3. ${cyan}访问令牌 (token): ${yellow}${TOKEN}${background}
-        echo -e ${green}4. ${cyan}登录速率 (loginRate): ${yellow}${LOGIN_RATE}${background}
-        echo -e ${green}5. ${cyan}自动登录账号 (autoLoginAccount): ${yellow}${AUTO_LOGIN}${background}
+        echo -e ${green}1. ${cyan}WebUI 监听地址 \(host\): ${yellow}${HOST}${background}
+        echo -e ${green}2. ${cyan}WebUI 端口 \(port\): ${yellow}${PORT}${background}
+        echo -e ${green}3. ${cyan}登录密钥 \(token\): ${yellow}${TOKEN}${background}
+        echo -e ${green}4. ${cyan}每分钟登录次数限制 \(loginRate\): ${yellow}${LOGIN_RATE}${background}
+        echo -e ${green}5. ${cyan}自动登录账号 \(autoLoginAccount\): ${yellow}${AUTO_LOGIN}${background}
         echo -e ${green}6. ${cyan}保存并重启服务${background}
         echo -e ${green}0. ${cyan}返回主菜单${background}
         echo "========================="
         echo -e ${green}WebUI 访问地址: ${cyan}http://${HOST}:${PORT}${background}
-        echo -e ${green}登录账号: ${cyan}napcat${background}
-        echo -e ${green}登录密码: ${cyan}${TOKEN}${background}
+        echo -e ${green}登录密钥: ${cyan}${TOKEN}${background}
         echo "========================="
         
         echo -en ${green}请输入选项: ${background};read option
         
         case $option in
             1)
-                echo -en ${cyan}请输入新的主机地址 (当前: ${HOST}): ${background};read new_host
+                echo -en ${cyan}请输入新的主机地址 \(当前: ${HOST}\): ${background};read new_host
                 if [ -n "$new_host" ]; then
                     jq --arg host "$new_host" '.host = $host' "$WEB_UI_CONFIG" > "${WEB_UI_CONFIG}.tmp" && mv "${WEB_UI_CONFIG}.tmp" "$WEB_UI_CONFIG"
                     echo -e ${green}主机地址已修改为: ${cyan}${new_host}${background}
@@ -380,7 +484,7 @@ manage_webui_config() {
                 fi
                 ;;
             2)
-                echo -en ${cyan}请输入新的端口 (当前: ${PORT}): ${background};read new_port
+                echo -en ${cyan}请输入新的端口 \(当前: ${PORT}\): ${background};read new_port
                 if [[ "$new_port" =~ ^[0-9]+$ ]] && [ "$new_port" -ge 1 ] && [ "$new_port" -le 65535 ]; then
                     jq --argjson port "$new_port" '.port = $port' "$WEB_UI_CONFIG" > "${WEB_UI_CONFIG}.tmp" && mv "${WEB_UI_CONFIG}.tmp" "$WEB_UI_CONFIG"
                     echo -e ${green}端口已修改为: ${cyan}${new_port}${background}
@@ -391,7 +495,7 @@ manage_webui_config() {
                 fi
                 ;;
             3)
-                echo -en ${cyan}请输入新的访问令牌 (当前: ${TOKEN}): ${background};read new_token
+                echo -en ${cyan}请输入新的访问令牌 \(当前: ${TOKEN}\): ${background};read new_token
                 if [ -n "$new_token" ]; then
                     jq --arg token "$new_token" '.token = $token' "$WEB_UI_CONFIG" > "${WEB_UI_CONFIG}.tmp" && mv "${WEB_UI_CONFIG}.tmp" "$WEB_UI_CONFIG"
                     echo -e ${green}访问令牌已修改为: ${cyan}${new_token}${background}
@@ -399,18 +503,18 @@ manage_webui_config() {
                 fi
                 ;;
             4)
-                echo -en ${cyan}请输入新的登录速率 (当前: ${LOGIN_RATE}): ${background};read new_rate
+                echo -en ${cyan}请输入新的每分钟登录次数限制 \(当前: ${LOGIN_RATE}\): ${background};read new_rate
                 if [[ "$new_rate" =~ ^[0-9]+$ ]]; then
                     jq --argjson rate "$new_rate" '.loginRate = $rate' "$WEB_UI_CONFIG" > "${WEB_UI_CONFIG}.tmp" && mv "${WEB_UI_CONFIG}.tmp" "$WEB_UI_CONFIG"
-                    echo -e ${green}登录速率已修改为: ${cyan}${new_rate}${background}
+                    echo -e ${green}每分钟登录次数限制已修改为: ${cyan}${new_rate}${background}
                     sleep 1
                 else
-                    echo -e ${red}登录速率必须是数字${background}
+                    echo -e ${red}每分钟登录次数限制必须是数字${background}
                     sleep 2
                 fi
                 ;;
             5)
-                echo -en ${cyan}请输入新的自动登录账号 (当前: ${AUTO_LOGIN}): ${background};read new_auto_login
+                echo -en ${cyan}请输入新的自动登录账号 \(当前: ${AUTO_LOGIN}\): ${background};read new_auto_login
                 jq --arg auto "$new_auto_login" '.autoLoginAccount = $auto' "$WEB_UI_CONFIG" > "${WEB_UI_CONFIG}.tmp" && mv "${WEB_UI_CONFIG}.tmp" "$WEB_UI_CONFIG"
                 echo -e ${green}自动登录账号已修改为: ${cyan}${new_auto_login}${background}
                 sleep 1
@@ -461,7 +565,7 @@ manage_qq_accounts() {
     fi
     
     # 检查配置目录是否存在
-    CONFIG_DIR="/QQ/resources/app/app_launcher/napcat/config"
+    CONFIG_DIR="/opt/QQ/resources/app/app_launcher/napcat/config"
     if [ ! -d "$CONFIG_DIR" ]; then
         echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
         echo -en ${cyan}回车返回${background};read
@@ -580,13 +684,9 @@ configure_ws() {
     # 检查配置目录是否存在
     CONFIG_DIR="/opt/QQ/resources/app/app_launcher/napcat/config"
     if [ ! -d "$CONFIG_DIR" ]; then
-        # 尝试另一个可能的路径
-        CONFIG_DIR="/QQ/resources/app/app_launcher/napcat/config"
-        if [ ! -d "$CONFIG_DIR" ];then
-            echo -e ${red}配置目录不存在${background}
-            echo -en ${cyan}回车返回${background};read
-            return 1
-        fi
+        echo -e ${red}配置目录不存在${background}
+        echo -en ${cyan}回车返回${background};read
+        return 1
     fi
     
     # 检查 jq 是否安装
@@ -771,7 +871,7 @@ configure_ws() {
             3)
                 # 自定义配置
                 echo -e ${yellow}自定义WebSocket配置${background}
-                echo -en ${cyan}请输入名称 (默认: custom): ${background};read ws_name
+                echo -en ${cyan}请输入名称 \(默认: custom\): ${background};read ws_name
                 ws_name=${ws_name:-custom}
                 
                 echo -en ${cyan}请输入WebSocket URL: ${background};read ws_url
@@ -781,7 +881,7 @@ configure_ws() {
                     continue
                 fi
                 
-                echo -en ${cyan}请输入token (可留空): ${background};read ws_token
+                echo -en ${cyan}请输入token \(可留空\): ${background};read ws_token
                 
                 echo -en ${cyan}是否启用该WebSocket连接? [Y/n]: ${background};read ws_enable
                 if [[ "$ws_enable" =~ ^[Nn]$ ]]; then
@@ -882,13 +982,9 @@ configure_music_sign() {
     # 检查配置目录是否存在
     CONFIG_DIR="/opt/QQ/resources/app/app_launcher/napcat/config"
     if [ ! -d "$CONFIG_DIR" ]; then
-        # 尝试另一个可能的路径
-        CONFIG_DIR="/QQ/resources/app/app_launcher/napcat/config"
-        if [ ! -d "$CONFIG_DIR" ];then
-            echo -e ${red}配置目录不存在${background}
-            echo -en ${cyan}回车返回${background};read
-            return 1
-        fi
+        echo -e ${red}配置目录不存在${background}
+        echo -en ${cyan}回车返回${background};read
+        return 1
     fi
     
     # 检查 jq 是否安装
@@ -933,11 +1029,11 @@ configure_music_sign() {
             1)
                 # 为所有QQ账号设置
                 echo -e ${yellow}即将为所有QQ账号设置音乐签名URL${background}
-                echo -en ${cyan}输入URL (默认: ${DEFAULT_MUSIC_SIGN_URL}): ${background};read music_url
+                echo -en ${cyan}输入URL \(默认: ${DEFAULT_MUSIC_SIGN_URL}\): ${background};read music_url
                 music_url=${music_url:-$DEFAULT_MUSIC_SIGN_URL}
                 
                 # 查找所有配置文件
-                config_files=$(find "$CONFIG_DIR" -name "onebot11_*.json" -o -name "napcat_*.json" 2>/dev/null)
+                config_files=$(find "$CONFIG_DIR" -name "onebot11_*.json" 2>/dev/null)
                 
                 if [ -z "$config_files" ];then
                     echo -e ${red}未找到任何QQ账号配置文件${background}
@@ -967,9 +1063,8 @@ configure_music_sign() {
                 # 查找已登录的QQ账号
                 echo -e ${yellow}正在查找已登录的QQ账号...${background}
                 onebot_files=$(find "$CONFIG_DIR" -name "onebot11_*.json" 2>/dev/null)
-                napcat_files=$(find "$CONFIG_DIR" -name "napcat_*.json" 2>/dev/null)
                 
-                if [ -z "$onebot_files" ] && [ -z "$napcat_files" ]; then
+                if [ -z "$onebot_files" ]; then
                     echo -e ${red}未找到已登录的QQ账号配置文件${background}
                     echo -e ${yellow}请先使用前台启动方式登录QQ账号${background}
                     echo -en ${cyan}回车返回${background};read
@@ -988,21 +1083,10 @@ configure_music_sign() {
                     if [ -n "$qq_number" ]; then
                         qq_numbers+=("$qq_number")
                         config_paths+=("$file")
-                        echo -e ${green}$i. ${cyan}$qq_number ${yellow}(onebot11)${background}
+                        echo -e ${green}$i. ${cyan}$qq_number ${yellow}\(onebot11\)${background}
                         i=$((i+1))
                     fi
                 done <<< "$onebot_files"
-                
-                # 处理 napcat 配置文件
-                while IFS= read -r file; do
-                    qq_number=$(basename "$file" | sed -n 's/napcat_\([0-9]*\)\.json/\1/p')
-                    if [ -n "$qq_number" ]; then
-                        qq_numbers+=("$qq_number")
-                        config_paths+=("$file")
-                        echo -e ${green}$i. ${cyan}$qq_number ${yellow}(napcat)${background}
-                        i=$((i+1))
-                    fi
-                done <<< "$napcat_files"
                 
                 echo -e ${green}0. ${cyan}返回上级菜单${background}
                 echo
@@ -1037,7 +1121,7 @@ configure_music_sign() {
                 
                 echo -e ${yellow}QQ: ${cyan}${selected_qq}${background}
                 echo -e ${yellow}当前音乐签名URL: ${cyan}${current_url}${background}
-                echo -en ${cyan}输入新的URL (默认: ${DEFAULT_MUSIC_SIGN_URL}): ${background};read music_url
+                echo -en ${cyan}输入新的URL \(默认: ${DEFAULT_MUSIC_SIGN_URL}\): ${background};read music_url
                 music_url=${music_url:-$DEFAULT_MUSIC_SIGN_URL}
                 
                 # 备份原配置文件
@@ -1112,15 +1196,15 @@ main() {
     echo -e ${green}4.  ${cyan}重启${APP_NAME}${background}
     echo -e ${green}5.  ${cyan}更新${APP_NAME}${background}
     echo -e ${green}6.  ${cyan}卸载${APP_NAME}${background}
-    echo -e ${green}7.  ${cyan}查看界面${background}
+    echo -e ${green}7.  ${cyan}查看日志${background}
     echo -e ${green}8.  ${cyan}WebUI 配置${background}
     echo -e ${green}9.  ${cyan}切换QQ账号${background}
-    echo -e ${green}10. ${cyan}配置WebSocket${background}
+    echo -e ${green}10. ${cyan}配置反向WebSocket${background}
     echo -e ${green}11. ${cyan}音乐签名配置${background}
     echo -e ${green}0.  ${cyan}退出${background}
     echo "========================="
     echo -e ${green}${APP_NAME}状态: ${condition}${background}
-    echo -e ${green}说明: ${cyan}首次使用请先安装并前台启动登录，之后可使用后台启动${background}
+    echo -e ${green}说明: ${cyan}安装后“配置反向WebSocket”（推荐trss或喵崽+lain），启动-扫码登录-转后台运行，启动云崽即可。${background}
     echo -e ${green}呆毛版-QQ群: ${cyan}285744328${background}
     echo "========================="
     echo
