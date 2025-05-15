@@ -701,6 +701,125 @@ manage_implementations(){
   done
 }
 
+switch_account() {
+  if [ ! -d $INSTALL_DIR ]; then
+    echo -en ${red}您还没有部署拉格朗日签名服务器!!! ${cyan}回车返回${background};read
+    return
+  fi
+
+  # 停止当前运行的服务
+  if tmux_ls lagrangebot > /dev/null 2>&1; then
+    echo -e ${yellow}正在停止拉格朗日签名服务器${background}
+    tmux_kill_session lagrangebot > /dev/null 2>&1
+    PID=$(ps aux | grep Lagrange.OneBot | sed '/grep/d' | awk '{print $2}')
+    if [ ! -z ${PID} ]; then
+      kill -9 ${PID}
+    fi
+  fi
+
+  # 创建账号保存目录
+  accounts_dir="$INSTALL_DIR/accounts"
+  mkdir -p $accounts_dir
+  
+  # 询问用户要保存的文件夹名或QQ号
+  echo -en ${cyan}请输入保存当前配置的文件夹名或QQ号\(留空则不保存\): ${background};read account_name
+  
+  if [ ! -z "$account_name" ]; then
+    # 保存当前账号数据
+    save_dir="$accounts_dir/$account_name"
+    mkdir -p $save_dir
+    
+    echo -e ${yellow}正在保存当前账号数据...${background}
+    
+    # 拷贝相关文件到保存目录
+    if [ -f "$INSTALL_DIR/device.json" ]; then
+      cp "$INSTALL_DIR/device.json" "$save_dir/"
+      echo -e ${green}已保存 device.json${background}
+    fi
+    
+    if [ -f "$INSTALL_DIR/keystore.json" ]; then
+      cp "$INSTALL_DIR/keystore.json" "$save_dir/"
+      echo -e ${green}已保存 keystore.json${background}
+    fi
+    
+    echo -e ${green}账号数据保存完成: ${yellow}$account_name${background}
+  fi
+  
+  # 询问是否要切换到其他账号
+  echo
+  echo -e ${yellow}可用的账号列表:${background}
+  
+  # 列出所有保存的账号
+  account_count=0
+  for acc_dir in "$accounts_dir"/*; do
+    if [ -d "$acc_dir" ];then
+      acc_name=$(basename "$acc_dir")
+      echo -e ${green}$((account_count+1)). ${cyan}$acc_name${background}
+      account_count=$((account_count+1))
+    fi
+  done
+  
+  if [ $account_count -eq 0 ]; then
+    echo -e ${yellow}没有找到保存的账号数据${background}
+  fi
+  
+  echo -e ${green}0. ${cyan}全新登录${background}
+  echo
+  
+  echo -en ${yellow}请选择要切换的账号\(输入编号\),或输入0重新登录: ${background};read switch_choice
+  
+  # 删除当前账号数据文件
+  echo -e ${yellow}正在清除当前账号数据...${background}
+  rm -f "$INSTALL_DIR/device.json"
+  rm -f "$INSTALL_DIR/keystore.json"
+  rm -rf "$INSTALL_DIR/lagrange-0-db"
+  
+  if [[ "$switch_choice" =~ ^[0-9]+$ ]] && [ $switch_choice -gt 0 ] && [ $switch_choice -le $account_count ]; then
+    # 获取选择的账号名称
+    selected_account=""
+    count=0
+    for acc_dir in "$accounts_dir"/*; do
+      if [ -d "$acc_dir" ];then
+        count=$((count+1))
+        if [ $count -eq $switch_choice ]; then
+          selected_account=$(basename "$acc_dir")
+          break
+        fi
+      fi
+    done
+    
+    if [ ! -z "$selected_account" ]; then
+      echo -e ${yellow}正在恢复账号 ${cyan}$selected_account${yellow} 的数据...${background}
+      
+      # 恢复账号数据
+      if [ -f "$accounts_dir/$selected_account/device.json" ]; then
+        cp "$accounts_dir/$selected_account/device.json" "$INSTALL_DIR/"
+        echo -e ${green}已恢复 device.json${background}
+      fi
+      
+      if [ -f "$accounts_dir/$selected_account/keystore.json" ]; then
+        cp "$accounts_dir/$selected_account/keystore.json" "$INSTALL_DIR/"
+        echo -e ${green}已恢复 keystore.json${background}
+      fi
+      
+      echo -e ${green}账号数据恢复完成${background}
+    fi
+  else
+    echo -e ${yellow}将使用全新账号登录${background}
+  fi
+  
+  # 前台启动
+  echo -e ${yellow}启动前台模式进行登录...${background}
+  echo -e ${cyan}提示: 登录完成后，可以按 Ctrl+C 退出，然后使用后台模式重新启动${background}
+  sleep 2
+  
+  # 前台启动
+  cd $INSTALL_DIR
+  $INSTALL_DIR/Lagrange.OneBot
+  
+  echo -en ${cyan}登录操作已完成，按回车返回主菜单${background};read
+}
+
 main(){
 if [ -d $INSTALL_DIR ];then
     if tmux_ls lagrangebot > /dev/null 2>&1 
@@ -724,6 +843,7 @@ echo -e  ${green} 7.  ${cyan}查看日志${background}
 echo -e  ${green} 8.  ${cyan}重写签名配置${background}
 echo -e  ${green} 9.  ${cyan}更换签名版本${background}
 echo -e  ${green} 10. ${cyan}管理OneBot连接配置${background}
+echo -e  ${green} 11. ${cyan}切换并备份QQ账号${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}拉格朗日状态: ${condition}${background}
@@ -772,6 +892,10 @@ change_lagrange_version
 10)
 echo
 manage_implementations
+;;
+11)
+echo
+switch_account
 ;;
 0)
 exit
