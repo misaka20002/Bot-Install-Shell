@@ -69,9 +69,13 @@ esac
 function node_install(){
 if [ "${GitMirror}" == "gitee.com" ]
 then
-    WebURL="https://mirrors.bfsu.edu.cn/nodejs-release/"
-    version3=$(curl ${WebURL} | grep ${version2} | grep -oP 'href=\K[^ ]+' | sed 's|"||g' | sed 's|/||g' | tail -n 1)
-    NodeJS_URL="https://registry.npmmirror.com/-/binary/node/latest-${version1}.x/node-${version3}-linux-${ARCH}.tar.xz"
+    WebURL="https://registry.npmmirror.com/-/binary/node/latest-${version1}.x/"
+    version3=$(curl -s ${WebURL} | grep -o '"name":"node-'${version2}'[^"]*-linux-'${ARCH}'.tar.xz"' | grep -o 'node-[^"]*' | head -n 1)
+    if [ -z "$version3" ]; then
+        # 如果没有找到精确版本，获取同系列最新版本
+        version3=$(curl -s ${WebURL} | grep -o '"name":"node-v'$(echo ${version2} | cut -d'.' -f1-2)'[^"]*-linux-'${ARCH}'.tar.xz"' | grep -o 'node-[^"]*' | sort -V | tail -n 1)
+    fi
+    NodeJS_URL="${WebURL}${version3}"
 elif [ "${GitMirror}" == "github.com" ]
 then
     WebURL="https://nodejs.org/dist/latest-v18.x/"
@@ -91,7 +95,7 @@ do
 done
 }
 
-if ! [[ "$Nodsjs_Version" == "v16" || "$Nodsjs_Version" == "v18" ]];then
+if ! [[ "$Nodsjs_Version" == "v16" || "$Nodsjs_Version" == "v18" || "$Nodsjs_Version" == "v19" || "$Nodsjs_Version" == "v20" || "$Nodsjs_Version" == "v21"|| "$Nodsjs_Version" == "v22"|| "$Nodsjs_Version" == "v23"|| "$Nodsjs_Version" == "v24" ]];then
     echo -e ${yellow}安装软件 Node.JS${background}
     if awk '{print $2}' /etc/issue | grep -q -E 22.*
         then

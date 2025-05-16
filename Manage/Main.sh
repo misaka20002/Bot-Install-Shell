@@ -229,7 +229,7 @@ if [ "${new_version}" != "${old_version}" ];then
     fi
 fi
 }
-old_version="1.1.19"
+old_version="1.1.21"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -405,7 +405,7 @@ case $1 in
       ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未运行]" 10 60
     fi
     ;;
-  plugin)
+  plugin_1)
     # URL="https://ipinfo.io"
     # Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
     # if [ ${Address} = "CN" ]
@@ -459,21 +459,107 @@ echo -en ${cyan}更新完成 回车返回${background};read
 
 QSignAPIChange(){
 if [ ${BotName} == "TRSS-Yunzai" ];then
-    echo -e ${cyan}TRSS崽请直接使用 ${yellow}"#QQ签名 + 签名服务器地址" ${background}
+    echo -e ${cyan}TRSS崽推荐使用 拉格朗日 或 NapCat 连接QQ； ${background}
+    echo -e ${cyan}若打算继续使用ICQQ则前台启动后使用 ${yellow}"#QQ签名 + 签名服务器地址" ${background}
     echo -en ${cyan}回车返回${background};read
     return
 fi
 echo -e ${white}"====="${green}呆毛版-QSign${white}"====="${background}
-echo -e ${green}请输入您的新签名服务器链接: ${background};read API
+echo -e ${green}1. 修改签名服务器链接${background}
+echo -e ${green}2. 修改QQ版本号${background}
+echo -en ${green}请选择要修改的内容 \(输入数字\): ${background};read choice
+
 file=config/config/bot.yaml
-old_sign_api_addr=$(grep sign_api_addr ${file})
-new_sign_api_addr="sign_api_addr: ${API}"
-sed -i "s|${old_sign_api_addr}|${new_sign_api_addr}|g" ${file}
-API=$(grep sign_api_addr ${file})
-API=$(echo ${API} | sed "s/sign_api_addr: //g")
-echo -e ${cyan}您的API链接已修改为:${green}${API}${background}
+
+if [ "$choice" == "1" ]; then
+    echo -e ${green}请输入您的新签名服务器链接: ${background};read API
+    old_sign_api_addr=$(grep sign_api_addr ${file})
+    new_sign_api_addr="sign_api_addr: ${API}"
+    sed -i "s|${old_sign_api_addr}|${new_sign_api_addr}|g" ${file}
+    API=$(grep sign_api_addr ${file})
+    API=$(echo ${API} | sed "s/sign_api_addr: //g")
+    echo -e ${cyan}您的API链接已修改为:${green}${API}${background}
+elif [ "$choice" == "2" ]; then
+    echo -e ${green}请输入您的新QQ版本号 \(例如: 9.1.50\): ${background};read VER
+    old_ver=$(grep "ver:" ${file})
+    new_ver="ver: ${VER}"
+    sed -i "s|${old_ver}|${new_ver}|g" ${file}
+    VER=$(grep "ver:" ${file})
+    VER=$(echo ${VER} | sed "s/ver: //g")
+    echo -e ${cyan}您的QQ版本号已修改为:${green}${VER}${background}
+else
+    echo -e ${red}无效的选择，请重试${background}
+fi
+
 echo
 echo -en ${cyan}回车返回${background};read
+}
+
+function OperatingEnvironmentInstall(){
+  echo -e ${yellow}"确认要重新安装环境吗? 这将重新安装以下依赖( ffmpeg, gzip, redis, tmux, chromium, fonts-wqy-zenhei, node.JS ... ) [y/n]"${background}
+  read -p "" confirm
+  case ${confirm} in
+    y|Y)
+      echo -e ${cyan}"开始重新安装环境..."${background}
+      ;;
+    n|N)
+      echo -e ${cyan}"已取消重新安装环境"${background}
+      Main
+      return
+      ;;
+    *)
+      echo -e ${red}"无效的输入，请输入 y 或 n"${background}
+      Main
+      return
+      ;;
+  esac
+  BotPathCheck
+
+  case $(uname -m) in
+      x86_64|amd64)
+      export ARCH=x64
+  ;;
+      arm64|aarch64)
+      export ARCH=arm64
+  ;;
+  *)
+      echo ${red}您的框架为${yellow}$(uname -m)${red},快提issue做适配.${background}
+      exit
+  ;;
+  esac
+
+    if sudo rm -f /usr/local/bin/ffmpeg; then
+      echo -e ${green}"Successfully removed /usr/local/bin/ffmpeg"${background}
+    else
+      echo -e ${red}"Failed to remove /usr/local/bin/ffmpeg"${background}
+      echo -e ${yellow}"You may need to manually remove it later"${background}
+    fi
+
+  command_all="BOT-PKG.sh BOT_INSTALL.sh BOT-NODE.JS.sh"
+  i=1
+  if ping -c 1 gitee.com > /dev/null 2>&1
+  then
+    URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
+  elif ping -c 1 github.com > /dev/null 2>&1
+  then
+    URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
+  fi
+  for command in ${command_all}
+  do
+    until bash <(curl -sL ${URL}/${command})
+    do
+      if [ ${i} -eq 3 ]
+      then
+        echo -e ${red}错误次数过多 退出${background}
+        exit
+      fi
+      i=$((${i}+1))
+      echo -en ${red}命令执行失败 ${green}3秒后重试${background}
+      sleep 3s
+      echo
+    done
+  done
+  Main
 }
 
 Number=$(${DialogWhiptail} \
@@ -485,12 +571,12 @@ Number=$(${DialogWhiptail} \
 "3" "停止运行" \
 "4" "重新启动" \
 "5" "打开日志" \
-"6.1" "插件管理" \
-"6.2" "插件管理_地址2" \
+"6.1" "插件管理_反代1" \
+"6.2" "插件管理_反代2" \
 "7" "全部更新" \
 "8" "填写签名" \
-"9" "其他功能" \
-"10" "重装ffmpeg" \
+"9" "重装ffmpeg" \
+"10" "其他功能" \
 "0" "返回" \
 3>&1 1>&2 2>&3)
 feedback=$?
@@ -512,7 +598,7 @@ case ${Number} in
         BOT log
         ;;
     6.1)
-        BOT plugin
+        BOT plugin_1
         ;;
     6.2)
         BOT plugin_2
@@ -524,11 +610,11 @@ case ${Number} in
         QSignAPIChange
         ;;
     9)
-        MirrorCheck
-        bash <(curl -sL https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/OtherFunctions.sh)
+        OperatingEnvironmentInstall
         ;;
     10)
-        OperatingEnvironmentInstall
+        MirrorCheck
+        bash <(curl -sL https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/OtherFunctions.sh)
         ;;
     0)
         return
@@ -573,72 +659,6 @@ do
   done
 done
 BotPath
-}
-function OperatingEnvironmentInstall(){
-  echo -e ${yellow}"确认要重新安装环境吗? 这将重新安装以下依赖( ffmpeg, gzip, redis, tmux, chromium, fonts-wqy-zenhei, node.JS ... ) [y/n]"${background}
-  read -p "" confirm
-  case ${confirm} in
-    y|Y)
-      echo -e ${cyan}"开始重新安装环境..."${background}
-      ;;
-    n|N)
-      echo -e ${cyan}"已取消重新安装环境"${background}
-      Main
-      return
-      ;;
-    *)
-      echo -e ${red}"无效的输入，请输入 y 或 n"${background}
-      Main
-      return
-      ;;
-  esac
-  BotPathCheck
-
-case $(uname -m) in
-    x86_64|amd64)
-    export ARCH=x64
-;;
-    arm64|aarch64)
-    export ARCH=arm64
-;;
-*)
-    echo ${red}您的框架为${yellow}$(uname -m)${red},快提issue做适配.${background}
-    exit
-;;
-esac
-
-  if sudo rm -f /usr/local/bin/ffmpeg; then
-    echo -e ${green}"Successfully removed /usr/local/bin/ffmpeg"${background}
-  else
-    echo -e ${red}"Failed to remove /usr/local/bin/ffmpeg"${background}
-    echo -e ${yellow}"You may need to manually remove it later"${background}
-  fi
-
-command_all="BOT-PKG.sh BOT_INSTALL.sh BOT-NODE.JS.sh"
-i=1
-if ping -c 1 gitee.com > /dev/null 2>&1
-then
-  URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
-elif ping -c 1 github.com > /dev/null 2>&1
-then
-  URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
-fi
-for command in ${command_all}
-do
-  until bash <(curl -sL ${URL}/${command})
-  do
-    if [ ${i} -eq 3 ]
-    then
-      echo -e ${red}错误次数过多 退出${background}
-      exit
-    fi
-    i=$((${i}+1))
-    echo -en ${red}命令执行失败 ${green}3秒后重试${background}
-    sleep 3s
-    echo
-  done
-done
-Main
 }
 function BotPath(){
     if BotPathCheck

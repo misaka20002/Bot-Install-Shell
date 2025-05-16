@@ -197,10 +197,221 @@ pnpm uninstall puppeteer
 pnpm install puppeteer@13.7.0 -w
 }
 
+CheckAndInstallNvm() {
+    if ! command -v nvm &> /dev/null; then
+        echo -e ${yellow}未检测到 NVM，正在安装...${background}
+        
+        # 安装 NVM
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+        
+        # 加载 NVM
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+        
+        # 确认安装
+        if command -v nvm &> /dev/null; then
+            echo -e ${green}NVM 安装成功！${background}
+        else
+            echo -e ${red}NVM 安装失败，请手动安装后再试${background}
+            echo -e ${cyan}可以访问 https://github.com/nvm-sh/nvm 获取安装指南${background}
+            echo -en ${cyan}回车返回${background}
+            read
+            return 1
+        fi
+    fi
+    return 0
+}
+
 UpdateNodeJS(){
-echo -e ${cyan}这个没写${background}
-echo -en ${cyan}回车返回${background}
-read
+    echo -e ${white}"====="${green}呆毛版-NVM管理${white}"====="${background}
+    
+    # 检查并安装 NVM
+    if ! CheckAndInstallNvm; then
+        return
+    fi
+    
+    echo -e ${green}请选择您的操作${background}
+    echo -e  ${green} 1. ${cyan}查看当前 Node.js 版本${background}
+    echo -e  ${green} 2. ${cyan}查看可用的 Node.js 版本${background}
+    echo -e  ${green} 3. ${cyan}查看已安装的 Node.js 版本${background}
+    echo -e  ${green} 4. ${cyan}安装指定版本的 Node.js${background}
+    echo -e  ${green} 5. ${cyan}切换 Node.js 版本${background}
+    echo -e  ${green} 6. ${cyan}卸载指定版本的 Node.js${background}
+    echo -e  ${green} 0. ${cyan}返回上级菜单${background}
+    echo "========================="
+    echo -en ${green}请输入您的选项: ${background};read num
+    case ${num} in
+      0)
+        return
+        ;;
+      1)
+        CheckCurrentNodeVersion
+        ;;
+      2)
+        CheckAvailableNodeVersions
+        ;;
+      3)
+        CheckInstalledNodeVersions
+        ;;
+      4)
+        InstallNodeVersion
+        ;;
+      5)
+        SwitchNodeVersion
+        ;;
+      6)
+        UninstallNodeVersion
+        ;;
+      *)
+        echo -e ${red}输入错误${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        UpdateNodeJS
+        ;;
+    esac
+}
+
+CheckCurrentNodeVersion(){
+    # 检查并安装 NVM
+    if ! CheckAndInstallNvm; then
+        UpdateNodeJS
+        return
+    fi
+    
+    echo -e ${cyan}当前 Node.js 版本:${background}
+    node -v
+    echo -en ${cyan}回车返回${background}
+    read
+    UpdateNodeJS
+}
+
+CheckAvailableNodeVersions(){
+    # 检查并安装 NVM
+    if ! CheckAndInstallNvm; then
+        UpdateNodeJS
+        return
+    fi
+    
+    echo -e ${cyan}可用的 Node.js 版本:${background}
+    nvm ls-remote
+    echo -en ${cyan}回车返回${background}
+    read
+    UpdateNodeJS
+}
+
+CheckInstalledNodeVersions(){
+    # 检查并安装 NVM
+    if ! CheckAndInstallNvm; then
+        UpdateNodeJS
+        return
+    fi
+    
+    echo -e ${cyan}已安装的 Node.js 版本:${background}
+    nvm ls
+    echo -en ${cyan}回车返回${background}
+    read
+    UpdateNodeJS
+}
+
+InstallNodeVersion(){
+    # 检查并安装 NVM
+    if ! CheckAndInstallNvm; then
+        UpdateNodeJS
+        return
+    fi
+    
+    echo -e ${white}"====="${green}安装 Node.js 版本${white}"====="${background}
+    echo -e ${green}请选择要安装的版本${background}
+    echo -e  ${green} 1. ${cyan}Node.js v18 LTS${background}
+    echo -e  ${green} 2. ${cyan}Node.js v19${background}
+    echo -e  ${green} 3. ${cyan}Node.js v20 LTS${background}
+    echo -e  ${green} 4. ${cyan}Node.js v21${background}
+    echo -e  ${green} 5. ${cyan}Node.js v22${background}
+    echo -e  ${green} 6. ${cyan}Node.js v23${background}
+    echo -e  ${green} 7. ${cyan}Node.js v24${background}
+    echo -e  ${green} 8. ${cyan}安装其他版本${background}
+    echo -e  ${green} 0. ${cyan}返回上级菜单${background}
+    echo "========================="
+    echo -en ${green}请输入您的选项: ${background};read num
+    case ${num} in
+      0)
+        UpdateNodeJS
+        ;;
+      1)
+        nvm install 18
+        ;;
+      2)
+        nvm install 19
+        ;;
+      3)
+        nvm install 20
+        ;;
+      4)
+        nvm install 21
+        ;;
+      5)
+        nvm install 22
+        ;;
+      6)
+        nvm install 23
+        ;;
+      7)
+        nvm install 24
+        ;;
+      8)
+        echo -en ${cyan}请输入要安装的 Node.js 版本 \(例如: 16.14.2\): ${background}
+        read version
+        nvm install ${version}
+        ;;
+      *)
+        echo -e ${red}输入错误${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        InstallNodeVersion
+        ;;
+    esac
+    echo -e ${green}安装完成${background}
+    echo -en ${cyan}回车返回${background}
+    read
+    UpdateNodeJS
+}
+
+SwitchNodeVersion(){
+    # 检查并安装 NVM
+    if ! CheckAndInstallNvm; then
+        UpdateNodeJS
+        return
+    fi
+    
+    echo -e ${cyan}已安装的 Node.js 版本:${background}
+    nvm ls
+    echo -en ${cyan}请输入要切换的 Node.js 版本 \(例如: 18 或 v18.17.1\): ${background}
+    read version
+    nvm use ${version}
+    echo -e ${green}当前 Node.js 版本:${background}
+    node -v
+    echo -en ${cyan}回车返回${background}
+    read
+    UpdateNodeJS
+}
+
+UninstallNodeVersion(){
+    # 检查并安装 NVM
+    if ! CheckAndInstallNvm; then
+        UpdateNodeJS
+        return
+    fi
+    
+    echo -e ${cyan}已安装的 Node.js 版本:${background}
+    nvm ls
+    echo -en ${cyan}请输入要卸载的 Node.js 版本 \(例如: 18 或 v18.17.1\): ${background}
+    read version
+    nvm uninstall ${version}
+    echo -e ${green}卸载完成${background}
+    echo -en ${cyan}回车返回${background}
+    read
+    UpdateNodeJS
 }
 
 FfmpegPath(){
