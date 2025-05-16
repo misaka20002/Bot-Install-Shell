@@ -135,7 +135,16 @@ start_NapCat() {
         return 1
     fi
     
-    if check_running; then
+    if [ -n "$1" ]; then
+        # 如果提供了QQ号作为参数，检查该QQ号是否已在运行
+        specific_qq="$1"
+        if is_qq_running "$specific_qq"; then
+            echo -e ${yellow}QQ号 ${cyan}${specific_qq}${yellow} 已经在运行中${background}
+            echo -en ${cyan}回车返回${background};read
+            return 0
+        fi
+        echo -e ${yellow}正在准备启动QQ号: ${cyan}${specific_qq}${background}
+    elif check_running; then
         echo -e ${yellow}${APP_NAME}已经在运行中${background}
         echo -en ${cyan}回车返回${background};read
         return 0
@@ -190,29 +199,47 @@ start_NapCat() {
                 while IFS= read -r file; do
                     qq_number=$(basename "$file" | sed -n 's/napcat_\([0-9]*\)\.json/\1/p')
                     if [ -n "$qq_number" ]; then
+                        # 如果指定了特定QQ号，只选择该QQ号
+                        if [ -n "$specific_qq" ] && [ "$qq_number" != "$specific_qq" ]; then
+                            continue
+                        fi
                         qq_numbers+=("$qq_number")
                         echo -e ${green}$i. ${cyan}$qq_number${background}
                         i=$((i+1))
                     fi
                 done <<< "$account_files"
                 
-                echo -e ${green}0. ${cyan}返回并选择全新登录${background}
-                echo
-                
-                # 让用户选择要登录的QQ账号
-                echo -en ${yellow}请选择要登录的QQ账号编号: ${background};read choice
-                
-                if [ "$choice" = "0" ]; then
-                    login_option=1
-                elif ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#qq_numbers[@]} ]; then
-                    echo -e ${red}无效的选择${background}
+                if [ ${#qq_numbers[@]} -eq 0 ]; then
+                    echo -e ${red}未找到${specific_qq:+指定的QQ号: $specific_qq}${background}
                     echo -en ${cyan}回车返回${background};read
                     return 1
-                else
-                    selected_qq=${qq_numbers[$((choice-1))]}
+                fi
+                
+                # 如果只有一个匹配项且提供了特定QQ号，自动选择该QQ号
+                if [ ${#qq_numbers[@]} -eq 1 ] && [ -n "$specific_qq" ]; then
+                    selected_qq=${qq_numbers[0]}
                     NAPCAT_CMD="xvfb-run -a qq --no-sandbox -q ${selected_qq}"
-                    echo -e ${yellow}已选择QQ账号: ${cyan}${selected_qq}${background}
+                    echo -e ${yellow}已自动选择QQ账号: ${cyan}${selected_qq}${background}
                     sleep 1
+                else
+                    echo -e ${green}0. ${cyan}返回并选择全新登录${background}
+                    echo
+                    
+                    # 让用户选择要登录的QQ账号
+                    echo -en ${yellow}请选择要登录的QQ账号编号: ${background};read choice
+                    
+                    if [ "$choice" = "0" ]; then
+                        login_option=1
+                    elif ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#qq_numbers[@]} ]; then
+                        echo -e ${red}无效的选择${background}
+                        echo -en ${cyan}回车返回${background};read
+                        return 1
+                    else
+                        selected_qq=${qq_numbers[$((choice-1))]}
+                        NAPCAT_CMD="xvfb-run -a qq --no-sandbox -q ${selected_qq}"
+                        echo -e ${yellow}已选择QQ账号: ${cyan}${selected_qq}${background}
+                        sleep 1
+                    fi
                 fi
             fi
             ;;
@@ -225,6 +252,13 @@ start_NapCat() {
     # 如果选择了全新登录或从其他选项回退到全新登录
     if [ "$login_option" = "1" ]; then
         NAPCAT_CMD="xvfb-run -a qq --no-sandbox"
+    fi
+    
+    # 如果已经选择或指定了QQ账号，为该QQ号设置唯一的tmux会话名
+    if [ -n "$selected_qq" ]; then
+        session_name="${TMUX_NAME}_${selected_qq}"
+    else
+        session_name="${TMUX_NAME}"
     fi
     
     # 选择启动方式
@@ -253,19 +287,19 @@ start_NapCat() {
             # 后台启动
             echo -e ${yellow}正在后台启动${APP_NAME}...${background}
             # 使用循环确保自动重启
-            tmux new-session -d -s ${TMUX_NAME} "export Boolean=true; while \${Boolean}; do ${NAPCAT_CMD}; echo -e '${red}${APP_NAME}已关闭，正在重启...${background}'; sleep 2s; done"
+            tmux new-session -d -s ${session_name} "export Boolean=true; while \${Boolean}; do ${NAPCAT_CMD}; echo -e '${red}${APP_NAME}已关闭，正在重启...${background}'; sleep 2s; done"
             
             # 检查是否成功启动
             sleep 2
-            if check_running; then
-                echo -e ${green}${APP_NAME}已成功在后台启动${background}
+            if tmux list-sessions 2>/dev/null | grep -q ${session_name}; then
+                echo -e ${green}${APP_NAME}${selected_qq:+ \(QQ: $selected_qq\)}已成功在后台启动${background}
                 echo -e ${cyan}提示: 使用 '查看日志' 功能可以访问${APP_NAME}界面${background}
                 
                 # 添加是否查看日志的选项
                 echo -en ${green}是否立即查看日志（打开日志后退出请按 Ctrl+B 然后按 D）? [Y/n]:${background}; read view_log_yn
                 case ${view_log_yn} in
                     Y|y|"")
-                        tmux attach-session -t ${TMUX_NAME}
+                        tmux attach-session -t ${session_name}
                         ;;
                     *)
                         echo -e ${green}您可以稍后通过 '查看日志' 选项进入${APP_NAME}界面${background}
@@ -285,10 +319,73 @@ start_NapCat() {
 
 # 停止 NapCat
 stop_NapCat() {
-    if ! check_running; then
-        echo -e ${yellow}${APP_NAME}未运行${background}
+    # 如果提供了QQ号作为参数，只停止该QQ号
+    if [ -n "$1" ]; then
+        specific_qq="$1"
+        session_name="${TMUX_NAME}_${specific_qq}"
+        
+        if ! tmux list-sessions 2>/dev/null | grep -q ${session_name}; then
+            echo -e ${yellow}QQ号 ${cyan}${specific_qq}${yellow} 未在运行${background}
+            echo -en ${cyan}回车返回${background};read
+            return 0
+        fi
+        
+        echo -e ${yellow}正在停止QQ号 ${cyan}${specific_qq}${yellow}...${background}
+        # 将Boolean设置为false以退出自动重启循环
+        tmux send-keys -t ${session_name} "Boolean=false" C-m
+        sleep 1
+        tmux kill-session -t ${session_name}
+        
+        # 检查是否成功停止
+        sleep 2
+        if ! tmux list-sessions 2>/dev/null | grep -q ${session_name}; then
+            echo -e ${green}QQ号 ${cyan}${specific_qq}${green} 已成功停止${background}
+        else
+            echo -e ${red}QQ号 ${cyan}${specific_qq}${red} 停止失败，尝试强制终止进程${background}
+            pkill -f "qq --no-sandbox -q ${specific_qq}"
+            sleep 1
+            if ! tmux list-sessions 2>/dev/null | grep -q ${session_name}; then
+                echo -e ${green}QQ号 ${cyan}${specific_qq}${green} 已成功停止${background}
+            else
+                echo -e ${red}无法停止QQ号 ${cyan}${specific_qq}${red}，请手动检查进程${background}
+            fi
+        fi
+        
         echo -en ${cyan}回车返回${background};read
         return 0
+    fi
+    
+    # 无参数时，检查是否有基本会话在运行
+    if ! check_running; then
+        # 检查是否有任何QQ实例在运行
+        if ! list_running_instances >/dev/null; then
+            echo -e ${yellow}${APP_NAME}未运行${background}
+            echo -en ${cyan}回车返回${background};read
+            return 0
+        else
+            # 如果有QQ实例在运行，显示停止所有实例的选项
+            echo -e ${yellow}发现以下QQ实例正在运行:${background}
+            list_running_instances
+            echo -en ${yellow}是否停止所有QQ实例? [y/N]${background};read stop_all
+            case ${stop_all} in
+                Y|y)
+                    # 停止所有QQ实例
+                    for session in $(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}_" | cut -d: -f1); do
+                        qq_number=${session#${TMUX_NAME}_}
+                        echo -e ${yellow}正在停止QQ号 ${cyan}${qq_number}${yellow}...${background}
+                        tmux send-keys -t ${session} "Boolean=false" C-m
+                        sleep 1
+                        tmux kill-session -t ${session}
+                    done
+                    echo -e ${green}已停止所有QQ实例${background}
+                    ;;
+                *)
+                    echo -e ${yellow}操作已取消${background}
+                    ;;
+            esac
+            echo -en ${cyan}回车返回${background};read
+            return 0
+        fi
     fi
     
     echo -e ${yellow}正在停止${APP_NAME}...${background}
@@ -327,17 +424,132 @@ restart_NapCat() {
     fi
 }
 
+# 检查特定QQ号是否在运行
+is_qq_running() {
+    local qq_number="$1"
+    if tmux list-sessions 2>/dev/null | grep -q "${TMUX_NAME}_${qq_number}"; then
+        return 0  # 正在运行
+    fi
+    return 1  # 未运行
+}
+
+# 列出所有运行中的QQ实例
+list_running_instances() {
+    # 检查是否有tmux会话
+    if ! command -v tmux &> /dev/null || ! tmux list-sessions &> /dev/null; then
+        return 1
+    fi
+    
+    # 获取所有napcat相关的tmux会话
+    local sessions=$(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}\|^${TMUX_NAME}_" | cut -d: -f1)
+    
+    if [ -z "$sessions" ]; then
+        return 1
+    fi
+    
+    local found=false
+    
+    # 遍历所有会话，提取QQ号
+    for session in $sessions; do
+        if [[ "$session" == "${TMUX_NAME}" ]]; then
+            echo -e ${green}[*] ${cyan}主实例 ${yellow}- ${purple}会话: ${session}${background}
+            found=true
+        elif [[ "$session" =~ ^${TMUX_NAME}_([0-9]+)$ ]]; then
+            local qq_number=${BASH_REMATCH[1]}
+            echo -e ${green}[*] ${cyan}QQ号: ${qq_number} ${yellow}- ${purple}会话: ${session}${background}
+            found=true
+        fi
+    done
+    
+    if $found; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # 查看 NapCat 日志/界面
 view_log() {
-    if ! check_running; then
+    if ! check_running && ! list_running_instances >/dev/null; then
         echo -e ${yellow}${APP_NAME}未运行，无法查看日志${background}
         echo -en ${cyan}回车返回${background};read
         return 1
     fi
     
+    # 如果有多个实例，让用户选择
+    if list_running_instances >/dev/null; then
+        # 显示QQ实例列表
+        echo -e ${yellow}当前运行的QQ实例:${background}
+        list_running_instances
+        
+        # 创建会话名数组
+        declare -a sessions
+        declare -a display_names
+        
+        # 填充数组
+        i=0
+        while read -r line; do
+            if [[ "$line" =~ QQ号:\ ([0-9]+).*会话:\ (${TMUX_NAME}_[0-9]+) ]]; then
+                qq_number="${BASH_REMATCH[1]}"
+                session="${BASH_REMATCH[2]}"
+                sessions+=("$session")
+                display_names+=("QQ号: $qq_number")
+                i=$((i+1))
+            elif [[ "$line" =~ 主实例.*会话:\ (${TMUX_NAME}) ]]; then
+                session="${BASH_REMATCH[1]}"
+                sessions+=("$session")
+                display_names+=("主实例")
+                i=$((i+1))
+            fi
+        done < <(list_running_instances)
+        
+        # 如果只有一个实例，直接连接
+        if [ ${#sessions[@]} -eq 1 ]; then
+            echo -e ${yellow}正在连接到唯一的实例: ${cyan}${display_names[0]}${background}
+            echo -e ${cyan}提示: 退出请按 Ctrl+B 然后按 D${background}
+            echo -en ${cyan}按回车键继续${background};read
+            sleep 1
+            
+            tmux attach-session -t ${sessions[0]}
+            return 0
+        fi
+        
+        # 打印选项
+        echo -e ${yellow}请选择要查看的实例:${background}
+        for ((j=0; j<${#sessions[@]}; j++)); do
+            echo -e ${green}$((j+1)). ${cyan}${display_names[$j]}${background}
+        done
+        
+        echo -e ${green}0. ${cyan}返回${background}
+        echo
+        
+        # 让用户选择要查看的实例
+        echo -en ${yellow}请选择要查看的实例编号: ${background};read choice
+        
+        if [ "$choice" = "0" ]; then
+            return 0
+        fi
+        
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#sessions[@]} ]; then
+            echo -e ${red}无效的选择${background}
+            echo -en ${cyan}回车返回${background};read
+            return 1
+        fi
+        
+        selected_session=${sessions[$((choice-1))]}
+        
+        echo -e ${yellow}正在连接到 ${cyan}${display_names[$((choice-1))]}${yellow} 的界面...${background}
+        echo -e ${cyan}提示: 退出请按 Ctrl+B 然后按 D${background}
+        echo -en ${cyan}按回车键继续${background};read
+        sleep 1
+        
+        tmux attach-session -t $selected_session
+        return 0
+    fi
+    
+    # 默认连接到主实例
     echo -e ${yellow}正在连接到${APP_NAME}界面...${background}
     echo -e ${cyan}提示: 退出请按 Ctrl+B 然后按 D${background}
-    echo -e ${cyan}按回车键继续${background};read
     sleep 1
     
     tmux attach-session -t ${TMUX_NAME}
@@ -1083,7 +1295,7 @@ EOF
                 del_index=$((del_choice-1))
                 WS_NAME=$(jq -r ".network.websocketClients[$del_index].name // \"未命名\"" "$CONFIG_FILE")
                 
-                echo -e ${yellow}确认删除WebSocket接口 "${WS_NAME}"? [y/N]: ${background};read confirm
+                echo -en ${yellow}确认删除WebSocket接口 "${WS_NAME}"? [y/N]: ${background};read confirm
                 
                 if [[ "$confirm" =~ ^[Yy]$ ]]; then
                     # 删除指定索引的WebSocket配置
@@ -1147,7 +1359,7 @@ EOF
                     action="启用"
                 fi
                 
-                echo -e ${yellow}确认${action} WebSocket接口 "${WS_NAME}"? [Y/n]: ${background};read confirm
+                echo -en ${yellow}确认${action} WebSocket接口 "${WS_NAME}"? [Y/n]: ${background};read confirm
                 
                 if [[ ! "$confirm" =~ ^[Nn]$ ]]; then
                     # 更新启用/禁用状态
@@ -1327,7 +1539,7 @@ configure_music_sign() {
                 music_url=${music_url:-$DEFAULT_MUSIC_SIGN_URL}
                 
                 # 备份原配置文件
-                cp "$selected_config" "${selected_config}.bak"
+                cp "$selected_config" "${selected_config}.bak"}
                 
                 # 更新音乐签名URL
                 jq --arg url "$music_url" '.musicSignUrl = $url' "$selected_config" > "${selected_config}.tmp" && 
@@ -1379,13 +1591,274 @@ check_update() {
     esac
 }
 
+# 管理多开实例
+manage_multi_instances() {
+    while true; do
+        clear
+        echo -e ${white}"====="${green}QQ多开实例管理${white}"====="${background}
+        
+        # 显示当前运行的QQ实例
+        echo -e ${yellow}当前运行的QQ实例:${background}
+        if ! list_running_instances; then
+            echo -e ${red}没有运行中的QQ实例${background}
+        fi
+        
+        echo -e ${yellow}"==========================="${background}
+        echo -e ${green}1. ${cyan}启动新的QQ实例${background}
+        echo -e ${green}2. ${cyan}启动指定QQ号${background}
+        echo -e ${green}3. ${cyan}停止指定QQ实例${background}
+        echo -e ${green}4. ${cyan}停止所有QQ实例${background}
+        echo -e ${green}5. ${cyan}查看指定QQ实例日志${background}
+        echo -e ${green}0. ${cyan}返回主菜单${background}
+        echo -e ${yellow}"==========================="${background}
+        
+        echo -en ${green}请选择操作: ${background};read option
+        
+        case $option in
+            1)
+                # 启动新的QQ实例
+                start_NapCat
+                ;;
+            2)
+                # 启动指定QQ号
+                # 查找已登录的QQ账号列表
+                CONFIG_DIR="/opt/QQ/resources/app/app_launcher/napcat/config"
+                if [ ! -d "$CONFIG_DIR" ]; then
+                    echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
+                    echo -e ${yellow}请先使用前台启动方式登录QQ账号${background}
+                    echo -en ${cyan}回车返回${background};read
+                    continue
+                fi
+                
+                echo -e ${yellow}正在查找已登录的QQ账号...${background}
+                account_files=$(find "$CONFIG_DIR" -name "napcat_*.json" 2>/dev/null)
+                
+                if [ -z "$account_files" ]; then
+                    echo -e ${red}未找到已登录的QQ账号${background}
+                    echo -e ${yellow}请先使用前台启动方式登录QQ账号${background}
+                    echo -en ${cyan}回车返回${background};read
+                    continue
+                fi
+                
+                # 提取并显示QQ号码列表
+                echo -e ${green}已找到以下QQ账号:${background}
+                i=1
+                declare -a qq_numbers
+                
+                while IFS= read -r file; do
+                    qq_number=$(basename "$file" | sed -n 's/napcat_\([0-9]*\)\.json/\1/p')
+                    if [ -n "$qq_number" ]; then
+                        qq_numbers+=("$qq_number")
+                        
+                        # 检查该QQ号是否已在运行
+                        if is_qq_running "$qq_number"; then
+                            status="${green}[已启动]"
+                        else
+                            status="${red}[未启动]"
+                        fi
+                        
+                        echo -e ${green}$i. ${cyan}$qq_number ${status}${background}
+                        i=$((i+1))
+                    fi
+                done <<< "$account_files"
+                
+                echo -e ${green}0. ${cyan}返回${background}
+                echo
+                
+                # 让用户选择要启动的QQ账号
+                echo -en ${yellow}请选择要启动的QQ账号编号: ${background};read choice
+                
+                if [ "$choice" = "0" ]; then
+                    continue
+                fi
+                
+                if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#qq_numbers[@]} ]; then
+                    echo -e ${red}无效的选择${background}
+                    echo -en ${cyan}回车返回${background};read
+                    continue
+                fi
+                
+                selected_qq=${qq_numbers[$((choice-1))]}
+                
+                # 检查该QQ号是否已在运行
+                if is_qq_running "$selected_qq"; then
+                    echo -e ${yellow}QQ号 ${cyan}${selected_qq}${yellow} 已经在运行中${background}
+                    echo -en ${cyan}回车返回${background};read
+                    continue
+                fi
+                
+                # 启动选定的QQ号
+                start_NapCat "$selected_qq"
+                ;;
+            3)
+                # 停止指定QQ实例
+                # 显示当前运行的QQ实例
+                echo -e ${yellow}当前运行的QQ实例:${background}
+                if ! list_running_instances; then
+                    echo -e ${red}没有运行中的QQ实例${background}
+                    echo -en ${cyan}回车返回${background};read
+                    continue
+                fi
+                
+                # 创建QQ号数组
+                declare -a running_qq
+                
+                # 填充数组
+                i=1
+                while read -r line; do
+                    if [[ "$line" =~ QQ号:\ ([0-9]+) ]]; then
+                        running_qq+=("${BASH_REMATCH[1]}")
+                        i=$((i+1))
+                    elif [[ "$line" =~ 主实例 ]]; then
+                        running_qq+=("main")
+                        i=$((i+1))
+                    fi
+                done < <(list_running_instances)
+                
+                echo -e ${green}0. ${cyan}返回${background}
+                echo
+                
+                # 让用户选择要停止的QQ实例
+                echo -en ${yellow}请选择要停止的QQ实例编号: ${background};read choice
+                
+                if [ "$choice" = "0" ]; then
+                    continue
+                fi
+                
+                if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#running_qq[@]} ]; then
+                    echo -e ${red}无效的选择${background}
+                    echo -en ${cyan}回车返回${background};read
+                    continue
+                fi
+                
+                selected_instance=${running_qq[$((choice-1))]}
+                
+                if [ "$selected_instance" = "main" ]; then
+                    # 停止主实例
+                    echo -e ${yellow}正在停止主实例...${background}
+                    tmux send-keys -t ${TMUX_NAME} "Boolean=false" C-m
+                    sleep 1
+                    tmux kill-session -t ${TMUX_NAME}
+                    echo -e ${green}主实例已停止${background}
+                else
+                    # 停止特定QQ号
+                    stop_NapCat "$selected_instance"
+                fi
+                ;;
+            4)
+                # 停止所有QQ实例
+                echo -e ${yellow}是否确认停止所有QQ实例? [y/N]${background};read confirm
+                
+                if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                    echo -e ${yellow}正在停止所有QQ实例...${background}
+                    
+                    # 停止主实例（如果存在）
+                    if check_running; then
+                        tmux send-keys -t ${TMUX_NAME} "Boolean=false" C-m
+                        sleep 1
+                        tmux kill-session -t ${TMUX_NAME}
+                    fi
+                    
+                    # 停止所有QQ号实例
+                    for session in $(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}_" | cut -d: -f1); do
+                        qq_number=${session#${TMUX_NAME}_}
+                        echo -e ${yellow}正在停止QQ号 ${cyan}${qq_number}${yellow}...${background}
+                        tmux send-keys -t ${session} "Boolean=false" C-m
+                        sleep 1
+                        tmux kill-session -t ${session}
+                    done
+                    
+                    echo -e ${green}已停止所有QQ实例${background}
+                else
+                    echo -e ${yellow}操作已取消${background}
+                fi
+                
+                echo -en ${cyan}回车返回${background};read
+                ;;
+            5)
+                # 查看指定QQ实例日志
+                # 显示当前运行的QQ实例
+                echo -e ${yellow}当前运行的QQ实例:${background}
+                if ! list_running_instances; then
+                    echo -e ${red}没有运行中的QQ实例${background}
+                    echo -en ${cyan}回车返回${background};read
+                    continue
+                fi
+                
+                # 创建会话名数组
+                declare -a sessions
+                declare -a display_names
+                
+                # 填充数组
+                i=0
+                while read -r line; do
+                    if [[ "$line" =~ QQ号:\ ([0-9]+).*会话:\ (${TMUX_NAME}_[0-9]+) ]]; then
+                        qq_number="${BASH_REMATCH[1]}"
+                        session="${BASH_REMATCH[2]}"
+                        sessions+=("$session")
+                        display_names+=("QQ号: $qq_number")
+                        i=$((i+1))
+                    elif [[ "$line" =~ 主实例.*会话:\ (${TMUX_NAME}) ]]; then
+                        session="${BASH_REMATCH[1]}"
+                        sessions+=("$session")
+                        display_names+=("主实例")
+                        i=$((i+1))
+                    fi
+                done < <(list_running_instances)
+                
+                # 打印选项
+                for ((j=0; j<${#sessions[@]}; j++)); do
+                    echo -e ${green}$((j+1)). ${cyan}${display_names[$j]}${background}
+                done
+                
+                echo -e ${green}0. ${cyan}返回${background}
+                echo
+                
+                # 让用户选择要查看的实例
+                echo -en ${yellow}请选择要查看的实例编号: ${background};read choice
+                
+                if [ "$choice" = "0" ]; then
+                    continue
+                fi
+                
+                if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#sessions[@]} ]; then
+                    echo -e ${red}无效的选择${background}
+                    echo -en ${cyan}回车返回${background};read
+                    continue
+                fi
+                
+                selected_session=${sessions[$((choice-1))]}
+                
+                echo -e ${yellow}正在连接到 ${cyan}${display_names[$((choice-1))]}${yellow} 的界面...${background}
+                echo -e ${cyan}提示: 退出请按 Ctrl+B 然后按 D${background}
+                echo -en ${cyan}按回车键继续${background};read
+                sleep 1
+                
+                tmux attach-session -t $selected_session
+                ;;
+            0)
+                return 0
+                ;;
+            *)
+                echo -e ${red}无效选项${background}
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 # 主菜单
 main() {
     if check_installed; then
         if check_running; then
             condition="${green}[已启动]"
         else
-            condition="${red}[未启动]"
+            # 检查是否有其他实例运行
+            if list_running_instances >/dev/null; then
+                condition="${green}[多实例运行中]"
+            else
+                condition="${red}[未启动]"
+            fi
         fi
     else
         condition="${red}[未部署]"
@@ -1403,9 +1876,18 @@ main() {
     echo -e ${green}9.  ${cyan}切换QQ账号${background}
     echo -e ${green}10. ${cyan}配置反向WebSocket${background}
     echo -e ${green}11. ${cyan}音乐签名配置${background}
+    echo -e ${green}12. ${cyan}QQ多开管理${background}
     echo -e ${green}0.  ${cyan}退出${background}
     echo "========================="
     echo -e ${green}${APP_NAME}状态: ${condition}${background}
+    
+    # 如果有实例在运行，显示实例信息
+    if list_running_instances >/dev/null; then
+        echo -e ${green}运行中的实例:${background}
+        list_running_instances
+        echo "========================="
+    fi
+    
     echo -e ${green}说明: ${cyan}安装后“配置反向WebSocket”（推荐trss或喵崽+lain），启动-扫码登录-转后台运行，启动云崽即可。${background}
     echo -e ${green}呆毛版-QQ群: ${cyan}285744328${background}
     echo "========================="
@@ -1454,6 +1936,10 @@ main() {
         11)
             echo
             configure_music_sign
+            ;;
+        12)
+            echo
+            manage_multi_instances
             ;;
         0)
             exit
