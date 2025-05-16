@@ -302,6 +302,7 @@ echo -e ${white}"====="${green}呆毛版-拉格朗日签名服务器${white}"===
 echo -e ${cyan}请选择启动方式${background}
 echo -e  ${green}1.  ${cyan}前台启动（首次登陆）${background}
 echo -e  ${green}2.  ${cyan}TMUX后台启动（推荐）${background}
+echo -e  ${green}说明：${cyan}两种方式都支持自动重启${background}
 echo "========================="
 echo -en ${green}请输入您的选项: ${background};read num
 case ${num} in 
@@ -505,10 +506,48 @@ change_lagrange_version(){
     echo -en ${cyan}回车返回${background};read
 }
 
+# 检查jq命令是否存在
+check_jq() {
+  if ! command -v jq &> /dev/null; then
+    echo -e ${yellow}"检测到未安装jq命令"${background}
+    echo -e ${cyan}"正在尝试安装jq..."${background}
+    
+    if [ $(command -v apt) ]; then
+      apt update -y
+      apt install -y jq
+    elif [ $(command -v yum) ]; then
+      yum install -y jq
+    elif [ $(command -v dnf) ]; then
+      dnf install -y jq
+    elif [ $(command -v pacman) ]; then
+      pacman -Sy --noconfirm jq
+    else
+      echo -e ${red}"无法自动安装jq，请手动安装后再使用此功能"${background}
+      return 1
+    fi
+    
+    # 再次检查jq是否已成功安装
+    if ! command -v jq &> /dev/null; then
+      echo -e ${red}"jq安装失败，请手动安装后再使用此功能"${background}
+      return 1
+    else
+      echo -e ${green}"jq安装成功"${background}
+      return 0
+    fi
+  fi
+  return 0
+}
+
 manage_implementations(){
   if [ ! -f $CONFIG_FILE ]; then
     echo -e ${red}配置文件不存在，请先安装拉格朗日签名服务器${background}
     echo -en ${cyan}回车返回${background};read
+    return
+  fi
+  
+  # 检查jq是否安装
+  if ! check_jq; then
+    echo -en ${yellow}"由于缺少jq命令，无法使用此功能，按回车返回"${background};read
     return
   fi
 
@@ -520,13 +559,25 @@ manage_implementations(){
     echo -e ${white}"====="${green}拉格朗日OneBot连接管理${white}"====="${background}
     echo -e ${cyan}当前已配置的连接：${background}
     
-    # 显示当前配置的连接
-    implementations=$(jq -r '.Implementations | length' $CONFIG_FILE)
+    # 使用jq解析JSON
+    implementations=$(jq -r '.Implementations | length' $CONFIG_FILE 2>/dev/null)
+    
+    # 如果jq命令失败，尝试使用grep和sed
+    if [ $? -ne 0 ] || [ -z "$implementations" ]; then
+      echo -e ${red}"解析JSON失败，请确保配置文件格式正确"${background}
+      echo -en ${yellow}"按回车返回"${background};read
+      return
+    fi
+    
+    if [ "$implementations" == "null" ]; then
+      implementations=0
+    fi
+    
     for (( i=0; i<$implementations; i++ )); do
       type=$(jq -r ".Implementations[$i].Type" $CONFIG_FILE)
       host=$(jq -r ".Implementations[$i].Host" $CONFIG_FILE)
       port=$(jq -r ".Implementations[$i].Port" $CONFIG_FILE)
-      suffix=$(jq -r ".Implementations[$i].Suffix" $CONFIG_FILE)
+      suffix=$(jq -r ".Implementations[$i].Suffix // \"\"" $CONFIG_FILE)
       echo -e ${green}$((i+1)). ${yellow}类型: ${cyan}$type${background}
       echo -e ${yellow}  地址: ${cyan}$host:$port$suffix${background}
     done
