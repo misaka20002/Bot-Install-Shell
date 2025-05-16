@@ -865,21 +865,22 @@ switch_account() {
       fi
       
       echo -e ${green}账号数据恢复完成${background}
+      echo -e ${yellow}已成功切换到 ${cyan}$selected_account${yellow} ，按回车返回主菜单${background};read
     fi
   else
     echo -e ${yellow}将使用全新账号登录${background}
+    # 前台启动
+    echo -e ${yellow}启动前台模式进行登录...${background}
+    echo -e ${cyan}提示: 登录完成后，可以按 Ctrl+C 退出，然后使用后台模式重新启动${background}
+    sleep 2
+    
+    cd $INSTALL_DIR
+    $INSTALL_DIR/Lagrange.OneBot
+    
+    echo -en ${cyan}登录操作已完成，按回车返回主菜单${background};read
   fi
   
-  # 前台启动
-  echo -e ${yellow}启动前台模式进行登录...${background}
-  echo -e ${cyan}提示: 登录完成后，可以按 Ctrl+C 退出，然后使用后台模式重新启动${background}
-  sleep 2
-  
-  # 前台启动
-  cd $INSTALL_DIR
-  $INSTALL_DIR/Lagrange.OneBot
-  
-  echo -en ${cyan}登录操作已完成，按回车返回主菜单${background};read
+
 }
 
 main(){
