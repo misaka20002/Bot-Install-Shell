@@ -501,14 +501,14 @@ then
       echo -en ${cyan}${Name} ${green}已安装 ${cyan}是否删除 ${yellow}[N/y]${background}
       read YN
       case ${YN} in
-      y)
+      Y|y)
         echo -e ${red}正在删除${Name}${background}
         rm -rf plugins/${PluginFolder} > /dev/null 2>&1
         rm -rf plugins/${PluginFolder} > /dev/null 2>&1
         echo -en ${green}删除完成 ${background}
         backmain
         ;;
-      N)
+      n|N)
         echo -en ${green}取消删除${Name} ${background}
         backmain
         ;;
@@ -1210,7 +1210,7 @@ Delete_GIT_Plugin(){
     echo -en ${red}是否删除${Git_Plugin} ${cyan}[N/Y]${background}
     read YN
     case ${YN} in
-    Y)
+    Y|y)
         for Num in ${Number}
         do
             file_folder=$(ls -1 -I example -I bin -I other -I system -I genshin plugins | sed -n "${Num}p")
@@ -1279,7 +1279,7 @@ Delete_JS_Plugin(){
     echo -en ${red}是否删除${JS_Plugin} ${cyan}[N/Y]${background}
     read YN
     case ${YN} in
-    Y)
+    Y|y)
         for Num in ${Number}
         do
             file=$(ls -1 -I example -I bin -I other -I system -I genshin plugins/example | sed -n "${Num}p")

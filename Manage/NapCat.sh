@@ -135,6 +135,25 @@ start_NapCat() {
         return 1
     fi
     
+    # 第二个参数为force_start，如果为true则强制启动新实例
+    force_start=${2:-false}
+    
+    if [ -n "$1" ]; then
+        # 如果提供了QQ号作为参数，检查该QQ号是否已在运行
+        specific_qq="$1"
+        if is_qq_running "$specific_qq"; then
+            echo -e ${yellow}QQ号 ${cyan}${specific_qq}${yellow} 已经在运行中${background}
+            echo -en ${cyan}回车返回${background};read
+            return 0
+        fi
+        echo -e ${yellow}正在准备启动QQ号: ${cyan}${specific_qq}${background}
+    elif check_running && [ "$force_start" != "true" ]; then
+        # 如果非强制启动模式，且已有实例在运行，则提示并返回
+        echo -e ${yellow}${APP_NAME}已经在运行中${background}
+        echo -en ${cyan}回车返回${background};read
+        return 0
+    fi
+    
     if [ -n "$1" ]; then
         # 如果提供了QQ号作为参数，检查该QQ号是否已在运行
         specific_qq="$1"
@@ -683,7 +702,7 @@ manage_webui_config() {
         echo -e ${green}6. ${cyan}保存并重启服务${background}
         echo -e ${green}0. ${cyan}返回主菜单${background}
         echo "========================="
-        echo -e ${green}WebUI 访问地址: ${cyan}http://${HOST}:${PORT}${background}
+        echo -en ${green}WebUI 访问地址: ${cyan}http://${HOST}:${PORT}${background}
         echo -e ${green}登录密钥: ${cyan}${TOKEN}${background}
         echo "========================="
         
@@ -791,7 +810,7 @@ manage_qq_accounts() {
     echo -e ${yellow}正在查找已登录的QQ账号...${background}
     account_files=$(find "$CONFIG_DIR" -name "napcat_*.json" 2>/dev/null)
     
-    if [ -z "$account_files" ]; then
+    if [ -z "$account_files" ];then
         echo -e ${red}未找到已登录的QQ账号${background}
         echo -e ${yellow}请先使用前台启动方式登录QQ账号${background}
         echo -en ${cyan}回车返回${background};read
@@ -805,7 +824,7 @@ manage_qq_accounts() {
     
     while IFS= read -r file; do
         qq_number=$(basename "$file" | sed -n 's/napcat_\([0-9]*\)\.json/\1/p')
-        if [ -n "$qq_number" ]; then
+        if [ -n "$qq_number" ];then
             qq_numbers+=("$qq_number")
             echo -e ${green}$i. ${cyan}$qq_number${background}
             i=$((i+1))
@@ -956,7 +975,7 @@ configure_ws() {
     # 让用户选择要配置的QQ账号
     echo -en ${yellow}请选择要配置WebSocket的QQ账号编号: ${background};read choice
     
-    if [ "$choice" = "0" ]; then
+    if [ "$choice" = "0" ];then
         return 0
     fi
     
@@ -1042,7 +1061,7 @@ configure_ws() {
             WS_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
             
             if [ "$WS_COUNT" -gt 0 ]; then
-                echo -e ${yellow}当前配置的WebSocket接口 (${WS_COUNT}个):${background}
+                echo -e ${yellow}当前配置的WebSocket接口 \(${WS_COUNT}个\):${background}
                 for ((i=0; i<$WS_COUNT; i++)); do
                     WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
                     WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
@@ -1616,8 +1635,8 @@ manage_multi_instances() {
         
         case $option in
             1)
-                # 启动新的QQ实例
-                start_NapCat
+                # 启动新的QQ实例，使用force_start=true强制启动新实例
+                start_NapCat true
                 ;;
             2)
                 # 启动指定QQ号
@@ -1702,15 +1721,24 @@ manage_multi_instances() {
                 
                 # 创建QQ号数组
                 declare -a running_qq
+                declare -a running_sessions
                 
-                # 填充数组
+                # 填充数组并重新显示带编号的列表
+                echo -e ${yellow}请选择要停止的QQ实例:${background}
                 i=1
                 while read -r line; do
-                    if [[ "$line" =~ QQ号:\ ([0-9]+) ]]; then
-                        running_qq+=("${BASH_REMATCH[1]}")
+                    if [[ "$line" =~ QQ号:\ ([0-9]+).*会话:\ (${TMUX_NAME}_[0-9]+) ]]; then
+                        qq_number="${BASH_REMATCH[1]}"
+                        session="${BASH_REMATCH[2]}"
+                        running_qq+=("$qq_number")
+                        running_sessions+=("$session")
+                        echo -e ${green}$i. ${cyan}QQ号: $qq_number${background}
                         i=$((i+1))
-                    elif [[ "$line" =~ 主实例 ]]; then
+                    elif [[ "$line" =~ 主实例.*会话:\ (${TMUX_NAME}) ]]; then
+                        session="${BASH_REMATCH[1]}"
                         running_qq+=("main")
+                        running_sessions+=("$session")
+                        echo -e ${green}$i. ${cyan}主实例${background}
                         i=$((i+1))
                     fi
                 done < <(list_running_instances)
@@ -1732,18 +1760,20 @@ manage_multi_instances() {
                 fi
                 
                 selected_instance=${running_qq[$((choice-1))]}
+                selected_session=${running_sessions[$((choice-1))]}
                 
                 if [ "$selected_instance" = "main" ]; then
                     # 停止主实例
                     echo -e ${yellow}正在停止主实例...${background}
-                    tmux send-keys -t ${TMUX_NAME} "Boolean=false" C-m
+                    tmux send-keys -t ${selected_session} "Boolean=false" C-m
                     sleep 1
-                    tmux kill-session -t ${TMUX_NAME}
+                    tmux kill-session -t ${selected_session}
                     echo -e ${green}主实例已停止${background}
                 else
                     # 停止特定QQ号
                     stop_NapCat "$selected_instance"
                 fi
+                # echo -en ${cyan}回车返回${background};read
                 ;;
             4)
                 # 停止所有QQ实例
@@ -1874,9 +1904,9 @@ main() {
     echo -e ${green}7.  ${cyan}查看日志${background}
     echo -e ${green}8.  ${cyan}WebUI 配置${background}
     echo -e ${green}9.  ${cyan}切换QQ账号${background}
-    echo -e ${green}10. ${cyan}配置反向WebSocket${background}
-    echo -e ${green}11. ${cyan}音乐签名配置${background}
-    echo -e ${green}12. ${cyan}QQ多开管理${background}
+    echo -e ${green}10. ${cyan}多开QQ管理${background}
+    echo -e ${green}11. ${cyan}配置反向WebSocket${background}
+    echo -e ${green}12. ${cyan}音乐签名配置${background}
     echo -e ${green}0.  ${cyan}退出${background}
     echo "========================="
     echo -e ${green}${APP_NAME}状态: ${condition}${background}
@@ -1931,15 +1961,15 @@ main() {
             ;;
         10)
             echo
-            configure_ws
+            manage_multi_instances
             ;;
         11)
             echo
-            configure_music_sign
+            configure_ws
             ;;
         12)
             echo
-            manage_multi_instances
+            configure_music_sign
             ;;
         0)
             exit
