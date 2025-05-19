@@ -87,12 +87,13 @@ Tmux_Name="$1"
 tmux_ls ${Tmux_Name} & > /dev/null 2>&1
 until meme_curl
 do
-    i=$((${i}+1))
+    sleep 1s
+    i=$((${i}+10)) # 每次步进10，
     a="${a}#"
     echo -ne "\r${i}% ${a}\r"
-    if [[ ${i} == 40 ]];then
+    if [[ ${i} == 100 ]];then
         echo
-        return 1
+        return 1 # 10秒后超时，返回错误码 1
     fi
 done
 echo
@@ -247,27 +248,30 @@ echo
 }
 
 Tmux_Start(){
-Start_Stop_Restart="启动"
-export Boolean=true
-tmux_new meme_generator "cd ${install_path}/meme-generator && source venv/bin/activate && while ${Boolean}; do python -m meme_generator.app; echo -e ${red}meme生成器关闭 正在重启${background}; sleep 2s; done"
-if tmux_gauge meme_generator
-then
-    echo
-    echo -en ${green}${Start_Stop_Restart}成功 是否打开窗口 [Y/N]:${background}
+    Start_Stop_Restart="启动"
+    export Boolean=true
+    tmux_new meme_generator "cd ${install_path}/meme-generator && source venv/bin/activate && while ${Boolean}; do python -m meme_generator.app; echo -e ${red}meme生成器关闭 正在重启${background}; sleep 2s; done"
+    if tmux_gauge meme_generator
+    then
+        echo
+        echo -en ${green}${Start_Stop_Restart}成功 是否打开窗口 [Y/N]:${background}
+    else
+        echo
+        echo -en ${green}${Start_Stop_Restart}等待超时 是否打开窗口 [Y/N]:${background}
+    fi
     read YN
     case ${YN} in
     Y|y)
         bot_tmux_attach_log meme_generator
     ;;
     *)
-        # 设置自动更新
+        # 询问是否开启自动更新
         setup_auto_update
         echo -en ${cyan}回车返回${background}
         read
         echo
     ;;
     esac
-fi
 }
 
 Pm2_Start(){
@@ -286,7 +290,7 @@ then
             echo
             ;;
         *)
-            # 设置自动更新
+            # 询问是否开启自动更新
             setup_auto_update
             ;;
         esac
@@ -303,8 +307,8 @@ echo
 echo -e ${white}"====="${green}呆毛版-meme生成器${white}"====="${background}
 echo -e ${cyan}请选择启动方式${background}
 echo -e  ${green}1.  ${cyan}前台启动${background}
-echo -e  ${green}2.  ${cyan}TMUX后台启动${background}
-echo -e  ${green}3.  ${cyan}PM2后台启动${background}
+echo -e  ${green}2.  ${cyan}TMUX后台启动（推荐）${background}
+# echo -e  ${green}3.  ${cyan}PM2后台启动${background}
 echo "========================="
 echo -en ${green}请输入您的选项: ${background};read num
 case ${num} in 
@@ -314,9 +318,9 @@ Foreground_Start
 2)
 Tmux_Start
 ;;
-3)
-Pm2_Start
-;;
+# 3)
+# Pm2_Start # 因为自动更新重启后使用 tmux 所以关闭这个选项
+# ;;
 *)
 echo
 echo -e ${red}输入错误${background}
@@ -527,14 +531,43 @@ auto_update_meme_generator(){
 }
 
 setup_auto_update(){
+  echo -en ${yellow}是否开启meme生成器自动更新? [Y/n]:${background};read yn
+  echo -e ${cyan}启动meme生成器之后将会在每天凌晨1点自动同步更新 meme GitHub 仓库并重启${background}
+  case ${yn} in
+  N|n)
+    # 如果用户选择不开启自动更新，但已经存在cron任务，则删除它
+    if crontab -l 2>/dev/null | grep -q "meme_generator_auto_update"; then
+      crontab -l 2>/dev/null | grep -v "meme_generator_auto_update" | crontab -
+      echo -e ${yellow}已关闭meme生成器的自动更新${background}
+    fi
+    ;;
+  *)
+    script_path=$(readlink -f "$0")
+    # 检查是否已经存在相同的cron任务
+    if ! crontab -l 2>/dev/null | grep -q "meme_generator_auto_update"; then
+      # 创建临时文件存储当前crontab
+      (crontab -l 2>/dev/null; echo "0 1 * * * bash ${script_path} auto_update # meme_generator_auto_update") | crontab -
+      echo -e ${green}已设置每天凌晨1点自动更新meme生成器${background}
+      echo -e ${cyan}自动更新日志位置: ${HOME}/.config/meme_generator/auto_update.log${background}
+    fi
+    ;;
+  esac
+}
+
+toggle_auto_update(){
   script_path=$(readlink -f "$0")
-  # 检查是否已经存在相同的cron任务
-  if ! crontab -l 2>/dev/null | grep -q "meme_generator_auto_update"; then
-    # 创建临时文件存储当前crontab
+  if crontab -l 2>/dev/null | grep -q "meme_generator_auto_update"; then
+    # 如果已经存在，则删除自动更新的cron任务
+    crontab -l 2>/dev/null | grep -v "meme_generator_auto_update" | crontab -
+    echo -e ${yellow}已关闭meme生成器的自动更新${background}
+  else
+    # 如果不存在，则添加自动更新的cron任务
     (crontab -l 2>/dev/null; echo "0 1 * * * bash ${script_path} auto_update # meme_generator_auto_update") | crontab -
-    echo -e ${green}已设置每天凌晨1点自动更新meme生成器${background}
+    echo -e ${green}已开启meme生成器的自动更新${background}
+    echo -e ${cyan}启动meme生成器之后将会在每天凌晨1点自动同步更新 meme GitHub 仓库并重启${background}
     echo -e ${cyan}自动更新日志位置: ${HOME}/.config/meme_generator/auto_update.log${background}
   fi
+  echo -en ${yellow}回车返回${background};read
 }
 
 main(){
@@ -542,6 +575,12 @@ main(){
 if [ "$1" = "auto_update" ]; then
   auto_update_meme_generator
   exit 0
+fi
+
+if crontab -l 2>/dev/null | grep -q "meme_generator_auto_update"; then
+    auto_update_condition="${green}[运行中]"
+else
+    auto_update_condition="${red}[未启动]"
 fi
 
 if [ -d ${install_path}/meme-generator ]; then
@@ -567,11 +606,12 @@ echo -e  ${green} 5.  ${cyan}更新meme生成器${background}
 echo -e  ${green} 6.  ${cyan}卸载meme生成器${background}
 echo -e  ${green} 7.  ${cyan}meme生成器日志${background}
 echo -e  ${green} 8.  ${cyan}修改端口${background}
+echo -e  ${green} 9.  ${cyan}自动更新设置${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}meme生成器脚本版本: ${Version}${background}
 echo -e ${green}meme生成器状态: ${condition}${background}
-echo -e ${green}说明:${cyan}启动meme生成器之后将会在每天凌晨1点自动同步更新 meme GitHub 仓库并重启${background}
+echo -e ${green}meme自动更新cron服务: ${auto_update_condition}${background}
 echo -e ${green}QQ群:${cyan}呆毛版-QQ群:285744328${background}
 echo "========================="
 echo
@@ -607,6 +647,10 @@ log_meme_generator
 8)
 echo
 change_port
+;;
+9)
+echo
+toggle_auto_update
 ;;
 0)
 exit

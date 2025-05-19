@@ -138,6 +138,9 @@ function Script_Install(){
     esac
     echo -e ${yellow} - ${cyan}正在安装${background}
     curl ${URL} > xdm
+    if [ -f "/usr/local/bin/bh" ]; then
+        rm -f /usr/local/bin/bh
+    fi
     mv -f xdm /usr/local/bin/xdm
     chmod +x /usr/local/bin/xdm
     echo
