@@ -282,7 +282,7 @@ tmux_new lagrangebot "while ${Boolean}; do cd $INSTALL_DIR && $INSTALL_DIR/Lagra
 echo
 echo -e ${green}新手说明：${background}
 echo -e ${cyan}1.首次启动需要打开窗口进行扫码登录；${background}
-echo -e ${cyan}2.TMUX中让窗口进入后台运行的快捷键为: Ctrl+b d ${background}
+echo -e ${cyan}2.进入TMUX窗口后，退出请按 Ctrl+B 然后按 D${background}
 echo -en ${green}${Start_Stop_Restart}成功 是否打开窗口 [Y/N]:${background}
 read YN
 case ${YN} in

@@ -35,7 +35,6 @@ fi
 
 config=$HOME/.config/meme_generator/config.toml
 install_path=$HOME/memeGenerator
-script_version="1.0.0"
 
 function tmux_new(){
 Tmux_Name="$1"
@@ -254,10 +253,10 @@ Tmux_Start(){
     if tmux_gauge meme_generator
     then
         echo
-        echo -en ${green}${Start_Stop_Restart}成功 是否打开窗口 [Y/N]:${background}
+        echo -en ${green}${Start_Stop_Restart}成功 是否打开窗口 进入TMUX窗口后，退出请按 Ctrl+B 然后按 D [Y/N]:${background}
     else
         echo
-        echo -en ${green}${Start_Stop_Restart}等待超时 是否打开窗口 [Y/N]:${background}
+        echo -en ${green}${Start_Stop_Restart}等待超时 是否打开窗口 进入TMUX窗口后，退出请按 Ctrl+B 然后按 D [Y/N]:${background}
     fi
     read YN
     case ${YN} in
@@ -435,20 +434,21 @@ echo -en ${yellow}回车返回${background};read
 }
 
 log_meme_generator(){
-Port=$(grep -E "port" ${config} | awk '{print $3}')
-if ! meme_curl
-then
-    echo -en ${red}meme生成器未启动 ${cyan}回车返回${background};read
-    echo
-    return
-fi
-if tmux_ls meme_generator > /dev/null 2>&1 
-then
-    bot_tmux_attach_log meme_generator
-elif pm2 show meme_generator | grep -q online > /dev/null 2>&1
-then
-    pm2 logs meme_generator
-fi
+  echo -en ${yellow}进入TMUX窗口后，退出请按 Ctrl+B 然后按 D${background};read
+  Port=$(grep -E "port" ${config} | awk '{print $3}')
+  if ! meme_curl
+  then
+      echo -en ${red}meme生成器未启动 ${cyan}回车返回${background};read
+      echo
+      return
+  fi
+  if tmux_ls meme_generator > /dev/null 2>&1 
+  then
+      bot_tmux_attach_log meme_generator
+  elif pm2 show meme_generator | grep -q online > /dev/null 2>&1
+  then
+      pm2 logs meme_generator
+  fi
 }
 
 change_port(){
@@ -591,9 +591,7 @@ if [ -d ${install_path}/meme-generator ]; then
     else
         condition="${red}[未启动]"
     fi
-    Version="${cyan}[${script_version}]"
 else
-    Version="${cyan}[${script_version}]"
     condition="${red}[未安装]"
 fi
 
@@ -605,13 +603,12 @@ echo -e  ${green} 4.  ${cyan}重启meme生成器${background}
 echo -e  ${green} 5.  ${cyan}更新meme生成器${background}
 echo -e  ${green} 6.  ${cyan}卸载meme生成器${background}
 echo -e  ${green} 7.  ${cyan}meme生成器日志${background}
-echo -e  ${green} 8.  ${cyan}修改端口${background}
-echo -e  ${green} 9.  ${cyan}自动更新设置${background}
+echo -e  ${green} 8.  ${cyan}修改端口号${background}
+echo -e  ${green} 9.  ${cyan}切换自动更新设置${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
-echo -e ${green}meme生成器脚本版本: ${Version}${background}
 echo -e ${green}meme生成器状态: ${condition}${background}
-echo -e ${green}meme自动更新cron服务: ${auto_update_condition}${background}
+echo -e ${green}meme自动更新服务: ${auto_update_condition}${background}
 echo -e ${green}QQ群:${cyan}呆毛版-QQ群:285744328${background}
 echo "========================="
 echo
