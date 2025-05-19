@@ -24,6 +24,8 @@
 - [x] ffmpeg安装
 - [x] 签名服务器部署
 - [x] 拉格朗日管理
+- [x] NapCat管理
+- [x] meme generator管理
 
 <br>
 <hr/>
@@ -34,7 +36,7 @@
 
 #### 安装方式
 
-> ###### `注意:` 如果您`已经`使用其他脚本部署过机器人,那么安装呆毛版脚本后,请第一时间执行`bh SWPKG`来检查软件包依赖,防止出现某些错误
+> ###### `注意:` 如果您`已经`使用其他脚本部署过机器人,那么安装呆毛版脚本后,请第一时间执行`xdm SWPKG`来检查软件包依赖,防止出现某些错误
 
 安装即`同意`[用户协议](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Manage/用户协议.txt)
 
@@ -84,11 +86,11 @@ bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/instal
 
 >打开呆毛版脚本的命令
 ```
-bh
+xdm
 ```
 >获取呆毛版脚本帮助的命令
 ```
-bh help
+xdm help
 ```
 >修复呆毛版脚本打不开的命令
 ```
@@ -96,7 +98,7 @@ bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/instal
 ```
 >删除呆毛版脚本的命令
 ```
-rm /usr/local/bin/bh
+rm /usr/local/bin/xdm
 ```
 
 </details>
@@ -111,3 +113,4 @@ rm /usr/local/bin/bh
 | :--------: | :--------: | :--------: |
 | 白狐脚本 | [☞Gitee](https://gitee.com/baihu433/Yunzai-Bot-Shell) | 云崽自动化部署及管理脚本 |
 | Lagrange | [☞GitHub](https://github.com/LagrangeDev/Lagrange.Core) | An Implementation of NTQQ Protocol, with Pure C#, Derived from Konata.Core |
+| NapCat | [☞GitHub](https://napneko.github.io/) | 现代化的基于 NTQQ 的 Bot 协议端实现 |

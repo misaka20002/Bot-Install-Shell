@@ -365,7 +365,7 @@ bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/instal
 
 安装完成后
 
-使用 `bh` 命令打开呆毛版脚本
+使用 `xdm` 命令打开呆毛版脚本
 
 <hr/>
 
@@ -515,7 +515,7 @@ tmoe proot ubuntu jammy arm64
 ```
 启动脚本:
 ```sh
-bh
+xdm
 ```
 
 <hr/>

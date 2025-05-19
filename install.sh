@@ -137,24 +137,24 @@ function Script_Install(){
             ;;
     esac
     echo -e ${yellow} - ${cyan}正在安装${background}
-    curl ${URL} > bh
-    mv -f bh /usr/local/bin/bh
-    chmod +x /usr/local/bin/bh
+    curl ${URL} > xdm
+    mv -f xdm /usr/local/bin/xdm
+    chmod +x /usr/local/bin/xdm
     echo
-    if ! bh help > /dev/null 2>&1;then
+    if ! xdm help > /dev/null 2>&1;then
         echo -e ${yellow} - ${red}安装失败${background}
         echo -e ${yellow} - ${cyan}正在尝试解决${background}
-        old_bh_bash='#!/bin/env bash'
-        new_bh_bash=$(command -v bash)
-        sed -i "s|${old_bh_bash}|#!${new_bh_bash}|g" /usr/local/bin/bh
-        #sed -i "s|'#!/bin/env bash'|#!$(command -v bash)|g" /usr/local/bin/bh
-        if ! bh help > /dev/null 2>&1;then
+        old_xdm_bash='#!/bin/env bash'
+        new_xdm_bash=$(command -v bash)
+        sed -i "s|${old_xdm_bash}|#!${new_xdm_bash}|g" /usr/local/bin/xdm
+        #sed -i "s|'#!/bin/env bash'|#!$(command -v bash)|g" /usr/local/bin/xdm
+        if ! xdm help > /dev/null 2>&1;then
             echo -e ${yellow} - ${red}解决失败${background}
             exit
         fi
     fi
     echo -e ${yellow} - ${yellow}安装成功${background}
-    echo -e ${yellow} - ${cyan}请使用 ${green}bh ${cyan}命令 打开脚本${background}
+    echo -e ${yellow} - ${cyan}请使用 ${green}xdm ${cyan}命令 打开脚本${background}
 }
 
 echo -e ${white}"====="${green}呆毛版-Script${white}"====="${background}

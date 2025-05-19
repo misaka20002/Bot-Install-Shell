@@ -113,17 +113,16 @@ exit
 
 function help(){
 echo -e ${green}===============================${background}
-echo -e ${cyan} bh"        | "${blue}呆毛版脚本${background}
-echo -e ${cyan} bh help"   | "${blue}呆毛版脚本帮助${background}
-echo -e ${cyan} bh PI"     | "${blue}插件管理脚本${background}
-echo -e ${cyan} bh SWPKG"  | "${blue}修复软件包依赖${background}
-echo -e ${cyan} bh QS"     | "${blue}拉格朗日管理脚本${background}
+echo -e ${green}         快捷方式${cyan}${background}
 echo -e ${green}===============================${background}
-echo -e ${cyan} bh yz ${blue}Yunzai-Bot根目录${background}
-echo -e ${cyan} bh mz ${blue}Miao-Yunzai根目录${background}
-echo -e ${cyan} bh tz ${blue}TRSS-Yunzai根目录${background}
+echo -e ${cyan} xdm"        | "${blue}呆毛版脚本${background}
+echo -e ${cyan} xdm help"   | "${blue}呆毛版脚本帮助${background}
+echo -e ${cyan} xdm PI"     | "${blue}插件管理脚本${background}
+echo -e ${cyan} xdm SWPKG"  | "${blue}修复软件包依赖${background}
 echo -e ${green}===============================${background}
-echo -e ${yellow} 脚本完全免费 打击倒卖 从你我做起${background}
+echo -e ${cyan} xdm mz ${blue}Miao-Yunzai根目录${background}
+echo -e ${cyan} xdm tz ${blue}TRSS-Yunzai根目录${background}
+echo -e ${green}===============================${background}
 echo -e ${green} QQ群:${cyan}呆毛版-QQ群:285744328${background}
 echo -e ${green}=============================${background}
 }
@@ -134,10 +133,6 @@ exit
 ;;
 PI)
 bash <(curl -sL https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
-exit
-;;
-QS)
-bash <(curl -sL https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/Lagrange_OneBot.sh)
 exit
 ;;
 SWPKG)
@@ -210,26 +205,30 @@ Runing
 esac
 ##############################
 function UPDATE(){
-version_date=$(curl -sL ${VersionURL})
-new_version="$(echo ${version_date} | grep version | awk '{print $2}' )"
-if [ "${new_version}" != "${old_version}" ];then
-    echo -e ${cyan}正在更新${background}
-    #echo -e https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/Main.sh
-    curl -o bh ${URL}
-    if bash bh help > /dev/null 2>&1
-    then
-        rm /usr/local/bin/bh
-        mv bh /usr/local/bin/bh
-        chmod +x /usr/local/bin/bh
-        echo -en ${cyan}更新完成 请重新启动${background};read
-        exit
-    else
-        echo -en ${red}出现错误 跳过更新 ${cyan}回车继续${background};read
-        rm bh
+    version_date=$(curl -sL ${VersionURL})
+    new_version="$(echo "${version_date}" | grep 'version:' | awk '{print $2}')"
+    help_message="$(echo "${version_date}" | grep 'help:' | sed 's/help: //')"
+    
+    if [ "${new_version}" != "${old_version}" ];then
+        echo -e ${cyan}正在更新${background}
+        curl -o xdm ${URL}
+        
+        if bash xdm help; then
+            if [ -f "/usr/local/bin/bh" ]; then
+                rm -f /usr/local/bin/bh
+            fi
+            rm -f /usr/local/bin/xdm
+            mv xdm /usr/local/bin/xdm
+            chmod +x /usr/local/bin/xdm
+            echo -en "${cyan}版本${new_version} 更新完成 ${help_message}${background}";read
+            exit
+        else
+            echo -en "${red}版本${new_version} 更新出现错误 跳过更新 ${help_message} ${cyan}回车继续${background}";read
+            rm xdm
+        fi
     fi
-fi
 }
-old_version="1.1.23"
+old_version="1.1.37"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -319,7 +318,7 @@ case $1 in
     elif [ ${res} -eq 3 ];then
       AttachPage "在Pm2后台启动" "日志"
     else
-      if tmux new -s ${TmuxName} -d "bh ${BotName} n"
+      if tmux new -s ${TmuxName} -d "xdm ${BotName} n"
       then
         ProgressBar "启动"
       else
@@ -373,7 +372,7 @@ case $1 in
     if [ ${res} -eq 1 ];then
       if tmux kill-session -t ${TmuxName}
       then
-        tmux new -s ${TmuxName} -d "bh ${BotName} n"
+        tmux new -s ${TmuxName} -d "xdm ${BotName} n"
         ProgressBar "启动"
         ${DialogWhiptail} --title "呆毛版-Script" --msgbox "重启成功" 10 60
       fi
@@ -386,7 +385,7 @@ case $1 in
     elif [ ${res} -eq 3 ];then
       if kill $(ps all | sed /grep/d | grep -q "${BOT_COMMAND}")
       then
-        bh ${BotName} n
+        xdm ${BotName} n
       fi
     else
       ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未启动]" 10 60
@@ -710,10 +709,11 @@ case ${Number} in
         MirrorCheck
         URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
         bash <(curl -sL ${URL}/NapCat.sh)
+        ;;
     5)
         MirrorCheck
-        URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/meme_generator"
-        bash <(curl -sL ${URL}/NapCat.sh)
+        URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
+        bash <(curl -sL ${URL}/meme_generator.sh)
         ;;
           0)
     	        exit 0
