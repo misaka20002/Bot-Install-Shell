@@ -1,21 +1,21 @@
 #!/bin/env bash
-if ping -c 1 gitee.com > /dev/null 2>&1
+if ping -c 1 github.com > /dev/null 2>&1
 then
-  GitMirror="gitee.com"
+  GitMirror="https://ghfast.top/"
   URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
 elif ping -c 1 github.com > /dev/null 2>&1
 then
-  GitMirror="gitee.com"
+  GitMirror=""
   URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
 fi
 
 install_Bot(){
   if [ "${BotName}" == "Miao-Yunzai" ]
   then
-    Git=https://ghfast.top/https://github.com/misaka20002/Miao-Yunzai.git
+    Git=${GitMirror}https://github.com/misaka20002/Miao-Yunzai.git
   elif [ "${BotName}" == "TRSS-Yunzai" ]
   then
-     Git=https://${GitMirror}/TimeRainStarSky/Yunzai.git
+     Git=${GitMirror}https://github.com/AIGC-Yunzai/TRSS-Yunzai-Lagrange.git
   fi
   echo -e ${cyan}正在克隆${BotName}${background}
   if ! git clone --depth=1 ${Git} $HOME/${BotName};then
@@ -25,7 +25,7 @@ install_Bot(){
 }
 install_Miao_Plugin(){
   echo -e ${cyan}正在克隆喵喵插件${background}
-  Git=https://ghfast.top/https://github.com/yoimiya-kokomi/miao-plugin.git
+  Git=${GitMirror}https://github.com/yoimiya-kokomi/miao-plugin.git
   if ! git clone --depth=1 ${Git} $HOME/${BotName}/plugins/miao-plugin;then
     echo -e ${red}克隆失败${background}
     exit
@@ -33,7 +33,7 @@ install_Miao_Plugin(){
 }
 install_Genshin(){
   echo -e ${cyan}正在克隆原神组件${background}
-  Git=https://${GitMirror}/TimeRainStarSky/Yunzai-genshin
+  Git=${GitMirror}https://github.com/TimeRainStarSky/Yunzai-genshin
   if ! git clone --depth=1 ${Git} $HOME/${BotName}/plugins/genshin;then
     echo -e ${red}克隆失败${background}
     exit
