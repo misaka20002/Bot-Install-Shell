@@ -579,58 +579,87 @@ uninstall_NapCat() {
     echo -e ${yellow}是否确认卸载${APP_NAME}? [y/N]${background};read yn
     case ${yn} in
         Y|y)
+            # 停止所有运行中的实例
+            echo -e ${yellow}正在停止所有运行中的${APP_NAME}实例...${background}
+            
+            # 停止主实例（如果存在）
             if check_running; then
-                echo -e ${yellow}正在停止${APP_NAME}...${background}
-                stop_NapCat > /dev/null 2>&1
+                tmux send-keys -t ${TMUX_NAME} "Boolean=false" C-m
+                sleep 1
+                tmux kill-session -t ${TMUX_NAME}
             fi
+            
+            # 停止所有QQ号实例
+            for session in $(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}_" | cut -d: -f1); do
+                qq_number=${session#${TMUX_NAME}_}
+                echo -e ${yellow}正在停止QQ号 ${cyan}${qq_number}${yellow}...${background}
+                tmux send-keys -t ${session} "Boolean=false" C-m
+                sleep 1
+                tmux kill-session -t ${session}
+            done
             
             echo -e ${yellow}正在卸载${APP_NAME}...${background}
             
-            # 删除NapCat安装目录
-            if [ -d "/QQ/resources/app/app_launcher/napcat" ]; then
-                echo -e ${yellow}正在删除NapCat安装目录...${background}
-                rm -rf /QQ/resources/app/app_launcher/napcat
-            fi
-            
-            # 检查并删除QQ主目录
-            if [ -d "/QQ" ]; then
-                echo -e ${yellow}是否删除完整的QQ目录? [y/N]${background};read delqq
-                case ${delqq} in
-                    Y|y)
-                        echo -e ${yellow}正在删除QQ目录...${background}
-                        rm -rf /QQ
-                        ;;
-                    *)
-                        echo -e ${yellow}保留QQ主目录${background}
-                        ;;
-                esac
-            fi
-            
-            # 因为NapCat没有提供卸载脚本，所以我们尝试移除已知的文件和包
+            # 使用包管理器卸载QQ（Ubuntu方式）
             if [ $(command -v apt) ]; then
-                apt remove -y qq*
+                echo -e ${yellow}使用apt卸载QQ...${background}
+                apt purge -y qq* linuxqq* 2>/dev/null
                 apt autoremove -y
             elif [ $(command -v yum) ]; then
-                yum remove -y qq*
+                echo -e ${yellow}使用yum卸载QQ...${background}
+                yum remove -y qq* linuxqq* 2>/dev/null
                 yum autoremove -y
             elif [ $(command -v dnf) ]; then
-                dnf remove -y qq*
+                echo -e ${yellow}使用dnf卸载QQ...${background}
+                dnf remove -y qq* linuxqq* 2>/dev/null
                 dnf autoremove -y
             elif [ $(command -v pacman) ]; then
-                pacman -Rns --noconfirm qq
+                echo -e ${yellow}使用pacman卸载QQ...${background}
+                pacman -Rns --noconfirm qq linuxqq 2>/dev/null
+            else
+                echo -e ${red}不支持的Linux发行版，尝试手动删除文件${background}
             fi
             
-            # 清理配置文件
-            rm -rf ~/.config/qq
+            # 彻底删除所有相关目录和文件
+            echo -e ${yellow}正在删除所有QQ相关文件和数据...${background}
             
-            # 清理可能的桌面和应用程序入口
-            rm -f /usr/share/applications/qq.desktop
-            rm -f ~/Desktop/qq.desktop
-
-            # 清理命令行工具
+            # 删除NapCat和QQ主目录
+            rm -rf /opt/QQ
+            rm -rf /QQ
+            
+            # 删除所有用户的QQ配置和数据
+            rm -rf /root/.config/qq
+            rm -rf /home/*/.config/qq
+            
+            # 删除所有用户的NapCat配置和数据
+            rm -rf /root/.config/napcat
+            rm -rf /home/*/.config/napcat
+            
+            # 删除所有用户的QQ数据目录
+            rm -rf /root/.linuxqq
+            rm -rf /home/*/.linuxqq
+            
+            # 删除系统级别的QQ配置和数据
+            rm -rf /etc/QQ
+            rm -rf /etc/napcat
+            
+            # 删除应用程序快捷方式和菜单项
+            rm -f /usr/share/applications/qq*.desktop
+            rm -f /usr/share/applications/linuxqq*.desktop
+            rm -f /usr/local/share/applications/qq*.desktop
+            
+            # 删除桌面快捷方式
+            rm -f /root/Desktop/qq*.desktop
+            rm -f /home/*/Desktop/qq*.desktop
+            
+            # 删除可执行文件
+            rm -f /usr/bin/qq
+            rm -f /usr/local/bin/qq
+            rm -f /usr/bin/napcat
             rm -f /usr/local/bin/napcat
             
-            echo -e ${green}${APP_NAME}卸载完成${background}
+            echo -e ${green}${APP_NAME}及所有相关数据已彻底卸载完成${background}
+            echo -e ${yellow}若要重新安装，请重新运行安装命令${background}
             echo -en ${cyan}回车返回${background};read
             ;;
         *)

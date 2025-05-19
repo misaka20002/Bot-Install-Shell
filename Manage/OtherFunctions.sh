@@ -198,13 +198,19 @@ pnpm install puppeteer@13.7.0 -w
 }
 
 CheckAndInstallNvm() {
+    # 先尝试加载 NVM 环境
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+    
+    # 然后检查是否可用
     if ! command -v nvm &> /dev/null; then
         echo -e ${yellow}未检测到 NVM，正在安装...${background}
         
         # 安装 NVM
         curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
         
-        # 加载 NVM
+        # 重新加载 NVM
         export NVM_DIR="$HOME/.nvm"
         [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
         [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
