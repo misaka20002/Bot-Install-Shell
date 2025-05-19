@@ -1,19 +1,16 @@
 <h1 align="center">Termux-Install</h1>
-<hr/>
 
-#### 准备工作
+
+## 安装 Termux APK
 
 | 应用 | 下载链接|
 |----|----|
-| Termux | [下载链接](https://f-droid.org/repo/com.termux_118.apk) |
+| [Termux](https://github.com/termux/termux-app/releases) （推荐） | [下载链接](https://f-droid.org/repo/com.termux_1021.apk) |
+| ZeroTermux | [下载链接](https://github.com/hanxinhao000/ZeroTermux/releases/tag/release) |
 
-<hr/>
+---
 
-#### 教程开始
-
-<hr/>
-
-##### 使用下面的命令安装TMOE脚本
+## 安装TMOE脚本
 
 ```sh
 bash -c "$(curl -L gitee.com/mo2/linux/raw/2/2)"
@@ -352,7 +349,6 @@ apt install git curl wget -y
 <hr/>
 
 然后安装呆毛版脚本
-![bh.png](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/bh/bh.png)
 
 ```sh
 bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/install.sh)
@@ -363,167 +359,11 @@ bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/instal
 
 <hr>
 
-安装完成后
+# 安装云崽
 
-使用 `xdm` 命令打开呆毛版脚本
+- 使用 `xdm` 命令打开呆毛版脚本
+- 选择 `TRSS-Yunzai` 并 `回车` 来安装TRSS崽
+- 返回主页，选择 `拉格朗日` 或者 `NapCat` 安装、配置接口后启动  `拉格朗日` 或者 `NapCat` 
+- 启动 `TRSS-Yunzai` 
+- 再后台正常启动后，可以选择自己喜欢的插件安装啦~
 
-<hr/>
-
-然后会出现以下界面
-
-![mz1.png](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/bh/bhmiao.png)
-
-选择第一个 `1 Miao-Yunzai` 并 `回车` 来安装喵崽
-
-<hr/>
-
-然后会出现以下界面
-询问是否安装喵崽
-
-![mz2.png](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/bh/mz2.png)
-
-选择 `安装` 并 `回车` 来确定安装喵崽
-
-<hr/>
-
-等他跑完后，会出现以下界面
-
-![bhmain.png](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/bh/bhmiao.png)
-
-选择`0 返回`
-
-<hr/>
-
-然后我们来部署签名服务器
-
-![](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/bh/bhmiao2.png)
-
-选择第三个 `3 签名服务器管理`
-
-<hr>
-
-然后会提示这个
-
-![](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/bh/qsign1.png)
-
-填入`1` 并 `回车`
-
-<hr>
-
-然后会让你选择签名服务器的QQ共享库版本
-
-![qsign.png](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/bh/qsign.png)
-
-推荐: `9. HD: 8.9.78` 
-填入 `9` 并回车
-
-<hr>
-
-然后会提示 `安装完成 是否启动?[Y/n]`
-
-填大写的 `Y` 并 `回车`
-
-然后会提示选择启动方式
-
-![qsign3.png](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/bh/qsign3.png)
-
-推荐: `2. TMUX后台启动` 
-填入 `2` 并回车
-
-<hr/>
-
-然后会提示 `启动成功 是否打开窗口 [Y/N]:`
-
-填入 `N` 并回车<br>
-如果提示 `回车返回` 就回车一下
-
-<hr>
-
-随后 它会返回到签名服务器的管理界面
-
-填 `0` 并 `回车`
-
-返回到BOT的管理页面
-
-<hr>
-
-然后选择 `1 Miao-Yunzai` 并`回车`进入Miao-Yunzai的管理页面
-
-这里注意:<br>
-手机用户请选择 `2 前台启动` <br>
-服务器用户请选择 `1 启动运行`
-
-<hr>
-
-1.`请输入机器人QQ号(建议用小号)：` <br>
-↑这一项 填你`机器人`的QQ号
-
-<hr/>
-
-2.`请输入登录密码(为空则扫码登录)：`<br>
-↑这一项 填你`机器人`的密码[注意:密码`不显示`出来]
-
-<hr/>
-
-3.`请选择登录端口：`<br>
-↑这一项 填你`机器人`的登录端口[也称`登录设备`],请选择`aPad`
-
-<hr/>
-
-4.`请输入主人QQ号：`<br>
-↑这一项 填你`机器人的管理员`账号
-
-<hr/>
-
-5.`请输入签名API地址（可留空）：`<br>
-↑这一项 填 `http://0.0.0.0:5200/sign?key=fox`
-
-<hr/>
-
-如果提示 `? 触发滑动验证，需要获取ticket通过验证，请选择获取方式: (Use arrow keys)`
-
-下载 [`Sakura Login Solver`](https://mirrors.chenby.cn/https://github.com/KasukuSakura/mirai-login-solver-sakura/releases/download/v0.0.12/apk-release.apk)(这是一个可以点击的链接)
-
-选择 `滑动验证app请求码获取` 并 `回车`
-
-![login1.png](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/img/bh/login2.png)
-
-然后它会提示
- `请打开滑动验证app，输入请求码【XXXX】，然后完成滑动验证`<br>
- 
- `记住`【 】里面的数字 填到 `Sakura Login Solver` 然后点击 `下一步`<br>
- 
-过完验证之后 到`Termux` 回车确定一下
-
-<hr/>
-
-之后机器人就被启动成功了<br>
-赶快去向机器人分别发送`#帮助`和`#喵喵帮助`<br>
-开始享用吧
-
-[注意 第一次启动 可能会启动失败 请重启]
-
-<hr/>
-
-注意事项:
-
-1.大退termux之后 请使用下面的命令来启动
-
-启动容器:
-```sh
-tmoe proot ubuntu jammy arm64
-```
-启动脚本:
-```sh
-xdm
-```
-
-<hr/>
-
-如果在安装过程中遇到问题，请添加群聊[q群:879718035] 
-
-有困难大家一起解决，不要硬挺着。
-
-日常闲聊也可以加入，欢迎来玩。
-
-教程到这里就结束了，希望对你有帮助，拜~
