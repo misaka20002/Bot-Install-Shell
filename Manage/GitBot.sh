@@ -33,7 +33,7 @@ install_Miao_Plugin(){
 }
 install_Genshin(){
   echo -e ${cyan}正在克隆原神组件${background}
-  Git=${GitMirror}https://github.com/TimeRainStarSky/Yunzai-genshin
+  Git=${GitMirror}https://github.com/Misaka21011/Yunzai-genshin
   if ! git clone --depth=1 ${Git} $HOME/${BotName}/plugins/genshin;then
     echo -e ${red}克隆失败${background}
     exit
