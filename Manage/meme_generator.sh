@@ -148,7 +148,7 @@ cd ${install_path}
 
 # 克隆meme-generator仓库
 echo -e ${green}克隆meme-generator仓库...${background}
-git clone ${GithubMirror}https://github.com/misaka20002/meme-generator.git
+git clone ${GithubMirror}https://github.com/MemeCrafters/meme-generator.git
 
 # 创建虚拟环境
 cd ${install_path}/meme-generator
@@ -163,7 +163,7 @@ mkdir -p $HOME/.config/meme_generator
 cat > ${config} << EOF
 [meme]
 load_builtin_memes = true  # 是否加载内置表情包
-meme_dirs = ["${install_path}/meme-generator-contrib/memes"]  # 加载其他位置的表情包，填写文件夹路径
+meme_dirs = ["${install_path}/meme-generator-contrib/memes", "${install_path}/meme_emoji/emoji"]  # 加载其他位置的表情包，填写文件夹路径
 meme_disabled_list = []  # 禁用的表情包列表，填写表情的 \`key\`
 
 [resource]
@@ -200,10 +200,15 @@ cd ${install_path}/meme-generator
 source venv/bin/activate
 python -m meme_generator.cli meme download
 
-# 下载额外图片
-echo -e ${green}下载额外图片...${background}
+# 下载额外图片 - 1
+echo -e ${green}下载额外图片meme-generator-contrib...${background}
 cd ${install_path}
-git clone ${GithubMirror}https://github.com/misaka20002/meme-generator-contrib.git
+git clone ${GithubMirror}https://github.com/MemeCrafters/meme-generator-contrib.git
+
+# 下载额外图片 - 2
+echo -e ${green}下载额外图片meme_emoji...${background}
+cd ${install_path}
+git clone ${GithubMirror}https://github.com/anyliew/meme_emoji.git
 
 # 安装字体
 echo -e ${green}安装字体...${background}
@@ -398,6 +403,12 @@ git fetch --all
 git reset --hard origin/main
 git pull
 
+echo -e ${yellow}正在更新meme_emoji...${background}
+cd ${install_path}/meme_emoji
+git fetch --all
+git reset --hard origin/main
+git pull
+
 echo -e ${green}更新完成！${background}
 echo -en ${yellow}是否重新启动meme生成器? [Y/n]${background};read yn
 case ${yn} in
@@ -515,6 +526,13 @@ auto_update_meme_generator(){
   # 更新meme-generator-contrib
   echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在更新meme-generator-contrib...${background}" >> ${log_file}
   cd ${install_path}/meme-generator-contrib
+  git fetch --all >> ${log_file} 2>&1
+  git reset --hard origin/main >> ${log_file} 2>&1
+  git pull >> ${log_file} 2>&1
+
+  # 更新meme_emoji
+  echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在更新meme_emoji...${background}" >> ${log_file}
+  cd ${install_path}/meme_emoji
   git fetch --all >> ${log_file} 2>&1
   git reset --hard origin/main >> ${log_file} 2>&1
   git pull >> ${log_file} 2>&1
