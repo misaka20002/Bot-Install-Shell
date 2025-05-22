@@ -100,8 +100,8 @@ function Script_Install(){
           GitMirror="gitee.com"
           URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
       else 
-          GitMirror="gitee.com"
-          URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
+          GitMirror="github.com"
+          URL="https://github.com/misaka20002/Bot-Install-Shell/raw/master/version"
       fi
     fi
     version_date=$(curl ${URL})
@@ -129,7 +129,7 @@ function Script_Install(){
             ;;
         2)
             export Git_Mirror=github
-            URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/Main.sh"
+            URL="https://github.com/misaka20002/Bot-Install-Shell/raw/master/Manage/Main.sh"
             ;;
         *)
             echo -e ${red}输入错误${background}
