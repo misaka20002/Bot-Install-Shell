@@ -356,7 +356,7 @@ bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/instal
 bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/install.sh)
 ```
 
-请阅读\[[用户协议](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Manage/用户协议.txt)\]
+请阅读\[[用户协议](../Manage/用户协议.txt)\]
 填入 `同意安装` 以开始安装
 
 <hr>

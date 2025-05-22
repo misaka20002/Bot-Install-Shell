@@ -18,7 +18,7 @@ elif [ $(command -v yum) ];then
     pkg_install="yum"
 fi
 
-bash <(curl -sL https://${Git_Mirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/BOT-PKG.sh)
+bash <(curl -sL ${GitMirror}/raw/master/Manage/BOT-PKG.sh)
 
 if ! ${pkg_install} list installed xz >/dev/null 2>&1
     then

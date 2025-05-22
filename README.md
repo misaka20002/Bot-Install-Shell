@@ -29,7 +29,7 @@
 
 > 注意: 如果您 **已经** 使用其他脚本部署过机器人,那么安装呆毛版脚本后,请第一时间执行 `xdm SWPKG` 来检查软件包依赖,防止出现某些错误。
 >
-> 安装前需要 `同意` [用户协议](https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Manage/用户协议.txt)
+> 安装前需要 `同意` [用户协议](./Manage/用户协议.txt)
 
 <details ><summary>① 服务器安装方法</summary>
 
@@ -62,7 +62,7 @@ bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/inst
 
 ###### 注意:除非您知道您在干什么,否则请不要使用该项!!!
 
-```
+```sh
 bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/install.sh)
 # 或
 bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/install.sh)
@@ -75,21 +75,21 @@ bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/inst
 <details ><summary>展开/收起</summary>
 
 - 打开呆毛版脚本的命令
-    ```
+    ```sh
     xdm
     ```
 - 获取呆毛版脚本帮助的命令
-    ```
+    ```sh
     xdm help
     ```
 - 修复呆毛版脚本打不开的命令
-    ```
+    ```sh
     bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/install.sh)
     #或
     bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/install.sh)
     ```
 - 删除呆毛版脚本的命令
-    ```
+    ```sh
     rm /usr/local/bin/xdm
     ```
 

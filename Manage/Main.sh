@@ -54,9 +54,9 @@ URL="https://ipinfo.io"
 Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
 if [ ${Address} = "CN" ]
 then
-    export GitMirror="gitee.com"
+    export GitMirror="https://gitee.com/Misaka21011/Yunzai-Bot-Shell"
 else 
-    export GitMirror="gitee.com"
+    export GitMirror="https://github.com/misaka20002/Bot-Install-Shell"
 fi
 }
 ##############################
@@ -136,7 +136,7 @@ bash <(curl -sL https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-
 exit
 ;;
 SWPKG)
-bash <(curl -sL https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/BOT_INSTALL.sh)
+bash <(curl -sL ${GitMirror}/raw/master/Manage/BOT_INSTALL.sh)
 exit
 ;;
 YZ|Yunzai|Yunzai-Bot)
@@ -228,7 +228,7 @@ function UPDATE(){
         fi
     fi
 }
-old_version="1.1.38"
+old_version="1.1.39"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -606,7 +606,7 @@ case ${Number} in
         ;;
     10)
         MirrorCheck
-        bash <(curl -sL https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/OtherFunctions.sh)
+        bash <(curl -sL ${GitMirror}/raw/master/Manage/OtherFunctions.sh)
         ;;
     0)
         return
@@ -696,22 +696,22 @@ case ${Number} in
         ;;
     3)
         MirrorCheck
-        URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
+        URL="${GitMirror}/raw/master/Manage"
         bash <(curl -sL ${URL}/Lagrange_OneBot.sh)
         ;;
     4)
         MirrorCheck
-        URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
+        URL="${GitMirror}/raw/master/Manage"
         bash <(curl -sL ${URL}/NapCat.sh)
         ;;
     5)
         MirrorCheck
-        URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
+        URL="${GitMirror}/raw/master/Manage"
         bash <(curl -sL ${URL}/meme_generator.sh)
         ;;
     6)
         MirrorCheck
-        URL="https://${GitMirror}/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
+        URL="${GitMirror}/raw/master/Manage"
         bash <(curl -sL ${URL}/SYS_Manage.sh)
         ;;
           0)
