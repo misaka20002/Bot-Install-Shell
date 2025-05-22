@@ -588,6 +588,106 @@ toggle_auto_update(){
   echo -en ${yellow}回车返回${background};read
 }
 
+rewrite_config(){
+    if [ ! -d ${install_path}/meme-generator ]; then
+        echo -e ${red}您还没有安装meme生成器！${background}
+        echo -en ${yellow}回车返回${background};read
+        return
+    fi
+    
+    echo -e ${yellow}此操作将重写meme生成器的配置文件${background}
+    echo -e ${red}警告：您的自定义设置将会丢失${background}
+    echo -en ${cyan}是否继续？[y/N]: ${background};read confirm
+    
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        echo -e ${yellow}已取消操作${background}
+        echo -en ${yellow}回车返回${background};read
+        return
+    fi
+    
+    # 检查是否需要先停止服务
+    meme_was_running=false
+    if meme_curl; then
+        meme_was_running=true
+        echo -e ${yellow}正在停止meme生成器...${background}
+        tmux_kill_session meme_generator > /dev/null 2>&1
+        pm2 delete meme_generator > /dev/null 2>&1
+        PID=$(ps aux | grep "meme_generator.app" | sed '/grep/d' | awk '{print $2}')
+        if [ ! -z "${PID}" ]; then
+            kill -9 ${PID}
+        fi
+    fi
+    
+    # 备份当前配置
+    if [ -f ${config} ]; then
+        backup_file="${config}.backup.$(date +%Y%m%d%H%M%S)"
+        cp ${config} ${backup_file}
+        echo -e ${green}已备份原配置文件至: ${backup_file}${background}
+    fi
+    
+    # 创建配置文件目录
+    mkdir -p $HOME/.config/meme_generator
+    
+    # 重写配置文件
+    cat > ${config} << EOF
+[meme]
+load_builtin_memes = true  # 是否加载内置表情包
+meme_dirs = ["${install_path}/meme-generator-contrib/memes", "${install_path}/meme_emoji/emoji"]  # 加载其他位置的表情包，填写文件夹路径
+meme_disabled_list = []  # 禁用的表情包列表，填写表情的 \`key\`
+
+[resource]
+# 下载内置表情包图片时的资源链接，下载时选择最快的站点
+resource_urls = [
+  "https://raw.githubusercontent.com/MeetWq/meme-generator/",
+  "https://ghproxy.com/https://raw.githubusercontent.com/MeetWq/meme-generator/",
+  "https://fastly.jsdelivr.net/gh/MeetWq/meme-generator@",
+  "https://raw.fastgit.org/MeetWq/meme-generator/",
+  "https://raw.fgit.ml/MeetWq/meme-generator/",
+  "https://raw.gitmirror.com/MeetWq/meme-generator/",
+  "https://raw.kgithub.com/MeetWq/meme-generator/",
+]
+
+[gif]
+gif_max_size = 10.0  # 限制生成的 gif 文件大小，单位为 Mb
+gif_max_frames = 100  # 限制生成的 gif 文件帧数
+
+[translate]
+baidu_trans_appid = ""  # 百度翻译api相关，表情包 \`dianzhongdian\` 需要使用
+baidu_trans_apikey = ""  # 可在 百度翻译开放平台 (http://api.fanyi.baidu.com) 申请
+
+[server]
+host = "0.0.0.0"  # web server 监听地址
+port = 50835  # web server 端口
+
+[log]
+log_level = "INFO"  # 日志等级
+EOF
+
+    echo -e ${green}配置文件已重写为默认设置${background}
+    
+    # 询问是否重启服务
+    if [ "$meme_was_running" = true ]; then
+        echo -en ${yellow}是否重新启动meme生成器? [Y/n]:${background};read yn
+        case ${yn} in
+        N|n)
+            echo -e ${yellow}请记得手动重启meme生成器以应用新配置${background}
+            ;;
+        *)
+            echo -e ${yellow}正在重启meme生成器...${background}
+            export Boolean=true
+            tmux_new meme_generator "cd ${install_path}/meme-generator && source venv/bin/activate && while ${Boolean}; do python -m meme_generator.app; echo -e ${red}meme生成器关闭 正在重启${background}; sleep 2s; done"
+            if tmux_gauge meme_generator; then
+                echo -e ${green}meme生成器已成功重启${background}
+            else
+                echo -e ${red}meme生成器重启超时，请手动检查${background}
+            fi
+            ;;
+        esac
+    fi
+    
+    echo -en ${yellow}回车返回${background};read
+}
+
 main(){
 # 检查是否是自动更新模式
 if [ "$1" = "auto_update" ]; then
@@ -623,6 +723,7 @@ echo -e  ${green} 6.  ${cyan}卸载meme生成器${background}
 echo -e  ${green} 7.  ${cyan}meme生成器日志${background}
 echo -e  ${green} 8.  ${cyan}修改端口号${background}
 echo -e  ${green} 9.  ${cyan}切换自动更新设置${background}
+echo -e  ${green} 10.  ${cyan}重写配置文件${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}meme生成器状态: ${condition}${background}
@@ -666,6 +767,10 @@ change_port
 9)
 echo
 toggle_auto_update
+;;
+10)
+echo
+rewrite_config
 ;;
 0)
 exit
