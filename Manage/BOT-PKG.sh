@@ -30,7 +30,7 @@ do
             exit
     fi
     i=$((${i}+1))
-    echo -en ${red}命令执行失败 ${green}3秒后重试${background}
+    echo -en ${red} pkg_install 命令执行失败 ${green}3秒后重试${background}
     sleep 3s
     echo
 done

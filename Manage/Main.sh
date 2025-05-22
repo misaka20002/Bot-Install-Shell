@@ -228,7 +228,7 @@ function UPDATE(){
         fi
     fi
 }
-old_version="1.1.39"
+old_version="1.1.51"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -538,6 +538,7 @@ function OperatingEnvironmentInstall(){
   fi
   for command in ${command_all}
   do
+    echo 执行url: ${URL}/${command}
     until bash <(curl -sL ${URL}/${command})
     do
       if [ ${i} -eq 3 ]
@@ -637,6 +638,7 @@ then
 fi
 for command in ${command_all}
 do
+  echo 执行url: ${URL}/${command}
   until bash <(curl -sL ${URL}/${command})
   do
     if [ ${i} -eq 3 ]
