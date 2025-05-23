@@ -930,8 +930,81 @@ switch_account() {
     
     echo -en ${cyan}登录操作已完成，按回车返回主菜单${background};read
   fi
-  
+}
 
+change_log_level(){
+  if [ ! -f $CONFIG_FILE ]; then
+    echo -e ${red}配置文件不存在，请先安装拉格朗日签名服务器${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+  fi
+  
+  # 检查jq是否安装
+  if ! check_jq; then
+    echo -en ${yellow}"由于缺少jq命令，无法使用此功能，按回车返回"${background};read
+    return
+  fi
+
+  # 读取当前日志等级
+  current_level=$(jq -r '.Logging.LogLevel.Default' $CONFIG_FILE)
+  
+  echo -e ${white}"====="${green}修改日志等级${white}"====="${background}
+  echo -e ${cyan}当前日志等级: ${green}${current_level}${background}
+  echo -e ${cyan}请选择新的日志等级:${background}
+  echo -e  ${green}1. ${cyan}Trace（最详细）${background}
+  echo -e  ${green}2. ${cyan}Debug${background}
+  echo -e  ${green}3. ${cyan}Information（默认）${background}
+  echo -e  ${green}4. ${cyan}Warning${background}
+  echo -e  ${green}5. ${cyan}Error${background}
+  echo -e  ${green}6. ${cyan}Critical${background}
+  echo -e  ${green}7. ${cyan}None（不输出日志）${background}
+  echo -e  ${green}0. ${cyan}取消${background}
+  echo "========================="
+  echo -en ${green}请输入您的选项: ${background};read num
+  
+  case $num in
+    1) new_level="Trace" ;;
+    2) new_level="Debug" ;;
+    3) new_level="Information" ;;
+    4) new_level="Warning" ;;
+    5) new_level="Error" ;;
+    6) new_level="Critical" ;;
+    7) new_level="None" ;;
+    0) return ;;
+    *) 
+      echo -e ${red}输入错误${background}
+      sleep 2
+      return ;;
+  esac
+  
+  # 备份配置文件
+  cp $CONFIG_FILE $CONFIG_FILE.bak
+  
+  # 更新日志等级
+  jq --arg level "$new_level" '.Logging.LogLevel.Default = $level' $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+  
+  echo -e ${green}日志等级已更新为: ${cyan}${new_level}${background}
+  echo -en ${cyan}回车返回${background};read
+}
+
+reWrite_config(){
+  if [ -f $CONFIG_FILE ]; then
+      echo -e ${yellow}警告: 这将覆盖您当前的配置文件${background}
+      echo -en ${cyan}是否继续重写配置文件? [y/N]:${background};read confirm
+      case ${confirm} in
+      y|Y)
+          write_config
+          echo -en ${cyan}回车返回${background};read
+          ;;
+      *)
+          echo -e ${yellow}操作已取消${background}
+          echo -en ${cyan}回车返回${background};read
+          ;;
+      esac
+  else
+      write_config
+      echo -en ${cyan}回车返回${background};read
+  fi
 }
 
 main(){
@@ -953,11 +1026,12 @@ echo -e  ${green} 3.  ${cyan}关闭Lagrange${background}
 echo -e  ${green} 4.  ${cyan}重启Lagrange${background}
 echo -e  ${green} 5.  ${cyan}更新Lagrange${background}
 echo -e  ${green} 6.  ${cyan}卸载Lagrange${background}
-echo -e  ${green} 7.  ${cyan}查看日志${background}
-echo -e  ${green} 8.  ${cyan}重写签名配置${background}
-echo -e  ${green} 9.  ${cyan}更换签名版本${background}
-echo -e  ${green} 10. ${cyan}管理OneBot连接配置${background}
-echo -e  ${green} 11. ${cyan}切换并备份QQ账号${background}
+echo -e  ${green} 7. ${cyan}切换并备份QQ账号${background}
+echo -e  ${green} 8.  ${cyan}查看日志${background}
+echo -e  ${green} 9.  ${cyan}重写配置文件${background}
+echo -e  ${green} 10.  ${cyan}更换签名版本${background}
+echo -e  ${green} 11. ${cyan}管理OneBot连接配置${background}
+echo -e  ${green} 12. ${cyan}修改日志等级${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}拉格朗日状态: ${condition}${background}
@@ -992,24 +1066,27 @@ echo
 uninstall_Lagrange
 ;;
 7)
-log_Lagrange
+echo
+switch_account
 ;;
 8)
-echo
-write_config
-echo -en ${cyan}回车返回${background};read
+log_Lagrange
 ;;
 9)
 echo
-change_lagrange_version
+reWrite_config
 ;;
 10)
 echo
-manage_implementations
+change_lagrange_version
 ;;
 11)
 echo
-switch_account
+manage_implementations
+;;
+12)
+echo
+change_log_level
 ;;
 0)
 exit
