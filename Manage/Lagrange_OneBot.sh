@@ -389,8 +389,9 @@ pv lagrange.tar.gz | tar -zxf - -C $TMP_DIR
 
 # 删除特定文件和文件夹,保留其他文件
 echo -e ${yellow}正在删除旧版本文件...${background}
-rm -rf $INSTALL_DIR/lagrange-0-db
 rm -f $INSTALL_DIR/Lagrange.OneBot
+echo -e ${yellow}将不会删除数据库文件...${background}
+# rm -rf $INSTALL_DIR/lagrange-0-db
 
 # 移动正确的文件到安装目录
 echo -e ${yellow}正在移动可执行文件...${background}
@@ -433,6 +434,26 @@ if [ ! -d $INSTALL_DIR ];then
     return
 fi
 
+echo -e ${white}"====="${red}卸载拉格朗日签名服务器${white}"====="${background}
+echo -e ${yellow}警告: 此操作将完全删除拉格朗日签名服务器${background}
+echo -e ${yellow}这将删除以下内容:${background}
+echo -e ${cyan}• 程序可执行文件${background}
+echo -e ${cyan}• 数据库文件${background}
+echo -e ${cyan}• 配置文件（可选择保留）${background}
+echo
+echo -en ${red}您确定要卸载拉格朗日签名服务器吗? [y/N]: ${background};read confirm_uninstall
+
+case ${confirm_uninstall} in
+y|Y)
+    echo -e ${yellow}用户确认卸载，开始执行...${background}
+    ;;
+*)
+    echo -e ${green}已取消卸载操作${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+    ;;
+esac
+
 echo -e ${yellow}正在停止服务器运行${background}
 tmux_kill_session lagrangebot > /dev/null 2>&1
 PID=$(ps aux | grep Lagrange.OneBot | sed '/grep/d' | awk '{print $2}')
@@ -441,8 +462,9 @@ if [ ! -z ${PID} ];then
 fi
 
 echo -e ${yellow}正在删除核心文件...${background}
-rm -rf $INSTALL_DIR/lagrange-0-db
 rm -f $INSTALL_DIR/Lagrange.OneBot
+echo -e ${yellow}正在删除数据库文件...${background}
+rm -rf $INSTALL_DIR/lagrange-0-db
 
 echo -en ${yellow}是否保留配置文件? [Y/n]:${background};read keep_config
 case ${keep_config} in
@@ -454,6 +476,23 @@ n|N)
     echo -e ${green}已保留配置文件${background}
     ;;
 esac
+
+echo -en ${yellow}是否保留账号备份数据? [Y/n]:${background};read keep_accounts
+case ${keep_accounts} in
+n|N)
+    echo -e ${yellow}正在删除账号备份数据...${background}
+    rm -rf $INSTALL_DIR/accounts
+    ;;
+*)
+    echo -e ${green}已保留账号备份数据${background}
+    ;;
+esac
+
+# 检查是否还有其他文件，如果目录为空则删除
+if [ -z "$(ls -A $INSTALL_DIR 2>/dev/null)" ]; then
+    echo -e ${yellow}正在删除空的安装目录...${background}
+    rmdir $INSTALL_DIR
+fi
 
 echo -e ${green}卸载完成${background}
 echo -en ${cyan}回车返回${background};read
@@ -834,15 +873,72 @@ switch_account() {
   accounts_dir="$INSTALL_DIR/accounts"
   mkdir -p $accounts_dir
   
-  # 询问用户要保存的文件夹名或QQ号
-  echo -en ${cyan}请输入保存当前配置的文件夹名或QQ号\(留空则不保存\): ${background};read account_name
+  # 检查是否存在已有账号数据
+  existing_count=0
+  echo -e ${yellow}检查现有账号数据...${background}
+  echo -e ${cyan}已存在的账号保存目录:${background}
+  
+  for acc_dir in "$accounts_dir"/*; do
+    if [ -d "$acc_dir" ];then
+      acc_name=$(basename "$acc_dir")
+      echo -e ${green}$((existing_count+1)). ${cyan}$acc_name${background}
+      existing_count=$((existing_count+1))
+    fi
+  done
+  
+  if [ $existing_count -eq 0 ]; then
+    echo -e ${yellow}没有找到已存在的账号目录${background}
+  fi
+  
+  echo -e ${green}$((existing_count+1)). ${cyan}创建新的保存目录${background}
+  echo -e ${green}0. ${cyan}不保存当前配置${background}
+  echo
+  
+  # 询问用户要保存的方式
+  echo -en ${cyan}请选择保存当前配置的方式\(输入编号\): ${background};read save_choice
+  
+  account_name=""
+  if [[ "$save_choice" =~ ^[0-9]+$ ]] && [ $save_choice -gt 0 ] && [ $save_choice -le $existing_count ]; then
+    # 选择已存在的目录
+    count=0
+    for acc_dir in "$accounts_dir"/*; do
+      if [ -d "$acc_dir" ];then
+        count=$((count+1))
+        if [ $count -eq $save_choice ]; then
+          account_name=$(basename "$acc_dir")
+          echo -e ${yellow}将覆盖保存到: ${cyan}$account_name${background}
+          echo -en ${cyan}确认覆盖? [Y/n]: ${background};read confirm
+          case ${confirm} in
+          n|N)
+            account_name=""
+            echo -e ${yellow}已取消保存${background}
+            ;;
+          *)
+            ;;
+          esac
+          break
+        fi
+      fi
+    done
+  elif [ $save_choice -eq $((existing_count+1)) ]; then
+    # 创建新目录
+    echo -en ${cyan}请输入新的保存目录名称\(建议使用昵称或QQ号\): ${background};read account_name
+    if [ -z "$account_name" ]; then
+      echo -e ${yellow}目录名称不能为空，已取消保存${background}
+      account_name=""
+    fi
+  elif [ $save_choice -eq 0 ]; then
+    echo -e ${yellow}不保存当前配置${background}
+  else
+    echo -e ${red}选择无效，不保存当前配置${background}
+  fi
   
   if [ ! -z "$account_name" ]; then
     # 保存当前账号数据
     save_dir="$accounts_dir/$account_name"
     mkdir -p $save_dir
     
-    echo -e ${yellow}正在保存当前账号数据...${background}
+    echo -e ${yellow}正在保存当前账号数据到: ${cyan}$account_name${background}
     
     # 拷贝相关文件到保存目录
     if [ -f "$INSTALL_DIR/device.json" ]; then
@@ -862,7 +958,7 @@ switch_account() {
   echo
   echo -e ${yellow}可用的账号列表:${background}
   
-  # 列出所有保存的账号
+  # 重新列出所有保存的账号
   account_count=0
   for acc_dir in "$accounts_dir"/*; do
     if [ -d "$acc_dir" ];then
@@ -885,7 +981,8 @@ switch_account() {
   echo -e ${yellow}正在清除当前账号数据...${background}
   rm -f "$INSTALL_DIR/device.json"
   rm -f "$INSTALL_DIR/keystore.json"
-  rm -rf "$INSTALL_DIR/lagrange-0-db"
+  echo -e ${yellow}将不会删除数据库文件...${background}
+  # rm -rf "$INSTALL_DIR/lagrange-0-db"
   
   if [[ "$switch_choice" =~ ^[0-9]+$ ]] && [ $switch_choice -gt 0 ] && [ $switch_choice -le $account_count ]; then
     # 获取选择的账号名称
