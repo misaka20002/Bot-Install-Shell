@@ -33,6 +33,15 @@
 
 <details ><summary>① 服务器安装方法</summary>
 
+
+<details ><summary>购买服务器</summary>
+
+- 纯小白推荐买一个 38元/年的2核2GB 或 188元/年的2核4GB 的[华为云（该链接无任何推广AFF）](https://activity.huaweicloud.com/discount_area_v5/index.html?utm_adplace=ecs-xsfwq_guanggao1)，使用Ubuntu24+镜像开机后，学习[使用SSH登陆服务器](https://www.bing.com/search?q=Termius%E4%BD%BF%E7%94%A8SSH%E7%99%BB%E9%99%86%E6%9C%8D%E5%8A%A1%E5%99%A8)然后输入以下命令：
+
+</details>
+
+
+
 ##### 服务器安装命令
 
 ```sh
@@ -41,6 +50,12 @@ bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/instal
 # 或
 bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/install.sh)
 ```
+
+- 使用 `xdm` 命令打开呆毛版脚本
+- 选择 `TRSS-Yunzai` 并 `回车` 来安装TRSS崽
+- 返回主页，选择 `拉格朗日` 或者 `NapCat` 安装、配置接口后启动  `拉格朗日` 或者 `NapCat` 
+- 启动 `TRSS-Yunzai` 
+- 再后台正常启动后，可以选择自己喜欢的插件安装啦~
 
 </details>
 
