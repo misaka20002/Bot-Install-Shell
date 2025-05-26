@@ -17,6 +17,11 @@ if [ -d /usr/local/node/bin ];then
 fi
 
 ChangeAccount(){
+if [ ${BotName} == "TRSS-Yunzai" ];then
+    echo -e ${cyan}TRSS-Yunzai 修改 ${yellow}"需要在适配器中操作" ${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+fi
 file="config/config/qq.yaml"
 if [ ! -e ${file} ];then
     echo -e ${red}文件不存在${background}
@@ -37,6 +42,11 @@ read
 }
 
 ChangeDevice(){
+if [ ${BotName} == "TRSS-Yunzai" ];then
+    echo -e ${cyan}TRSS-Yunzai 修改 ${yellow}"需要在适配器中操作" ${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+fi
 file="config/config/qq.yaml"
 if [ ! -e ${file} ];then
     echo -e ${red}文件不存在${background}
@@ -86,6 +96,11 @@ read
 }
 
 ChangeAdmin(){
+if [ ${BotName} == "TRSS-Yunzai" ];then
+    echo -e ${cyan}TRSS-Yunzai 修改 ${yellow}"在前台登陆的控制台 或 登陆后qq中发送：#设置主人 后查看控制台消息获取设置主人秘钥" ${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+fi
 file="config/config/other.yaml"
 if [ ! -e ${file} ];then
     echo -e ${red}文件不存在${background}
@@ -421,6 +436,10 @@ UninstallNodeVersion(){
 }
 
 FfmpegPath(){
+if [ ${BotName} == "TRSS-Yunzai" ];then
+    echo -e ${cyan}TRSS-Yunzai 不需要FFMPEG ${yellow}"需要在适配器中操作" ${background}
+    echo -en ${cyan}回车继续${background};read
+fi
 file="config/config/bot.yaml"
 if [ ! -e ${file} ];then
     echo -e ${red}文件不存在${background}
