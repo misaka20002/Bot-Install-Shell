@@ -1095,6 +1095,7 @@ configure_ws() {
                     WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
                     WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
                     WS_ENABLE=$(jq -r ".network.websocketClients[$i].enable // false" "$CONFIG_FILE")
+                    WS_TOKEN=$(jq -r ".network.websocketClients[$i].token // \"\"" "$CONFIG_FILE")
                     
                     if [ "$WS_ENABLE" = "true" ]; then
                         status="${green}已启用"
@@ -1102,7 +1103,12 @@ configure_ws() {
                         status="${red}已禁用"
                     fi
                     
-                    echo -e ${green}[$((i+1))] ${cyan}${WS_NAME} ${yellow}- ${cyan}${WS_URL} ${yellow}- ${status}${background}
+                    token_status=""
+                    if [ -n "$WS_TOKEN" ]; then
+                        token_status="${green}[已设置token]"
+                    fi
+                    
+                    echo -e ${green}[$((i+1))] ${cyan}${WS_NAME} ${yellow}- ${cyan}${WS_URL} ${yellow}- ${status} ${token_status}${background}
                 done
             else
                 echo -e ${yellow}未配置任何WebSocket接口${background}
@@ -1117,6 +1123,7 @@ configure_ws() {
         echo -e ${green}3. ${cyan}编辑WebSocket接口${background}
         echo -e ${green}4. ${cyan}删除WebSocket接口${background}
         echo -e ${green}5. ${cyan}启用/禁用WebSocket接口${background}
+        echo -e ${green}6. ${cyan}管理WebSocket Token${background}
         echo -e ${green}0. ${cyan}返回上级菜单${background}
         echo -e ${yellow}"==========================="${background}
         
@@ -1308,6 +1315,13 @@ EOF
                 mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
                 
                 echo -e ${green}已更新WebSocket接口配置${background}
+                
+                # 如果修改了token，询问是否要同步到TRSS
+                if [ "$ws_token" != "$current_token" ] && [ -n "$ws_token" ]; then
+                    echo -e ${yellow}检测到Token已修改${background}
+                    sync_token_to_trss "$ws_token"
+                fi
+                
                 sleep 1
                 ;;
             4)
@@ -1420,6 +1434,104 @@ EOF
                 fi
                 sleep 1
                 ;;
+            6)
+                # 管理WebSocket Token
+                WS_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
+                
+                if [ "$WS_COUNT" -eq 0 ]; then
+                    echo -e ${red}没有可管理的WebSocket接口${background}
+                    sleep 1
+                    continue
+                fi
+                
+                echo -e ${yellow}请选择要管理Token的WebSocket接口:${background}
+                for ((i=0; i<$WS_COUNT; i++)); do
+                    WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
+                    WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
+                    WS_TOKEN=$(jq -r ".network.websocketClients[$i].token // \"\"" "$CONFIG_FILE")
+                    
+                    token_status=""
+                    if [ -n "$WS_TOKEN" ]; then
+                        token_status="${green}[已设置token]"
+                    else
+                        token_status="${red}[未设置token]"
+                    fi
+                    
+                    echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_URL} ${token_status}${background}
+                done
+                echo -e ${green}0. ${cyan}返回${background}
+                
+                echo -en ${green}请输入编号: ${background};read token_choice
+                
+                if [ "$token_choice" = "0" ]; then
+                    continue
+                fi
+                
+                if ! [[ "$token_choice" =~ ^[0-9]+$ ]] || [ "$token_choice" -lt 1 ] || [ "$token_choice" -gt "$WS_COUNT" ]; then
+                    echo -e ${red}无效的选择${background}
+                    sleep 1
+                    continue
+                fi
+                
+                token_index=$((token_choice-1))
+                WS_NAME=$(jq -r ".network.websocketClients[$token_index].name // \"未命名\"" "$CONFIG_FILE")
+                current_token=$(jq -r ".network.websocketClients[$token_index].token // \"\"" "$CONFIG_FILE")
+                
+                echo -e ${yellow}管理 "${WS_NAME}" 的Token${background}
+                echo -e ${cyan}当前Token: ${yellow}${current_token:-"未设置"}${background}
+                echo
+                echo -e ${green}1. ${cyan}修改Token${background}
+                echo -e ${green}2. ${cyan}清除Token${background}
+                echo -e ${green}0. ${cyan}返回${background}
+                
+                echo -en ${green}请选择操作: ${background};read token_op
+                
+                case $token_op in
+                    1)
+                        echo -en ${cyan}请输入新的Token: ${background};read new_token
+                        
+                        if [ -n "$new_token" ]; then
+                            # 更新Token
+                            jq --argjson idx "$token_index" --arg token "$new_token" \
+                                '.network.websocketClients[$idx].token = $token' \
+                                "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                            
+                            echo -e ${green}Token已更新${background}
+                            
+                            # 询问是否同步到TRSS-Yunzai配置
+                            sync_token_to_trss "$new_token"
+                        else
+                            echo -e ${yellow}Token未修改${background}
+                        fi
+                        sleep 1
+                        ;;
+                    2)
+                        echo -en ${yellow}确认清除Token? [y/N]: ${background};read confirm
+                        
+                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                            # 清除Token
+                            jq --argjson idx "$token_index" \
+                                '.network.websocketClients[$idx].token = ""' \
+                                "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                            
+                            echo -e ${green}Token已清除${background}
+                            
+                            # 询问是否同步到TRSS-Yunzai配置
+                            sync_token_to_trss ""
+                        else
+                            echo -e ${yellow}操作已取消${background}
+                        fi
+                        sleep 1
+                        ;;
+                    0)
+                        continue
+                        ;;
+                    *)
+                        echo -e ${red}无效选项${background}
+                        sleep 1
+                        ;;
+                esac
+                ;;
             0)
                 # 返回上级菜单
                 return 0
@@ -1430,6 +1542,123 @@ EOF
                 ;;
         esac
     done
+}
+
+# 同步AccessToken到TRSS-Yunzai配置
+sync_token_to_trss() {
+    local new_token="$1"
+    local trss_config="$HOME/TRSS-Yunzai/config/config/server.yaml"
+    
+    echo -en ${cyan}是否同步修改TRSS-Yunzai的配置文件? [Y/n]: ${background};read sync_choice
+    case $sync_choice in
+        n|N)
+            echo -e ${yellow}跳过修改TRSS-Yunzai配置${background}
+            echo -en ${cyan}回车返回${background};read
+            return
+            ;;
+    esac
+    
+    # 检查TRSS-Yunzai配置文件是否存在
+    if [ ! -f "$trss_config" ]; then
+        echo -e ${red}未找到TRSS-Yunzai配置文件: ${yellow}$trss_config${background}
+        echo -e ${yellow}请检查TRSS-Yunzai是否已安装或配置路径是否正确${background}
+        echo -en ${cyan}请输入TRSS-Yunzai配置文件路径 \(留空跳过\): ${background};read custom_path
+        
+        if [ -z "$custom_path" ]; then
+            echo -e ${yellow}已跳过配置同步${background}
+            sleep 2
+            return
+        elif [ -f "$custom_path" ]; then
+            trss_config="$custom_path"
+            echo -e ${green}已使用自定义路径: ${cyan}$trss_config${background}
+        else
+            echo -e ${red}指定的文件不存在: ${yellow}$custom_path${background}
+            echo -e ${yellow}已跳过配置同步${background}
+            sleep 2
+            return
+        fi
+    fi
+    
+    # 备份原配置文件
+    cp "$trss_config" "$trss_config.bak"
+    echo -e ${yellow}已备份原配置至: ${cyan}$trss_config.bak${background}
+    
+    # 准备Bearer令牌格式
+    bearer_token=""
+    if [ ! -z "$new_token" ]; then
+        bearer_token="Bearer $new_token"
+    fi
+    
+    # 检查配置文件中是否有auth和authorization
+    if grep -q "auth:" "$trss_config"; then
+        if grep -q "authorization:" "$trss_config"; then
+            # 更新已存在的authorization
+            if [ -z "$bearer_token" ]; then
+                # 如果token为空，则删除authorization行
+                sed -i '/authorization:/d' "$trss_config"
+                echo -e ${green}已删除authorization配置${background}
+            else
+                # 更新authorization值
+                sed -i "s|authorization: *\".*\"|authorization: \"$bearer_token\"|" "$trss_config"
+                echo -e ${green}已更新TRSS-Yunzai配置中的authorization${background}
+            fi
+        else
+            # auth存在但authorization不存在，添加authorization
+            if [ ! -z "$bearer_token" ]; then
+                sed -i "/auth:/a\\  authorization: \"$bearer_token\"" "$trss_config"
+                echo -e ${green}已在auth下添加authorization${background}
+            fi
+        fi
+    else
+        # 如果不存在auth部分，且有token需要添加，则添加完整配置
+        if [ ! -z "$bearer_token" ] && grep -q "redirect:" "$trss_config"; then
+            # 在redirect行后添加auth配置
+            sed -i "/redirect:/a\\
+# 服务器鉴权\\
+auth:\\
+  authorization: \"$bearer_token\"" "$trss_config"
+            echo -e ${green}已添加auth配置到TRSS-Yunzai配置${background}
+        elif [ ! -z "$bearer_token" ]; then
+            # 没有找到redirect行，在文件末尾添加
+            cat >> "$trss_config" << EOF
+# 服务器鉴权
+auth:
+  authorization: "$bearer_token"
+EOF
+            echo -e ${green}已添加auth配置到TRSS-Yunzai配置文件末尾${background}
+        fi
+    fi
+    
+    # 检查文件中是否有重复的auth条目
+    if [ $(grep -c "auth:" "$trss_config") -gt 1 ]; then
+        echo -e ${yellow}警告：检测到重复的auth条目，尝试修复...${background}
+        # 创建临时文件
+        tmp_file=$(mktemp)
+        
+        # 标记是否已处理第一个auth条目
+        processed_first_auth=false
+        
+        # 逐行读取并处理
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^auth: ]]; then
+                if [ "$processed_first_auth" = false ]; then
+                    # 保留第一个auth条目
+                    echo "$line" >> "$tmp_file"
+                    processed_first_auth=true
+                fi
+                # 跳过其他auth条目
+            else
+                echo "$line" >> "$tmp_file"
+            fi
+        done < "$trss_config"
+        
+        # 用临时文件替换原文件
+        mv "$tmp_file" "$trss_config"
+        echo -e ${green}已修复重复的auth条目${background}
+    fi
+    
+    echo -e ${green}TRSS-Yunzai配置已同步更新${background}
+    echo -en ${yellow}请记得重启 TRSS-Yunzai 以应用新配置 ${cyan}回车返回${background};read
 }
 
 # 配置音乐签名URL
