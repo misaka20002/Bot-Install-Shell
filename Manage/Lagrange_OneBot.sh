@@ -586,7 +586,7 @@ sync_token_to_trss() {
   case $sync_choice in
     n|N)
       echo -e ${yellow}跳过修改TRSS-Yunzai配置${background}
-      sleep 1
+      echo -en ${cyan}回车返回${background};read
       return
     ;;
   esac
@@ -603,32 +603,49 @@ sync_token_to_trss() {
   cp "$trss_config" "$trss_config.bak"
   echo -e ${yellow}已备份原配置至: ${cyan}$trss_config.bak${background}
   
-  # 检查配置文件是否包含 auth: null 或其他 auth 条目
-  if grep -q "auth: *null" "$trss_config"; then
-    # 将 auth: null 替换为完整的auth配置
-    sed -i "s/auth: *null/auth:\n  AccessToken: \"$new_token\"/" "$trss_config"
-    echo -e ${green}已将 auth: null 替换为完整的AccessToken配置${background}
-  elif grep -q "auth:" "$trss_config" && grep -q "AccessToken:" "$trss_config"; then
-    # 更新已存在的AccessToken
-    sed -i "s/AccessToken: *\".*\"/AccessToken: \"$new_token\"/" "$trss_config"
-    echo -e ${green}已更新TRSS-Yunzai配置中的AccessToken${background}
-  elif grep -q "auth:" "$trss_config"; then
-    # auth行存在但没有AccessToken，添加AccessToken
-    sed -i "/auth:/a\\  AccessToken: \"$new_token\"" "$trss_config"
-    echo -e ${green}已在现有auth配置下添加AccessToken${background}
+  # 准备Bearer令牌格式
+  bearer_token=""
+  if [ ! -z "$new_token" ]; then
+    bearer_token="Bearer $new_token"
+  fi
+  
+  # 检查配置文件中是否有auth和authorization
+  if grep -q "auth:" "$trss_config"; then
+    if grep -q "authorization:" "$trss_config"; then
+      # 更新已存在的authorization
+      if [ -z "$bearer_token" ]; then
+        # 如果token为空，则删除authorization行
+        sed -i '/authorization:/d' "$trss_config"
+        echo -e ${green}已删除authorization配置${background}
+      else
+        # 更新authorization值
+        sed -i "s|authorization: *\".*\"|authorization: \"$bearer_token\"|" "$trss_config"
+        echo -e ${green}已更新TRSS-Yunzai配置中的authorization${background}
+      fi
+    else
+      # auth存在但authorization不存在，添加authorization
+      if [ ! -z "$bearer_token" ]; then
+        sed -i "/auth:/a\\  authorization: \"$bearer_token\"" "$trss_config"
+        echo -e ${green}已在auth下添加authorization${background}
+      fi
+    fi
   else
-    # 如果不存在，添加auth部分到配置文件的适当位置
-    if grep -q "redirect:" "$trss_config"; then
+    # 如果不存在auth部分，且有token需要添加，则添加完整配置
+    if [ ! -z "$bearer_token" ] && grep -q "redirect:" "$trss_config"; then
       # 在redirect行后添加auth配置
       sed -i "/redirect:/a\\
 # 服务器鉴权\\
 auth:\\
-  AccessToken: \"$new_token\"" "$trss_config"
-      echo -e ${green}已添加auth.AccessToken到TRSS-Yunzai配置${background}
-    else
-      echo -e ${red}无法找到适合插入auth配置的位置${background}
-      echo -e ${yellow}请手动编辑TRSS-Yunzai配置文件: ${cyan}$trss_config${background}
-      sleep 2
+  authorization: \"$bearer_token\"" "$trss_config"
+      echo -e ${green}已添加auth配置到TRSS-Yunzai配置${background}
+    elif [ ! -z "$bearer_token" ]; then
+      # 没有找到redirect行，在文件末尾添加
+      cat >> "$trss_config" << EOF
+# 服务器鉴权
+auth:
+  authorization: "$bearer_token"
+EOF
+      echo -e ${green}已添加auth配置到TRSS-Yunzai配置文件末尾${background}
     fi
   fi
   
@@ -661,7 +678,7 @@ auth:\\
   fi
   
   echo -e ${green}TRSS-Yunzai配置已同步更新${background}
-  echo -en ${cyan}回车返回${background};read
+  echo -en ${yellow}要记得重启 TRSS-Yunzai 哦~ ${cyan} 回车返回${background};read
 }
 
 manage_implementations(){
@@ -970,6 +987,21 @@ manage_implementations(){
             
             # 询问是否同步修改TRSS-Yunzai配置
             sync_token_to_trss "$new_token"
+            
+            # 提示需要重启并询问是否立即重启
+            echo -e ${yellow}注意: 修改AccessToken后需要重启Lagrange才能生效${background}
+            if tmux_ls lagrangebot > /dev/null 2>&1; then
+              echo -en ${cyan}是否立即重启Lagrange? [Y/n]: ${background};read restart_now
+              case ${restart_now} in
+                n|N)
+                  echo -e ${yellow}请记得稍后手动重启Lagrange${background}
+                  ;;
+                *)
+                  echo -e ${yellow}正在重启Lagrange...${background}
+                  restart_Lagrange
+                  ;;
+              esac
+            fi
           ;;
           2)
             # 删除AccessToken（设为空字符串）
@@ -981,6 +1013,21 @@ manage_implementations(){
             
             # 询问是否同步修改TRSS-Yunzai配置
             sync_token_to_trss ""
+            
+            # 提示需要重启并询问是否立即重启
+            echo -e ${yellow}注意: 修改AccessToken后需要重启Lagrange才能生效${background}
+            if tmux_ls lagrangebot > /dev/null 2>&1; then
+              echo -en ${cyan}是否立即重启Lagrange? [Y/n]: ${background};read restart_now
+              case ${restart_now} in
+                n|N)
+                  echo -e ${yellow}请记得稍后手动重启Lagrange${background}
+                  ;;
+                *)
+                  echo -e ${yellow}正在重启Lagrange...${background}
+                  restart_Lagrange
+                  ;;
+              esac
+            fi
           ;;
           0)
             continue
