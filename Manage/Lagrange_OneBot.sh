@@ -577,6 +577,93 @@ check_jq() {
   return 0
 }
 
+# 同步AccessToken到TRSS-Yunzai配置
+sync_token_to_trss() {
+  local new_token="$1"
+  local trss_config="$HOME/TRSS-Yunzai/config/config/server.yaml"
+  
+  echo -en ${cyan}是否同步修改TRSS-Yunzai的配置文件? [Y/n]: ${background};read sync_choice
+  case $sync_choice in
+    n|N)
+      echo -e ${yellow}跳过修改TRSS-Yunzai配置${background}
+      sleep 1
+      return
+    ;;
+  esac
+  
+  # 检查TRSS-Yunzai配置文件是否存在
+  if [ ! -f "$trss_config" ]; then
+    echo -e ${red}未找到TRSS-Yunzai配置文件: ${yellow}$trss_config${background}
+    echo -e ${yellow}请检查TRSS-Yunzai是否已安装或配置路径是否正确${background}
+    sleep 2
+    return
+  fi
+  
+  # 备份原配置文件
+  cp "$trss_config" "$trss_config.bak"
+  echo -e ${yellow}已备份原配置至: ${cyan}$trss_config.bak${background}
+  
+  # 检查配置文件是否包含 auth: null 或其他 auth 条目
+  if grep -q "auth: *null" "$trss_config"; then
+    # 将 auth: null 替换为完整的auth配置
+    sed -i "s/auth: *null/auth:\n  AccessToken: \"$new_token\"/" "$trss_config"
+    echo -e ${green}已将 auth: null 替换为完整的AccessToken配置${background}
+  elif grep -q "auth:" "$trss_config" && grep -q "AccessToken:" "$trss_config"; then
+    # 更新已存在的AccessToken
+    sed -i "s/AccessToken: *\".*\"/AccessToken: \"$new_token\"/" "$trss_config"
+    echo -e ${green}已更新TRSS-Yunzai配置中的AccessToken${background}
+  elif grep -q "auth:" "$trss_config"; then
+    # auth行存在但没有AccessToken，添加AccessToken
+    sed -i "/auth:/a\\  AccessToken: \"$new_token\"" "$trss_config"
+    echo -e ${green}已在现有auth配置下添加AccessToken${background}
+  else
+    # 如果不存在，添加auth部分到配置文件的适当位置
+    if grep -q "redirect:" "$trss_config"; then
+      # 在redirect行后添加auth配置
+      sed -i "/redirect:/a\\
+# 服务器鉴权\\
+auth:\\
+  AccessToken: \"$new_token\"" "$trss_config"
+      echo -e ${green}已添加auth.AccessToken到TRSS-Yunzai配置${background}
+    else
+      echo -e ${red}无法找到适合插入auth配置的位置${background}
+      echo -e ${yellow}请手动编辑TRSS-Yunzai配置文件: ${cyan}$trss_config${background}
+      sleep 2
+    fi
+  fi
+  
+  # 检查文件中是否有重复的auth条目
+  if [ $(grep -c "auth:" "$trss_config") -gt 1 ]; then
+    echo -e ${yellow}警告：检测到重复的auth条目，尝试修复...${background}
+    # 创建临时文件
+    tmp_file=$(mktemp)
+    
+    # 标记是否已处理第一个auth条目
+    processed_first_auth=false
+    
+    # 逐行读取并处理
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^auth: ]]; then
+        if [ "$processed_first_auth" = false ]; then
+          # 保留第一个auth条目
+          echo "$line" >> "$tmp_file"
+          processed_first_auth=true
+        fi
+        # 跳过其他auth条目
+      else
+        echo "$line" >> "$tmp_file"
+      fi
+    done < "$trss_config"
+    
+    # 用临时文件替换原文件
+    mv "$tmp_file" "$trss_config"
+    echo -e ${green}已修复重复的auth条目${background}
+  fi
+  
+  echo -e ${green}TRSS-Yunzai配置已同步更新${background}
+  echo -en ${cyan}回车返回${background};read
+}
+
 manage_implementations(){
   if [ ! -f $CONFIG_FILE ]; then
     echo -e ${red}配置文件不存在，请先安装拉格朗日签名服务器${background}
@@ -624,6 +711,7 @@ manage_implementations(){
     echo "========================="
     echo -e ${green}1. ${cyan}添加新连接${background}
     echo -e ${green}2. ${cyan}删除现有连接${background}
+    echo -e ${green}3. ${cyan}管理AccessToken${background}
     echo -e ${green}0. ${cyan}返回${background}
     echo "========================="
     echo -en ${green}请输入您的选项: ${background};read option
@@ -840,7 +928,69 @@ manage_implementations(){
         echo -e ${green}成功删除连接: ${cyan}$host:$port$suffix${background}
         sleep 2
         ;;
+      3)
+        # 管理AccessToken
+        if [ $implementations -eq 0 ]; then
+          echo -e ${red}没有可用的连接配置${background}
+          sleep 2
+          continue
+        fi
         
+        echo -en ${cyan}请输入要管理AccessToken的连接编号 \(1-$implementations\): ${background};read conn_num
+        
+        if ! [[ "$conn_num" =~ ^[0-9]+$ ]] || [ $conn_num -lt 1 ] || [ $conn_num -gt $implementations ]; then
+          echo -e ${red}无效的编号${background}
+          sleep 2
+          continue
+        fi
+        
+        idx=$((conn_num-1))
+        type=$(jq -r ".Implementations[$idx].Type" $CONFIG_FILE)
+        host=$(jq -r ".Implementations[$idx].Host" $CONFIG_FILE)
+        port=$(jq -r ".Implementations[$idx].Port" $CONFIG_FILE)
+        current_token=$(jq -r ".Implementations[$idx].AccessToken" $CONFIG_FILE)
+        
+        echo -e ${cyan}已选择连接: ${yellow}$type - $host:$port${background}
+        echo -e ${cyan}当前AccessToken: ${yellow}$current_token${background}
+        echo
+        echo -e ${green}1. ${cyan}修改AccessToken${background}
+        echo -e ${green}2. ${cyan}删除AccessToken${background}
+        echo -e ${green}0. ${cyan}返回${background}
+        echo -en ${green}请输入您的选项: ${background};read token_option
+        
+        case $token_option in
+          1)
+            echo -en ${cyan}请输入新的AccessToken: ${background};read new_token
+            # 更新AccessToken
+            jq --argjson idx "$idx" --arg token "$new_token" \
+              '.Implementations[$idx].AccessToken = $token' \
+              $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+            
+            echo -e ${green}AccessToken已更新${background}
+            
+            # 询问是否同步修改TRSS-Yunzai配置
+            sync_token_to_trss "$new_token"
+          ;;
+          2)
+            # 删除AccessToken（设为空字符串）
+            jq --argjson idx "$idx" \
+              '.Implementations[$idx].AccessToken = ""' \
+              $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+            
+            echo -e ${green}AccessToken已删除${background}
+            
+            # 询问是否同步修改TRSS-Yunzai配置
+            sync_token_to_trss ""
+          ;;
+          0)
+            continue
+          ;;
+          *)
+            echo -e ${red}无效选项${background}
+            sleep 2
+          ;;
+        esac
+      ;;
       0)
         return
         ;;
