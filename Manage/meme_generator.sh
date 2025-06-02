@@ -1,4 +1,6 @@
 #!/bin/env bash
+SCRIPT_VERSION="1.0.2"
+
 export red="\033[31m"
 export green="\033[32m"
 export yellow="\033[33m"
@@ -35,6 +37,7 @@ fi
 
 config=$HOME/.config/meme_generator/config.toml
 install_path=$HOME/memeGenerator
+SCRIPT_LOCAL_PATH="$HOME/.config/meme_generator/update_script.sh"
 
 function tmux_new(){
 Tmux_Name="$1"
@@ -495,6 +498,41 @@ Y|y)
 esac
 }
 
+ensure_script_saved() {
+  script_dir="$(dirname "$SCRIPT_LOCAL_PATH")"
+  mkdir -p "$script_dir"
+  current_version=${SCRIPT_VERSION}
+  # 检查本地脚本版本
+  local_version=""
+  if [[ -f "$SCRIPT_LOCAL_PATH" ]]; then
+    local_version=$(grep "^SCRIPT_VERSION=" "$SCRIPT_LOCAL_PATH" | head -n 1 | cut -d'"' -f2)
+  fi
+  # 如果本地脚本不存在或版本不同，则需要更新
+  if [[ ! -f "$SCRIPT_LOCAL_PATH" ]] || [[ -z "$local_version" ]] || [[ "$current_version" != "$local_version" ]]; then
+    download_script() {
+      # 如果当前脚本是从标准输入或临时文件运行的，则从远程下载
+      curl -sL "https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/meme_generator.sh" > "$SCRIPT_LOCAL_PATH"
+      if [ $? -eq 0 ]; then
+          chmod +x "$SCRIPT_LOCAL_PATH"
+      else
+          curl -sL "https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/refs/heads/master/Manage/meme_generator.sh" > "$SCRIPT_LOCAL_PATH"
+          if [ $? -eq 0 ]; then
+            chmod +x "$SCRIPT_LOCAL_PATH"
+          else
+            echo "警告: 脚本更新失败，meme服务器自动更新服务可能出错，请检查网络连接"
+            return 1
+          fi
+      fi
+      return 0
+    }
+    download_script
+  else
+    # 版本相同，不需要更新
+    return 0
+  fi
+  return 0
+}
+
 auto_update_meme_generator(){
   log_file="${HOME}/.config/meme_generator/auto_update.log"
   mkdir -p "${HOME}/.config/meme_generator"
@@ -560,11 +598,12 @@ setup_auto_update(){
     fi
     ;;
   *)
-    script_path=$(readlink -f "$0")
+    # 确保脚本已保存到固定位置
+    ensure_script_saved
+    
     # 检查是否已经存在相同的cron任务
     if ! crontab -l 2>/dev/null | grep -q "meme_generator_auto_update"; then
-      # 创建临时文件存储当前crontab
-      (crontab -l 2>/dev/null; echo "0 1 * * * bash ${script_path} auto_update # meme_generator_auto_update") | crontab -
+      (crontab -l 2>/dev/null; echo "0 1 * * * bash ${SCRIPT_LOCAL_PATH} auto_update # meme_generator_auto_update") | crontab -
       echo -e ${green}已设置每天凌晨1点自动更新meme生成器${background}
       echo -e ${cyan}自动更新日志位置: ${HOME}/.config/meme_generator/auto_update.log${background}
     fi
@@ -573,14 +612,16 @@ setup_auto_update(){
 }
 
 toggle_auto_update(){
-  script_path=$(readlink -f "$0")
+  # 确保脚本已保存到固定位置
+  ensure_script_saved
+  
   if crontab -l 2>/dev/null | grep -q "meme_generator_auto_update"; then
     # 如果已经存在，则删除自动更新的cron任务
     crontab -l 2>/dev/null | grep -v "meme_generator_auto_update" | crontab -
     echo -e ${yellow}已关闭meme生成器的自动更新${background}
   else
     # 如果不存在，则添加自动更新的cron任务
-    (crontab -l 2>/dev/null; echo "0 1 * * * bash ${script_path} auto_update # meme_generator_auto_update") | crontab -
+    (crontab -l 2>/dev/null; echo "0 1 * * * bash ${SCRIPT_LOCAL_PATH} auto_update # meme_generator_auto_update") | crontab -
     echo -e ${green}已开启meme生成器的自动更新${background}
     echo -e ${cyan}启动meme生成器之后将会在每天凌晨1点自动同步更新 meme GitHub 仓库并重启${background}
     echo -e ${cyan}自动更新日志位置: ${HOME}/.config/meme_generator/auto_update.log${background}
@@ -689,10 +730,9 @@ EOF
 }
 
 main(){
-# 检查是否是自动更新模式
-if [ "$1" = "auto_update" ]; then
-  auto_update_meme_generator
-  exit 0
+# 如果是首次通过curl执行，确保先保存脚本
+if [[ "$0" == *"/dev/fd/"* || "$0" == "bash" ]]; then
+  ensure_script_saved
 fi
 
 if crontab -l 2>/dev/null | grep -q "meme_generator_auto_update"; then
@@ -791,4 +831,10 @@ function mainbak()
         mainbak
     done
 }
-mainbak
+
+if [ "$1" = "auto_update" ]; then
+  auto_update_meme_generator
+  exit 0
+else
+  mainbak
+fi
