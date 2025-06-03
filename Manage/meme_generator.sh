@@ -1,5 +1,5 @@
 #!/bin/env bash
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.3"
 
 export red="\033[31m"
 export green="\033[32m"
@@ -533,9 +533,26 @@ ensure_script_saved() {
   return 0
 }
 
+log_file(){
+  # 限制日志文件最大行数为1000行
+  log_path="${HOME}/.config/meme_generator/auto_update.log"
+  if [ -f "$log_path" ]; then
+    line_count=$(wc -l < "$log_path")
+    if [ "$line_count" -gt 1000 ]; then
+      # 保留最后1000行
+      tail -n 1000 "$log_path" > "${log_path}.tmp"
+      mv "${log_path}.tmp" "$log_path"
+      echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 日志已截断至1000行${background}" >> "$log_path"
+    fi
+  fi
+}
+
 auto_update_meme_generator(){
   log_file="${HOME}/.config/meme_generator/auto_update.log"
   mkdir -p "${HOME}/.config/meme_generator"
+  # 先检查并限制日志行数
+  log_file
+  
   echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 开始自动更新meme生成器...${background}" >> ${log_file}
   
   # 检查meme生成器是否在运行
@@ -546,7 +563,7 @@ auto_update_meme_generator(){
     tmux_kill_session meme_generator > /dev/null 2>&1
     pm2 delete meme_generator > /dev/null 2>&1
     PID=$(ps aux | grep "meme_generator.app" | sed '/grep/d' | awk '{print $2}')
-    if [ ! -z "${PID}"]; then
+    if [ ! -z "${PID}" ]; then
       kill -9 ${PID}
     fi
   fi
@@ -577,12 +594,18 @@ auto_update_meme_generator(){
 
   echo -e "${green}[$(date "+%Y-%m-%d %H:%M:%S")] 更新完成！${background}" >> ${log_file}
   
-  # 如果之前在运行，则重新启动
+  # 如果之前在运行，则重新启动 - 修复启动部分
   if $was_running; then
     echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在重新启动meme生成器...${background}" >> ${log_file}
     export Boolean=true
-    tmux_new meme_generator "cd ${install_path}/meme-generator && source venv/bin/activate && while ${Boolean}; do python -m meme_generator.app; echo -e ${red}meme生成器关闭 正在重启${background}; sleep 2s; done" >> ${log_file} 2>&1
-    echo -e "${green}[$(date "+%Y-%m-%d %H:%M:%S")] meme生成器重启完成${background}" >> ${log_file}
+    # 将输出重定向从tmux_new命令中移出，确保tmux命令能正常执行
+    tmux_new meme_generator "cd ${install_path}/meme-generator && source venv/bin/activate && while ${Boolean}; do python -m meme_generator.app; echo -e ${red}meme生成器关闭 正在重启${background}; sleep 2s; done"
+    # 记录启动结果
+    if tmux_ls meme_generator; then
+      echo -e "${green}[$(date "+%Y-%m-%d %H:%M:%S")] meme生成器成功启动${background}" >> ${log_file}
+    else
+      echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] meme生成器启动失败${background}" >> ${log_file}
+    fi
   fi
 }
 
