@@ -1,5 +1,5 @@
 #!/bin/env bash
-SCRIPT_VERSION="1.0.3"
+SCRIPT_VERSION="1.0.6"
 
 export red="\033[31m"
 export green="\033[32m"
@@ -752,6 +752,22 @@ EOF
     echo -en ${yellow}回车返回${background};read
 }
 
+view_auto_update_log(){
+  log_file="${HOME}/.config/meme_generator/auto_update.log"
+  
+  if [ ! -f "$log_file" ]; then
+    echo -e ${red}日志文件不存在，可能自动更新尚未运行过${background}
+    echo -en ${yellow}回车返回${background};read
+    return
+  fi
+  
+  echo -e ${yellow}正在查看自动更新服务日志内容（按q退出）:${background}
+  echo -en ${yellow}回车继续${background};read
+  less -R "$log_file"
+  
+  echo -en ${yellow}回车返回${background};read
+}
+
 main(){
 # 如果是首次通过curl执行，确保先保存脚本
 if [[ "$0" == *"/dev/fd/"* || "$0" == "bash" ]]; then
@@ -784,9 +800,10 @@ echo -e  ${green} 4.  ${cyan}重启meme生成器${background}
 echo -e  ${green} 5.  ${cyan}更新meme生成器${background}
 echo -e  ${green} 6.  ${cyan}卸载meme生成器${background}
 echo -e  ${green} 7.  ${cyan}meme生成器日志${background}
-echo -e  ${green} 8.  ${cyan}修改端口号${background}
-echo -e  ${green} 9.  ${cyan}切换自动更新设置${background}
-echo -e  ${green} 10.  ${cyan}重写配置文件${background}
+echo -e  ${green} 8.  ${cyan}查看自动更新服务日志${background}
+echo -e  ${green} 9.  ${cyan}修改meme端口号${background}
+echo -e  ${green} 10.  ${cyan}切换自动更新设置${background}
+echo -e  ${green} 11.  ${cyan}重写配置文件${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}meme生成器状态: ${condition}${background}
@@ -825,13 +842,17 @@ log_meme_generator
 ;;
 8)
 echo
-change_port
+view_auto_update_log
 ;;
 9)
 echo
-toggle_auto_update
+change_port
 ;;
 10)
+echo
+toggle_auto_update
+;;
+11)
 echo
 rewrite_config
 ;;
