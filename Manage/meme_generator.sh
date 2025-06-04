@@ -29,10 +29,12 @@ Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
 if [ "${Address}" = "CN" ]
 then
   GitMirror="gitee.com"
-  GithubMirror="https://github.moeyy.xyz/"
+  GithubMirror_1="https://github.moeyy.xyz/"
+  GithubMirror_2="https://ghfast.top/"
 else
   GitMirror="github.com"
-  GithubMirror=""
+  GithubMirror_1=""
+  GithubMirror_2=""
 fi
 
 config=$HOME/.config/meme_generator/config.toml
@@ -113,6 +115,70 @@ then
 fi
 }
 
+# 添加git操作函数，支持镜像自动切换
+git_clone() {
+  repo_url="$1"
+  target_dir="$2"
+  log_file="$3"
+  
+  # 先尝试使用主镜像
+  if git clone ${GithubMirror_1}${repo_url} ${target_dir} >> ${log_file} 2>&1; then
+    return 0
+  else
+    echo -e "${yellow}主镜像访问失败，尝试使用备用镜像...${background}" >> ${log_file}
+    # 尝试使用备用镜像
+    if git clone ${GithubMirror_2}${repo_url} ${target_dir} >> ${log_file} 2>&1; then
+      return 0
+    else
+      # 都失败了，尝试直接访问
+      echo -e "${yellow}备用镜像也失败，尝试直接访问...${background}" >> ${log_file}
+      if git clone ${repo_url} ${target_dir} >> ${log_file} 2>&1; then
+        return 0
+      else
+        return 1
+      fi
+    fi
+  fi
+}
+
+# 添加git更新函数，支持镜像自动切换
+git_update() {
+  repo_dir="$1"
+  log_file="$2"
+  
+  cd ${repo_dir}
+  
+  # 获取当前远程仓库URL
+  remote_url=$(git remote get-url origin 2>/dev/null)
+  
+  # 尝试直接更新
+  if git fetch --all >> ${log_file} 2>&1 && git reset --hard origin/main >> ${log_file} 2>&1 && git pull >> ${log_file} 2>&1; then
+    return 0
+  else
+    echo -e "${yellow}更新失败，尝试修改远程URL使用备用镜像...${background}" >> ${log_file}
+    
+    # 提取原始URL
+    original_url=${remote_url#*//*/}
+    
+    # 尝试使用主镜像
+    git remote set-url origin ${GithubMirror_1}${original_url} >> ${log_file} 2>&1
+    if git fetch --all >> ${log_file} 2>&1 && git reset --hard origin/main >> ${log_file} 2>&1 && git pull >> ${log_file} 2>&1; then
+      return 0
+    else
+      echo -e "${yellow}主镜像失败，尝试使用备用镜像...${background}" >> ${log_file}
+      
+      # 尝试使用备用镜像
+      git remote set-url origin ${GithubMirror_2}${original_url} >> ${log_file} 2>&1
+      if git fetch --all >> ${log_file} 2>&1 && git reset --hard origin/main >> ${log_file} 2>&1 && git pull >> ${log_file} 2>&1; then
+        return 0
+      else
+        echo -e "${red}所有镜像都失败，更新失败${background}" >> ${log_file}
+        return 1
+      fi
+    fi
+  fi
+}
+
 install_meme_generator(){
 if [ -d ${install_path}/meme-generator ]; then
   echo -e ${yellow}您已安装meme生成器${background}
@@ -151,7 +217,11 @@ cd ${install_path}
 
 # 克隆meme-generator仓库
 echo -e ${green}克隆meme-generator仓库...${background}
-git clone ${GithubMirror}https://github.com/MemeCrafters/meme-generator.git
+if ! git_clone "https://github.com/MemeCrafters/meme-generator.git" "${install_path}/meme-generator" "/dev/null"; then
+  echo -e ${red}克隆meme-generator仓库失败${background}
+  echo -en ${yellow}回车返回${background};read
+  return 1
+fi
 
 # 创建虚拟环境
 cd ${install_path}/meme-generator
@@ -205,13 +275,17 @@ python -m meme_generator.cli meme download
 
 # 下载额外图片 - 1
 echo -e ${green}下载额外图片meme-generator-contrib...${background}
-cd ${install_path}
-git clone ${GithubMirror}https://github.com/MemeCrafters/meme-generator-contrib.git
+if ! git_clone "https://github.com/MemeCrafters/meme-generator-contrib.git" "${install_path}/meme-generator-contrib" "/dev/null"; then
+  echo -e ${red}克隆meme-generator-contrib仓库失败${background}
+  echo -e ${yellow}继续安装其他组件...${background}
+fi
 
 # 下载额外图片 - 2
 echo -e ${green}下载额外图片meme_emoji...${background}
-cd ${install_path}
-git clone ${GithubMirror}https://github.com/anyliew/meme_emoji.git
+if ! git_clone "https://github.com/anyliew/meme_emoji.git" "${install_path}/meme_emoji" "/dev/null"; then
+  echo -e ${red}克隆meme_emoji仓库失败${background}
+  echo -e ${yellow}继续安装其他组件...${background}
+fi
 
 # 安装字体
 echo -e ${green}安装字体...${background}
@@ -570,27 +644,27 @@ auto_update_meme_generator(){
 
   # 更新meme-generator
   echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在更新meme生成器...${background}" >> ${log_file}
-  cd ${install_path}/meme-generator
-  git fetch --all >> ${log_file} 2>&1
-  git reset --hard origin/main >> ${log_file} 2>&1
-  git pull >> ${log_file} 2>&1
+  if ! git_update "${install_path}/meme-generator" "${log_file}"; then
+    echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] meme-generator更新失败${background}" >> ${log_file}
+  else
+    source venv/bin/activate
+    python -m pip install . >> ${log_file} 2>&1
+  fi
 
   source venv/bin/activate
   python -m pip install . >> ${log_file} 2>&1
 
   # 更新meme-generator-contrib
   echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在更新meme-generator-contrib...${background}" >> ${log_file}
-  cd ${install_path}/meme-generator-contrib
-  git fetch --all >> ${log_file} 2>&1
-  git reset --hard origin/main >> ${log_file} 2>&1
-  git pull >> ${log_file} 2>&1
+  if ! git_update "${install_path}/meme-generator-contrib" "${log_file}"; then
+    echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] meme-generator-contrib更新失败${background}" >> ${log_file}
+  fi
 
   # 更新meme_emoji
   echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在更新meme_emoji...${background}" >> ${log_file}
-  cd ${install_path}/meme_emoji
-  git fetch --all >> ${log_file} 2>&1
-  git reset --hard origin/main >> ${log_file} 2>&1
-  git pull >> ${log_file} 2>&1
+  if ! git_update "${install_path}/meme_emoji" "${log_file}"; then
+    echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] meme_emoji更新失败${background}" >> ${log_file}
+  fi
 
   echo -e "${green}[$(date "+%Y-%m-%d %H:%M:%S")] 更新完成！${background}" >> ${log_file}
   
