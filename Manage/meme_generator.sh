@@ -1,5 +1,5 @@
 #!/bin/env bash
-SCRIPT_VERSION="1.0.6"
+SCRIPT_VERSION="1.0.01"
 
 export red="\033[31m"
 export green="\033[32m"
@@ -684,6 +684,11 @@ auto_update_meme_generator(){
 }
 
 setup_auto_update(){
+      # 禁用cron定时自动更新
+      echo -en ${yellow}cron定时方案无法执行自动更新，已禁用cron定时自动更新功能，请自己有空的时候手动更新哦${background};read
+      return
+
+
   echo -en ${yellow}是否开启meme生成器自动更新? [Y/n]:${background};read yn
   echo -e ${cyan}启动meme生成器之后将会在每天凌晨1点自动同步更新 meme GitHub 仓库并重启${background}
   case ${yn} in
@@ -717,6 +722,11 @@ toggle_auto_update(){
     crontab -l 2>/dev/null | grep -v "meme_generator_auto_update" | crontab -
     echo -e ${yellow}已关闭meme生成器的自动更新${background}
   else
+      # 禁用cron定时自动更新
+      echo -en ${yellow}cron定时方案无法执行自动更新，已禁用cron定时自动更新功能，请自己有空的时候手动更新哦${background};read
+      return
+
+
     # 如果不存在，则添加自动更新的cron任务
     (crontab -l 2>/dev/null; echo "0 1 * * * bash ${SCRIPT_LOCAL_PATH} auto_update # meme_generator_auto_update") | crontab -
     echo -e ${green}已开启meme生成器的自动更新${background}
