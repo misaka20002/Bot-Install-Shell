@@ -55,7 +55,7 @@ bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/inst
 - 选择 `TRSS-Yunzai` 并 `回车` 来安装TRSS崽
 - 返回主页，选择 `拉格朗日` 或者 `NapCat` 安装、配置接口后启动  `拉格朗日` 或者 `NapCat` 
 - 启动 `TRSS-Yunzai` 
-- 再后台正常启动后，可以选择自己喜欢的插件安装啦~
+- 在后台正常启动后，可以选择自己喜欢的插件安装啦~
 
 </details>
 
