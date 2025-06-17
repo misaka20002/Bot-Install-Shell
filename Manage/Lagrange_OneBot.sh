@@ -61,11 +61,6 @@ then
 fi
 }
 
-function tmux_attach(){
-Tmux_Name="$1"
-tmux attach -t ${Tmux_Name} > /dev/null 2>&1
-}
-
 function tmux_kill_session(){
 Tmux_Name="$1"
 tmux kill-session -t ${Tmux_Name}
@@ -80,33 +75,6 @@ then
 else
     return 1
 fi
-}
-
-function lagrange_curl(){
-Port=2536
-if curl -sL 127.0.0.1:${Port} > /dev/null 2>&1
-then
-    return 0
-else
-    return 1
-fi
-}
-
-function tmux_gauge(){
-i=0
-Tmux_Name="$1"
-tmux_ls ${Tmux_Name} & > /dev/null 2>&1
-until lagrange_curl
-do
-    i=$((${i}+1))
-    a="${a}#"
-    echo -ne "\r${i}% ${a}\r"
-    if [[ ${i} == 40 ]];then
-        echo
-        return 1
-    fi
-done
-echo
 }
 
 bot_tmux_attach_log(){
@@ -161,6 +129,7 @@ else
 fi
 
 mkdir -p $INSTALL_DIR
+mkdir -p $INSTALL_DIR/accounts
 
 echo -e ${yellow}正在下载拉格朗日签名服务器...${background}
 until wget -O lagrange.tar.gz -c ${LAGRANGE_URL}
@@ -178,324 +147,159 @@ pv lagrange.tar.gz | tar -zxf - -C $TMP_DIR
 # 移动正确的文件到安装目录
 echo -e ${yellow}正在移动可执行文件...${background}
 if [ -f $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/Lagrange.OneBot ]; then
-    # 清空安装目录
-    rm -rf $INSTALL_DIR/*
-    
-    # 复制所有文件到安装目录
-    cp -r $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/* $INSTALL_DIR/
+    # 复制可执行文件到安装目录
+    cp $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/Lagrange.OneBot $INSTALL_DIR/
+    chmod +x $INSTALL_DIR/Lagrange.OneBot
     
     # 清理临时文件
     echo -e ${yellow}正在清理临时文件...${background}
     rm -f lagrange.tar.gz
     rm -rf $TMP_DIR
-    
-    chmod +x $INSTALL_DIR/Lagrange.OneBot
 else
     echo -e ${red}未找到可执行文件，解压路径可能有变化${background}
     echo -e ${yellow}请检查解压后的文件结构${background}
     exit 1
 fi
 
-write_config
-
-if [ ! "${install_Lagrange}" == "true" ]
-then
-    echo -en ${yellow}安装完成 是否启动?[Y/n]${background};read yn
-    case ${yn} in
-    Y|y)
-    start_Lagrange
-    ;;
-    esac
-fi
-}
-
-write_config(){
-echo -e ${yellow}正在写入配置文件...${background}
-cat > $CONFIG_FILE << EOF
-{
-    "\$schema": "https://raw.githubusercontent.com/LagrangeDev/Lagrange.Core/master/Lagrange.OneBot/Resources/appsettings_schema.json",
-    "Logging": {
-        "LogLevel": {
-            "Default": "Information",
-            "Microsoft": "Warning",
-            "Microsoft.Hosting.Lifetime": "Information"
-        }
-    },
-    "SignServerUrl": "https://sign.lagrangecore.org/api/sign/30366",
-    "SignProxyUrl": "",
-    "MusicSignServerUrl": "https://ss.xingzhige.com/music_card/card",
-    "Account": {
-        "Uin": 0,
-        "Protocol": "Linux",
-        "AutoReconnect": true,
-        "GetOptimumServer": true
-    },
-    "Message": {
-        "IgnoreSelf": true,
-        "StringPost": false
-    },
-    "QrCode": {
-        "ConsoleCompatibilityMode": false
-    },
-    "Implementations": [
-        {
-            "Type": "ReverseWebSocket",
-            "Host": "127.0.0.1",
-            "Port": 2536,
-            "Suffix": "/OneBotv11",
-            "ReconnectInterval": 5000,
-            "HeartBeatInterval": 5000,
-            "AccessToken": ""
-        }
-    ]
-}
-EOF
-echo -e ${green}配置文件写入完成${background}
-}
-
-start_Lagrange(){
-if tmux_ls lagrangebot > /dev/null 2>&1 
-then
-    echo -en ${yellow}拉格朗日签名服务器已启动 ${cyan}回车返回${background};read
-    echo
-    return
-fi
-
-Foreground_Start(){
-export Boolean=true
-while ${Boolean}
-do 
-  cd $INSTALL_DIR
-  $INSTALL_DIR/Lagrange.OneBot
-  echo -e ${red}拉格朗日签名服务器关闭 正在重启${background}
-  sleep 2s
-done
-echo -en ${cyan}回车返回${background}
-read
-echo
-}
-
-Tmux_Start(){
-Start_Stop_Restart="启动"
-export Boolean=true
-tmux_new lagrangebot "while ${Boolean}; do cd $INSTALL_DIR && $INSTALL_DIR/Lagrange.OneBot; echo -e ${red}拉格朗日签名服务器关闭 正在重启${background}; done"
-echo
-echo -e ${green}新手说明：${background}
-echo -e ${cyan}1.首次启动需要打开窗口进行扫码登录；${background}
-echo -e ${cyan}2.进入TMUX窗口后，退出请按 Ctrl+B 然后按 D${background}
-echo -en ${green}${Start_Stop_Restart}成功 是否打开窗口 [Y/N]:${background}
-read YN
-case ${YN} in
-Y|y)
-    bot_tmux_attach_log lagrangebot
-;;
+echo -e ${green}安装完成${background}
+echo -en ${cyan}现在要创建一个QQ账号吗？[Y/n]${background};read yn
+case ${yn} in
+Y|y|"")
+  manage_multi_qq
+  ;;
 *)
-    echo -en ${cyan}回车返回${background}
-    read
-    echo
-;;
+  echo -en ${cyan}回车返回主菜单${background};read
+  ;;
 esac
-}
-
-echo
-echo -e ${white}"====="${green}呆毛版-拉格朗日签名服务器${white}"====="${background}
-echo -e ${cyan}请选择启动方式${background}
-echo -e  ${green}1.  ${cyan}前台启动（首次登陆）${background}
-echo -e  ${green}2.  ${cyan}TMUX后台启动（推荐）${background}
-echo -e  ${green}说明：${cyan}两种方式都支持自动重启${background}
-echo "========================="
-echo -en ${green}请输入您的选项: ${background};read num
-case ${num} in 
-1)
-Foreground_Start
-;;
-2)
-Tmux_Start
-;;
-*)
-echo
-echo -e ${red}输入错误${background}
-exit
-;;
-esac
-}
-
-stop_Lagrange(){
-if tmux_ls lagrangebot > /dev/null 2>&1 
-then
-    echo -e ${yellow}正在停止拉格朗日签名服务器${background}
-    export Boolean=false
-    tmux_kill_session lagrangebot > /dev/null 2>&1
-    PID=$(ps aux | grep Lagrange.OneBot | sed '/grep/d' | awk '{print $2}')
-    if ! [ -z ${PID} ];then
-        kill ${PID}
-    fi
-    echo -en ${red}拉格朗日签名服务器停止成功 ${cyan}回车返回${background}
-    read
-    echo
-    return
-else
-    echo -en ${red}拉格朗日签名服务器未启动 ${cyan}回车返回${background}
-    read
-    echo
-    return
-fi
-}
-
-restart_Lagrange(){
-if tmux_ls lagrangebot > /dev/null 2>&1 
-then
-    tmux_kill_session lagrangebot
-    export Start_Stop_Restart="重启"
-    start_Lagrange
-else
-    echo -e ${red}拉格朗日签名服务器未启动${background}
-    echo
-    return
-fi
 }
 
 update_Lagrange(){
-if tmux_ls lagrangebot > /dev/null 2>&1 
-then
-    echo -e ${yellow}正在停止拉格朗日签名服务器${background}
-    tmux_kill_session lagrangebot > /dev/null 2>&1
-    PID=$(ps aux | grep Lagrange.OneBot | sed '/grep/d' | awk '{print $2}')
-    if [ ! -z ${PID} ];then
-        kill -9 ${PID}
+  if ! is_lagrange_installed; then
+    echo -e ${red}"Lagrange未安装，请先安装Lagrange"${background}
+    echo -en ${cyan}"按回车返回主菜单"${background};read
+    return
+  fi
+
+  echo -e ${yellow}正在下载最新版本...${background}
+  rm -f lagrange.tar.gz
+  until wget -O lagrange.tar.gz -c ${LAGRANGE_URL}
+  do
+    echo -e ${red}下载失败 ${green}正在重试${background}
+  done
+
+  # 创建临时目录进行解压
+  TMP_DIR=$HOME/temp_lagrange
+  rm -rf $TMP_DIR
+  mkdir -p $TMP_DIR
+
+  echo -e ${yellow}正在解压文件,请耐心等候${background}
+  pv lagrange.tar.gz | tar -zxf - -C $TMP_DIR
+
+  # 停止所有账号的服务
+  echo -e ${yellow}正在停止所有账号的服务...${background}
+  for acc_dir in "$INSTALL_DIR/accounts"/*; do
+    if [ -d "$acc_dir" ]; then
+      acc_name=$(basename "$acc_dir")
+      tmux_name="lagrange_$acc_name"
+      
+      if tmux_ls $tmux_name > /dev/null 2>&1; then
+        echo -e ${yellow}停止账号 ${cyan}$acc_name${yellow} 的服务...${background}
+        tmux_kill_session $tmux_name > /dev/null 2>&1
+      fi
     fi
-    echo
-fi
+  done
 
-echo -e ${yellow}正在下载最新版本...${background}
-rm -f lagrange.tar.gz
-until wget -O lagrange.tar.gz -c ${LAGRANGE_URL}
-do
-  echo -e ${red}下载失败 ${green}正在重试${background}
-done
+  # 更新主程序
+  echo -e ${yellow}正在更新主程序...${background}
+  if [ -f $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/Lagrange.OneBot ]; then
+      # 备份原可执行文件
+      if [ -f $INSTALL_DIR/Lagrange.OneBot ]; then
+        mv $INSTALL_DIR/Lagrange.OneBot $INSTALL_DIR/Lagrange.OneBot.bak
+      fi
+      
+      # 复制新的可执行文件
+      cp $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/Lagrange.OneBot $INSTALL_DIR/
+      chmod +x $INSTALL_DIR/Lagrange.OneBot
+      
+      # 清理临时文件
+      echo -e ${yellow}正在清理临时文件...${background}
+      rm -f lagrange.tar.gz
+      rm -rf $TMP_DIR
+      
+      echo -e ${green}更新完成${background}
+  else
+      echo -e ${red}未找到可执行文件，解压路径可能有变化${background}
+      echo -e ${yellow}请检查解压后的文件结构${background}
+      exit 1
+  fi
 
-echo -e ${yellow}正在备份配置文件...${background}
-if [ -f $CONFIG_FILE ]; then
-    cp $CONFIG_FILE $CONFIG_FILE.bak
-fi
-
-# 创建临时目录进行解压
-TMP_DIR=$HOME/temp_lagrange
-rm -rf $TMP_DIR
-mkdir -p $TMP_DIR
-
-echo -e ${yellow}正在解压文件,请耐心等候${background}
-pv lagrange.tar.gz | tar -zxf - -C $TMP_DIR
-
-# 删除特定文件和文件夹,保留其他文件
-echo -e ${yellow}正在删除旧版本文件...${background}
-rm -f $INSTALL_DIR/Lagrange.OneBot
-echo -e ${yellow}将不会删除数据库文件...${background}
-# rm -rf $INSTALL_DIR/lagrange-0-db
-
-# 移动正确的文件到安装目录
-echo -e ${yellow}正在移动可执行文件...${background}
-if [ -f $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/Lagrange.OneBot ]; then
-    # 复制所有文件到安装目录,但不覆盖配置文件
-    cp -r $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/* $INSTALL_DIR/
-    
-    # 清理临时文件
-    echo -e ${yellow}正在清理临时文件...${background}
-    rm -f lagrange.tar.gz
-    rm -rf $TMP_DIR
-    
-    chmod +x $INSTALL_DIR/Lagrange.OneBot
-else
-    echo -e ${red}未找到可执行文件，解压路径可能有变化${background}
-    echo -e ${yellow}请检查解压后的文件结构${background}
-    exit 1
-fi
-
-echo -e ${yellow}正在恢复配置文件...${background}
-if [ -f $CONFIG_FILE.bak ]; then
-    cp $CONFIG_FILE.bak $CONFIG_FILE
-    rm -f $CONFIG_FILE.bak
-else
-    write_config
-fi
-
-echo -e ${green}更新完成${background}
-echo -en ${yellow}是否启动服务器?[Y/n]${background};read yn
-case ${yn} in
-Y|y)
-start_Lagrange
-;;
-esac
+  echo -en ${yellow}是否重新启动所有账号? [Y/n]:${background};read restart_all
+  
+  case $restart_all in
+    n|N)
+      echo -e ${yellow}请稍后手动启动账号${background}
+      ;;
+    *)
+      # 启动所有之前运行的账号
+      for acc_dir in "$INSTALL_DIR/accounts"/*; do
+        if [ -d "$acc_dir" ]; then
+          acc_name=$(basename "$acc_dir")
+          tmux_name="lagrange_$acc_name"
+          
+          echo -e ${yellow}启动账号 ${cyan}$acc_name${yellow} ...${background}
+          local QQ_DIR="$INSTALL_DIR/accounts/$acc_name"
+          tmux_new $tmux_name "cd \"$QQ_DIR\" && $INSTALL_DIR/Lagrange.OneBot; echo -e ${red}账号 $acc_name 已关闭，正在重启${background}; sleep 2"
+        fi
+      done
+      echo -e ${green}所有账号已重启${background}
+      ;;
+  esac
+  
+  echo -en ${cyan}回车返回${background};read
 }
 
 uninstall_Lagrange(){
-if [ ! -d $INSTALL_DIR ];then
+  if [ ! -d $INSTALL_DIR ];then
     echo -en ${red}您还没有部署拉格朗日签名服务器!!! ${cyan}回车返回${background};read
     return
-fi
+  fi
 
-echo -e ${white}"====="${red}卸载拉格朗日签名服务器${white}"====="${background}
-echo -e ${yellow}警告: 此操作将完全删除拉格朗日签名服务器${background}
-echo -e ${yellow}这将删除以下内容:${background}
-echo -e ${cyan}• 程序可执行文件${background}
-echo -e ${cyan}• 数据库文件${background}
-echo -e ${cyan}• 配置文件（可选择保留）${background}
-echo
-echo -en ${red}您确定要卸载拉格朗日签名服务器吗? [y/N]: ${background};read confirm_uninstall
+  echo -e ${white}"====="${red}卸载拉格朗日签名服务器${white}"====="${background}
+  echo -e ${yellow}警告: 此操作将完全删除拉格朗日签名服务器${background}
+  echo -e ${yellow}这将删除以下内容:${background}
+  echo -e ${cyan}• 程序可执行文件${background}
+  echo -e ${cyan}• 所有账号的数据文件${background}
+  echo -e ${cyan}• 所有配置文件${background}
+  echo
+  echo -en ${red}您确定要卸载拉格朗日签名服务器吗? [输入DELETE确认]: ${background};read confirm_uninstall
 
-case ${confirm_uninstall} in
-y|Y)
-    echo -e ${yellow}用户确认卸载，开始执行...${background}
-    ;;
-*)
+  if [ "$confirm_uninstall" != "DELETE" ]; then
     echo -e ${green}已取消卸载操作${background}
     echo -en ${cyan}回车返回${background};read
     return
-    ;;
-esac
+  fi
 
-echo -e ${yellow}正在停止服务器运行${background}
-tmux_kill_session lagrangebot > /dev/null 2>&1
-PID=$(ps aux | grep Lagrange.OneBot | sed '/grep/d' | awk '{print $2}')
-if [ ! -z ${PID} ];then
-    kill -9 ${PID}
-fi
+  echo -e ${yellow}正在停止所有账号的服务...${background}
+  
+  # 停止所有账号的服务
+  for acc_dir in "$INSTALL_DIR/accounts"/*; do
+    if [ -d "$acc_dir" ]; then
+      acc_name=$(basename "$acc_dir")
+      tmux_name="lagrange_$acc_name"
+      
+      if tmux_ls $tmux_name > /dev/null 2>&1; then
+        echo -e ${yellow}停止账号 ${cyan}$acc_name${yellow} 的服务...${background}
+        tmux_kill_session $tmux_name > /dev/null 2>&1
+      fi
+    fi
+  done
 
-echo -e ${yellow}正在删除核心文件...${background}
-rm -f $INSTALL_DIR/Lagrange.OneBot
-echo -e ${yellow}正在删除数据库文件...${background}
-rm -rf $INSTALL_DIR/lagrange-0-db
+  # 删除所有文件
+  echo -e ${yellow}正在删除所有文件...${background}
+  rm -rf $INSTALL_DIR
 
-echo -en ${yellow}是否保留配置文件? [Y/n]:${background};read keep_config
-case ${keep_config} in
-n|N)
-    echo -e ${yellow}正在删除配置文件...${background}
-    rm -f $CONFIG_FILE
-    ;;
-*)
-    echo -e ${green}已保留配置文件${background}
-    ;;
-esac
-
-echo -en ${yellow}是否保留账号备份数据? [Y/n]:${background};read keep_accounts
-case ${keep_accounts} in
-n|N)
-    echo -e ${yellow}正在删除账号备份数据...${background}
-    rm -rf $INSTALL_DIR/accounts
-    ;;
-*)
-    echo -e ${green}已保留账号备份数据${background}
-    ;;
-esac
-
-# 检查是否还有其他文件，如果目录为空则删除
-if [ -z "$(ls -A $INSTALL_DIR 2>/dev/null)" ]; then
-    echo -e ${yellow}正在删除空的安装目录...${background}
-    rmdir $INSTALL_DIR
-fi
-
-echo -e ${green}卸载完成${background}
-echo -en ${cyan}回车返回${background};read
+  echo -e ${green}拉格朗日签名服务器已完全卸载${background}
+  echo -en ${cyan}回车返回${background};read
 }
 
 log_Lagrange(){
@@ -506,43 +310,6 @@ then
     return
 fi
 bot_tmux_attach_log lagrangebot
-}
-
-change_lagrange_version(){
-    echo -e ${white}"====="${green}呆毛版-拉格朗日签名版本${white}"====="${background}
-    
-    # 读取当前版本号
-    current_url=$(grep -E "SignServerUrl" $CONFIG_FILE | sed 's/.*"SignServerUrl": "\(.*\)",/\1/')
-    current_version=$(echo $current_url | sed -E 's/.*\/([0-9]+)$/\1/')
-    
-    echo -e ${cyan}当前签名版本: ${green}${current_version}${background}
-    echo -e ${cyan}请选择签名服务器版本${background}
-    echo -e  ${green} 1.  ${cyan}版本: 30366 \(lagrangecore.org\)${background}
-    echo -e  ${green} 2.  ${cyan}版本: 25765 \(0w0.ing\)${background}
-    echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read num
-    
-    case ${num} in
-    1|30366)
-        new_url="https://sign.lagrangecore.org/api/sign/30366"
-        new_version="30366"
-        ;;
-    2|25765)
-        new_url="https://sign.0w0.ing/api/sign/25765"
-        new_version="25765"
-        ;;
-    *)
-        echo -e ${red}输入错误${background}
-        echo -en ${cyan}回车返回${background};read
-        return
-        ;;
-    esac
-    
-    # 替换 SignServerUrl
-    sed -i "s|\"SignServerUrl\": \".*\"|\"SignServerUrl\": \"$new_url\"|" $CONFIG_FILE
-    
-    echo -e ${green}签名版本已更改为: ${cyan}${new_version}${background}
-    echo -en ${cyan}回车返回${background};read
 }
 
 # 检查jq命令是否存在
@@ -595,7 +362,7 @@ sync_token_to_trss() {
   if [ ! -f "$trss_config" ]; then
     echo -e ${red}未找到TRSS-Yunzai配置文件: ${yellow}$trss_config${background}
     echo -e ${yellow}请检查TRSS-Yunzai是否已安装或配置路径是否正确${background}
-    sleep 2
+    echo -en ${cyan}回车返回${background};read
     return
   fi
   
@@ -681,8 +448,345 @@ EOF
   echo -en ${yellow}要记得重启 TRSS-Yunzai 哦~ ${cyan} 回车返回${background};read
 }
 
-manage_implementations(){
-  if [ ! -f $CONFIG_FILE ]; then
+start_lagrange_for_account(){
+  local qq_name="$1"
+  local QQ_DIR="$INSTALL_DIR/accounts/$qq_name"
+  local tmux_name="lagrange_$qq_name"
+  
+  if tmux_ls $tmux_name > /dev/null 2>&1; then
+    echo -en ${yellow}账号 ${cyan}$qq_name ${yellow}已启动 ${cyan}回车返回${background};read
+    echo
+    return
+  fi
+  
+  echo -e ${white}"====="${green}启动账号: ${cyan}$qq_name${white}"====="${background}
+  echo -e ${cyan}请选择启动方式${background}
+  echo -e  ${green}1.  ${cyan}前台启动（首次登陆）${background}
+  echo -e  ${green}2.  ${cyan}TMUX后台启动（推荐）${background}
+  echo "========================="
+  echo -en ${green}请输入您的选项: ${background};read start_mode
+  
+  case $start_mode in
+    1)
+      # 前台启动
+      cd "$QQ_DIR"
+      $INSTALL_DIR/Lagrange.OneBot
+      echo -en ${cyan}操作已完成，按回车返回${background};read
+      ;;
+    2)
+      # TMUX后台启动
+      tmux_new $tmux_name "cd \"$QQ_DIR\" && $INSTALL_DIR/Lagrange.OneBot; echo -e ${red}账号 $qq_name 已关闭，正在重启${background}; sleep 2"
+      
+      echo -e ${green}新手说明：${background}
+      echo -e ${cyan}1.首次启动需要打开窗口进行扫码登录；${background}
+      echo -e ${cyan}2.进入TMUX窗口后，退出请按 Ctrl+B 然后按 D${background}
+      echo -en ${green}启动成功 是否打开窗口 [Y/N]:${background};read yn
+      
+      case $yn in
+        Y|y)
+          bot_tmux_attach_log $tmux_name
+          ;;
+        *)
+          echo -en ${cyan}回车返回${background};read
+          ;;
+      esac
+      ;;
+    *)
+      echo -e ${red}输入错误${background}
+      echo -en ${cyan}回车返回${background};read
+      ;;
+  esac
+}
+
+stop_lagrange_for_account(){
+  local qq_name="$1"
+  local tmux_name="lagrange_$qq_name"
+  
+  if tmux_ls $tmux_name > /dev/null 2>&1; then
+    echo -e ${yellow}正在停止账号 ${cyan}$qq_name${yellow} 的服务...${background}
+    tmux_kill_session $tmux_name > /dev/null 2>&1
+    
+    # 查找并杀死可能残留的进程
+    local PID=$(ps aux | grep "cd \"$INSTALL_DIR/accounts/$qq_name\"" | grep Lagrange.OneBot | sed '/grep/d' | awk '{print $2}')
+    if [ ! -z "$PID" ]; then
+      kill -9 $PID
+    fi
+    
+    echo -en ${green}账号 ${cyan}$qq_name ${green}已停止 ${cyan}回车返回${background};read
+  else
+    echo -en ${red}账号 ${cyan}$qq_name ${red}未启动 ${cyan}回车返回${background};read
+  fi
+}
+
+restart_lagrange_for_account(){
+  local qq_name="$1"
+  local tmux_name="lagrange_$qq_name"
+  
+  if tmux_ls $tmux_name > /dev/null 2>&1; then
+    echo -e ${yellow}正在重启账号 ${cyan}$qq_name${yellow} 的服务...${background}
+    tmux_kill_session $tmux_name > /dev/null 2>&1
+    
+    # 短暂等待确保完全停止
+    sleep 2
+    
+    # 重新启动
+    local QQ_DIR="$INSTALL_DIR/accounts/$qq_name"
+    tmux_new $tmux_name "cd \"$QQ_DIR\" && $INSTALL_DIR/Lagrange.OneBot; echo -e ${red}账号 $qq_name 已关闭，正在重启${background}; sleep 2"
+    
+    echo -en ${green}账号 ${cyan}$qq_name ${green}已重启 ${cyan}回车返回${background};read
+  else
+    echo -e ${red}账号 ${cyan}$qq_name ${red}未启动，正在启动...${background}
+    start_lagrange_for_account "$qq_name"
+  fi
+}
+
+view_log_for_account(){
+  local qq_name="$1"
+  local tmux_name="lagrange_$qq_name"
+  
+  if ! tmux_ls $tmux_name > /dev/null 2>&1; then
+    echo -en ${red}账号 ${cyan}$qq_name ${red}未启动 ${cyan}回车返回${background};read
+    return
+  fi
+  
+  bot_tmux_attach_log $tmux_name
+}
+
+relogin_qq(){
+  local qq_name="$1"
+  local QQ_DIR="$INSTALL_DIR/accounts/$qq_name"
+  local tmux_name="lagrange_$qq_name"
+  
+  echo -e ${yellow}重新登录将删除当前账号 ${cyan}$qq_name ${yellow}的登录信息${background}
+  echo -en ${cyan}确认重新登录吗? [y/N]: ${background};read confirm
+  
+  case $confirm in
+    y|Y)
+      # 停止当前服务
+      if tmux_ls $tmux_name > /dev/null 2>&1; then
+        echo -e ${yellow}正在停止当前服务...${background}
+        tmux_kill_session $tmux_name > /dev/null 2>&1
+        sleep 2
+      fi
+      
+      # 删除登录信息
+      echo -e ${yellow}正在删除登录信息...${background}
+      rm -f "$QQ_DIR/device.json" "$QQ_DIR/keystore.json"
+      
+      echo -e ${green}登录信息已删除${background}
+      echo -en ${cyan}是否立即启动并重新登录? [Y/n]: ${background};read start_now
+      
+      case $start_now in
+        n|N)
+          return
+          ;;
+        *)
+          start_lagrange_for_account "$qq_name"
+          ;;
+      esac
+      ;;
+    *)
+      echo -e ${yellow}操作已取消${background}
+      echo -en ${cyan}回车返回${background};read
+      ;;
+  esac
+}
+
+delete_qq(){
+  local qq_name="$1"
+  local QQ_DIR="$INSTALL_DIR/accounts/$qq_name"
+  local tmux_name="lagrange_$qq_name"
+  
+  echo -e ${red}警告: 此操作将删除账号 ${cyan}$qq_name ${red}的所有数据，包括配置和登录信息${background}
+  echo -en ${cyan}确认删除吗? [输入DELETE确认]: ${background};read confirm
+  
+  if [ "$confirm" != "DELETE" ]; then
+    echo -e ${yellow}操作已取消${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+  fi
+  
+  # 停止当前服务
+  if tmux_ls $tmux_name > /dev/null 2>&1; then
+    echo -e ${yellow}正在停止服务...${background}
+    tmux_kill_session $tmux_name > /dev/null 2>&1
+    
+    # 查找并杀死可能残留的进程
+    local PID=$(ps aux | grep "cd \"$QQ_DIR\"" | grep Lagrange.OneBot | sed '/grep/d' | awk '{print $2}')
+    if [ ! -z "$PID" ]; then
+      kill -9 $PID
+    fi
+    
+    sleep 2
+  fi
+  
+  # 删除账号目录
+  echo -e ${yellow}正在删除账号数据...${background}
+  rm -rf "$QQ_DIR"
+  
+  echo -e ${green}账号 ${cyan}$qq_name ${green}已删除${background}
+  echo -en ${cyan}按回车返回上级菜单${background};read
+}
+
+rewrite_config_for_account(){
+  local qq_name="$1"
+  local config_file="$INSTALL_DIR/accounts/$qq_name/appsettings.json"
+  
+  if [ -f "$config_file" ]; then
+    echo -e ${yellow}警告: 这将覆盖账号 ${cyan}$qq_name ${yellow}的配置文件${background}
+    echo -en ${cyan}是否继续重写配置文件? [y/N]:${background};read confirm
+    case $confirm in
+    y|Y)
+        create_config_for_account "$qq_name"
+        echo -en ${cyan}回车返回${background};read
+        ;;
+    *)
+        echo -e ${yellow}操作已取消${background}
+        echo -en ${cyan}回车返回${background};read
+        ;;
+    esac
+  else
+    create_config_for_account "$qq_name"
+    echo -en ${cyan}回车返回${background};read
+  fi
+}
+
+change_sign_version_for_account(){
+  local qq_name="$1"
+  local config_file="$INSTALL_DIR/accounts/$qq_name/appsettings.json"
+  
+  if [ ! -f "$config_file" ]; then
+    echo -e ${red}配置文件不存在${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+  fi
+  
+  echo -e ${white}"====="${green}呆毛版-拉格朗日签名版本${white}"====="${background}
+  
+  # 读取当前版本号
+  current_url=$(grep -E "SignServerUrl" "$config_file" | sed 's/.*"SignServerUrl": "\(.*\)",/\1/')
+  current_version=$(echo $current_url | sed -E 's/.*\/([0-9]+)$/\1/')
+  
+  echo -e ${cyan}当前签名版本: ${green}${current_version}${background}
+  echo -e ${cyan}请选择签名服务器版本${background}
+  echo -e  ${green} 1.  ${cyan}版本: 30366 \(lagrangecore.org\)${background}
+  echo -e  ${green} 2.  ${cyan}版本: 25765 \(0w0.ing\)${background}
+  echo "========================="
+  echo -en ${green}请输入您的选项: ${background};read num
+  
+  case ${num} in
+  1|30366)
+      new_url="https://sign.lagrangecore.org/api/sign/30366"
+      new_version="30366"
+      ;;
+  2|25765)
+      new_url="https://sign.0w0.ing/api/sign/25765"
+      new_version="25765"
+      ;;
+  *)
+      echo -e ${red}输入错误${background}
+      echo -en ${cyan}回车返回${background};read
+      return
+      ;;
+  esac
+  
+  # 替换 SignServerUrl
+  sed -i "s|\"SignServerUrl\": \".*\"|\"SignServerUrl\": \"$new_url\"|" "$config_file"
+  
+  echo -e ${green}账号 ${cyan}$qq_name ${green}的签名版本已更改为: ${cyan}${new_version}${background}
+  echo -en ${cyan}回车返回${background};read
+}
+
+install_Lagrange(){
+if [ -d $INSTALL_DIR ];then
+  echo -e ${yellow}您已安装拉格朗日签名服务器${background}
+  echo -en ${cyan}是否重新安装? [Y/n]${background};read yn
+  case ${yn} in
+  Y|y)
+    rm -rf $INSTALL_DIR
+    ;;
+  *)
+    return
+    ;;
+  esac
+fi
+
+if [ -e /etc/resolv.conf ]; then
+  if ! grep -q "8.8.8.8" /etc/resolv.conf ;then
+    cp -f /etc/resolv.conf /etc/resolv.conf.backup
+    echo -e ${yellow}DNS已备份至 /etc/resolv.conf.backup${background}
+    echo "nameserver 8.8.8.8" > /etc/resolv.conf
+    echo -e ${yellow}DNS已修改为 8.8.8.8${background}
+  fi
+fi
+
+if [ $(command -v apt) ];then
+  apt update -y
+  apt install -y tar gzip wget curl unzip git tmux pv jq
+elif [ $(command -v yum) ];then
+  yum makecache -y
+  yum install -y tar gzip wget curl unzip git tmux pv jq
+elif [ $(command -v dnf) ];then
+  dnf makecache -y
+  dnf install -y tar gzip wget curl unzip git tmux pv jq
+elif [ $(command -v pacman) ];then
+  pacman -Syy --noconfirm --needed tar gzip wget curl unzip git tmux pv jq
+else
+  echo -e ${red}不受支持的Linux发行版${background}
+  exit
+fi
+
+mkdir -p $INSTALL_DIR
+mkdir -p $INSTALL_DIR/accounts
+
+echo -e ${yellow}正在下载拉格朗日签名服务器...${background}
+until wget -O lagrange.tar.gz -c ${LAGRANGE_URL}
+do
+  echo -e ${red}下载失败 ${green}正在重试${background}
+done
+
+echo -e ${yellow}正在解压文件,请耐心等候${background}
+# 创建临时目录进行解压
+TMP_DIR=$HOME/temp_lagrange
+rm -rf $TMP_DIR
+mkdir -p $TMP_DIR
+pv lagrange.tar.gz | tar -zxf - -C $TMP_DIR
+
+# 移动正确的文件到安装目录
+echo -e ${yellow}正在移动可执行文件...${background}
+if [ -f $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/Lagrange.OneBot ]; then
+    # 复制可执行文件到安装目录
+    cp $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/Lagrange.OneBot $INSTALL_DIR/
+    chmod +x $INSTALL_DIR/Lagrange.OneBot
+    
+    # 清理临时文件
+    echo -e ${yellow}正在清理临时文件...${background}
+    rm -f lagrange.tar.gz
+    rm -rf $TMP_DIR
+else
+    echo -e ${red}未找到可执行文件，解压路径可能有变化${background}
+    echo -e ${yellow}请检查解压后的文件结构${background}
+    exit 1
+fi
+
+echo -e ${green}安装完成${background}
+echo -en ${cyan}现在要创建一个QQ账号吗？[Y/n]${background};read yn
+case ${yn} in
+Y|y|"")
+  manage_multi_qq
+  ;;
+*)
+  echo -en ${cyan}回车返回主菜单${background};read
+  ;;
+esac
+}
+
+manage_implementations_with_path(){
+  local custom_config_file="$1"
+  local account_name="$2"
+  local config_path="${custom_config_file:-$CONFIG_FILE}"
+  
+  if [ ! -f "$config_path" ]; then
     echo -e ${red}配置文件不存在，请先安装拉格朗日签名服务器${background}
     echo -en ${cyan}回车返回${background};read
     return
@@ -695,15 +799,20 @@ manage_implementations(){
   fi
 
   # 备份配置文件
-  cp $CONFIG_FILE $CONFIG_FILE.bak
+  cp "$config_path" "$config_path.bak"
 
   while true; do
     clear
-    echo -e ${white}"====="${green}拉格朗日OneBot连接管理${white}"====="${background}
+    # 显示标题，如果有账号名则显示
+    if [ -n "$account_name" ]; then
+      echo -e ${white}"====="${green}账号 ${cyan}$account_name${green} 的OneBot连接管理${white}"====="${background}
+    else
+      echo -e ${white}"====="${green}拉格朗日OneBot连接管理${white}"====="${background}
+    fi
     echo -e ${cyan}当前已配置的连接：${background}
     
     # 使用jq解析JSON
-    implementations=$(jq -r '.Implementations | length' $CONFIG_FILE 2>/dev/null)
+    implementations=$(jq -r '.Implementations | length' "$config_path" 2>/dev/null)
     
     # 如果jq命令失败，尝试使用grep和sed
     if [ $? -ne 0 ] || [ -z "$implementations" ]; then
@@ -717,10 +826,10 @@ manage_implementations(){
     fi
     
     for (( i=0; i<$implementations; i++ )); do
-      type=$(jq -r ".Implementations[$i].Type" $CONFIG_FILE)
-      host=$(jq -r ".Implementations[$i].Host" $CONFIG_FILE)
-      port=$(jq -r ".Implementations[$i].Port" $CONFIG_FILE)
-      suffix=$(jq -r ".Implementations[$i].Suffix // \"\"" $CONFIG_FILE)
+      type=$(jq -r ".Implementations[$i].Type" "$config_path")
+      host=$(jq -r ".Implementations[$i].Host" "$config_path")
+      port=$(jq -r ".Implementations[$i].Port" "$config_path")
+      suffix=$(jq -r ".Implementations[$i].Suffix // \"\"" "$config_path")
       echo -e ${green}$((i+1)). ${yellow}类型: ${cyan}$type${background}
       echo -e ${yellow}  地址: ${cyan}$host:$port$suffix${background}
     done
@@ -794,7 +903,7 @@ manage_implementations(){
               0) continue ;;
               *)
                 echo -e ${red}无效选项${background}
-                sleep 2
+                echo -en ${cyan}回车返回${background};read
                 continue
                 ;;
             esac
@@ -864,7 +973,7 @@ manage_implementations(){
           0) continue ;;
           *) 
             echo -e ${red}无效选项${background}
-            sleep 2
+            echo -en ${cyan}回车返回${background};read
             continue ;;
         esac
         
@@ -880,7 +989,7 @@ manage_implementations(){
                  --argjson heartbeat "$heartbeat" \
                  --arg token "$token" \
                  '.Implementations += [{"Type": $type, "Host": $host, "Port": $port, "Suffix": $suffix, "ReconnectInterval": $reconnect, "HeartBeatInterval": $heartbeat, "AccessToken": $token}]' \
-                 $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+                 "$config_path" > "$config_path.tmp" && mv "$config_path.tmp" "$config_path"
               ;;
             "Http")
               jq --arg type "$conn_type" \
@@ -888,7 +997,7 @@ manage_implementations(){
                  --argjson port "$port" \
                  --arg token "$token" \
                  '.Implementations += [{"Type": $type, "Host": $host, "Port": $port, "AccessToken": $token}]' \
-                 $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+                 "$config_path" > "$config_path.tmp" && mv "$config_path.tmp" "$config_path"
               ;;
             "HttpPost")
               jq --arg type "$conn_type" \
@@ -900,7 +1009,7 @@ manage_implementations(){
                  --arg token "$token" \
                  --arg secret "$secret" \
                  '.Implementations += [{"Type": $type, "Host": $host, "Port": $port, "Suffix": $suffix, "HeartBeatInterval": $heartbeat, "HeartBeatEnable": $heartbeat_enable, "AccessToken": $token, "Secret": $secret}]' \
-                 $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+                 "$config_path" > "$config_path.tmp" && mv "$config_path.tmp" "$config_path"
               ;;
             "ForwardWebSocket")
               jq --arg type "$conn_type" \
@@ -910,19 +1019,19 @@ manage_implementations(){
                  --argjson heartbeat_enable "$heartbeat_enable" \
                  --arg token "$token" \
                  '.Implementations += [{"Type": $type, "Host": $host, "Port": $port, "HeartBeatInterval": $heartbeat, "HeartBeatEnable": $heartbeat_enable, "AccessToken": $token}]' \
-                 $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+                 "$config_path" > "$config_path.tmp" && mv "$config_path.tmp" "$config_path"
               ;;
           esac
           
           echo -e ${green}成功添加新连接: ${cyan}$conn_type - $host:$port${background}
-          sleep 2
+          echo -en ${cyan}回车返回${background};read
         fi
         ;;
         
       2)
         if [ $implementations -eq 0 ]; then
           echo -e ${red}没有可删除的连接${background}
-          sleep 2
+          echo -en ${cyan}回车返回${background};read
           continue
         fi
         
@@ -930,26 +1039,26 @@ manage_implementations(){
         
         if ! [[ "$del_num" =~ ^[0-9]+$ ]] || [ $del_num -lt 1 ] || [ $del_num -gt $implementations ]; then
           echo -e ${red}无效的编号${background}
-          sleep 2
+          echo -en ${cyan}回车返回${background};read
           continue
         fi
         
         idx=$((del_num-1))
-        host=$(jq -r ".Implementations[$idx].Host" $CONFIG_FILE)
-        port=$(jq -r ".Implementations[$idx].Port" $CONFIG_FILE)
-        suffix=$(jq -r ".Implementations[$idx].Suffix" $CONFIG_FILE)
+        host=$(jq -r ".Implementations[$idx].Host" "$config_path")
+        port=$(jq -r ".Implementations[$idx].Port" "$config_path")
+        suffix=$(jq -r ".Implementations[$idx].Suffix" "$config_path")
         
         # 从配置中删除连接
-        jq "del(.Implementations[$idx])" $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+        jq "del(.Implementations[$idx])" "$config_path" > "$config_path.tmp" && mv "$config_path.tmp" "$config_path"
         
         echo -e ${green}成功删除连接: ${cyan}$host:$port$suffix${background}
-        sleep 2
+        echo -en ${cyan}回车返回${background};read
         ;;
       3)
         # 管理AccessToken
         if [ $implementations -eq 0 ]; then
           echo -e ${red}没有可用的连接配置${background}
-          sleep 2
+          echo -en ${cyan}回车返回${background};read
           continue
         fi
         
@@ -957,21 +1066,22 @@ manage_implementations(){
         
         if ! [[ "$conn_num" =~ ^[0-9]+$ ]] || [ $conn_num -lt 1 ] || [ $conn_num -gt $implementations ]; then
           echo -e ${red}无效的编号${background}
-          sleep 2
+          echo -en ${cyan}回车返回${background};read
           continue
         fi
         
         idx=$((conn_num-1))
-        type=$(jq -r ".Implementations[$idx].Type" $CONFIG_FILE)
-        host=$(jq -r ".Implementations[$idx].Host" $CONFIG_FILE)
-        port=$(jq -r ".Implementations[$idx].Port" $CONFIG_FILE)
-        current_token=$(jq -r ".Implementations[$idx].AccessToken" $CONFIG_FILE)
+        type=$(jq -r ".Implementations[$idx].Type" "$config_path")
+        host=$(jq -r ".Implementations[$idx].Host" "$config_path")
+        port=$(jq -r ".Implementations[$idx].Port" "$config_path")
+        current_token=$(jq -r ".Implementations[$idx].AccessToken" "$config_path")
         
         echo -e ${cyan}已选择连接: ${yellow}$type - $host:$port${background}
         echo -e ${cyan}当前AccessToken: ${yellow}$current_token${background}
         echo
         echo -e ${green}1. ${cyan}修改AccessToken${background}
         echo -e ${green}2. ${cyan}删除AccessToken${background}
+        echo -e ${green}3. ${cyan}从TRSS配置中导入AccessToken${background}
         echo -e ${green}0. ${cyan}返回${background}
         echo -en ${green}请输入您的选项: ${background};read token_option
         
@@ -981,7 +1091,7 @@ manage_implementations(){
             # 更新AccessToken
             jq --argjson idx "$idx" --arg token "$new_token" \
               '.Implementations[$idx].AccessToken = $token' \
-              $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+              "$config_path" > "$config_path.tmp" && mv "$config_path.tmp" "$config_path"
             
             echo -e ${green}AccessToken已更新${background}
             
@@ -990,7 +1100,23 @@ manage_implementations(){
             
             # 提示需要重启并询问是否立即重启
             echo -e ${yellow}注意: 修改AccessToken后需要重启Lagrange才能生效${background}
-            if tmux_ls lagrangebot > /dev/null 2>&1; then
+            # 如果是特定账号的配置，需要重启该账号
+            if [ -n "$account_name" ]; then
+              local tmux_name="lagrange_$account_name"
+              if tmux_ls $tmux_name > /dev/null 2>&1; then
+                echo -en ${cyan}是否立即重启账号 $account_name? [Y/n]: ${background};read restart_now
+                case ${restart_now} in
+                  n|N)
+                    echo -e ${yellow}请记得稍后手动重启该账号${background}
+                    ;;
+                  *)
+                    echo -e ${yellow}正在重启账号 $account_name...${background}
+                    restart_lagrange_for_account "$account_name"
+                    ;;
+                esac
+              fi
+            # 否则是全局配置，询问是否重启全局服务
+            elif tmux_ls lagrangebot > /dev/null 2>&1; then
               echo -en ${cyan}是否立即重启Lagrange? [Y/n]: ${background};read restart_now
               case ${restart_now} in
                 n|N)
@@ -1002,12 +1128,13 @@ manage_implementations(){
                   ;;
               esac
             fi
+            echo -en ${cyan}回车继续${background};read
           ;;
           2)
             # 删除AccessToken（设为空字符串）
             jq --argjson idx "$idx" \
               '.Implementations[$idx].AccessToken = ""' \
-              $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+              "$config_path" > "$config_path.tmp" && mv "$config_path.tmp" "$config_path"
             
             echo -e ${green}AccessToken已删除${background}
             
@@ -1016,7 +1143,23 @@ manage_implementations(){
             
             # 提示需要重启并询问是否立即重启
             echo -e ${yellow}注意: 修改AccessToken后需要重启Lagrange才能生效${background}
-            if tmux_ls lagrangebot > /dev/null 2>&1; then
+            # 如果是特定账号的配置，需要重启该账号
+            if [ -n "$account_name" ]; then
+              local tmux_name="lagrange_$account_name"
+              if tmux_ls $tmux_name > /dev/null 2>&1; then
+                echo -en ${cyan}是否立即重启账号 $account_name? [Y/n]: ${background};read restart_now
+                case ${restart_now} in
+                  n|N)
+                    echo -e ${yellow}请记得稍后手动重启该账号${background}
+                    ;;
+                  *)
+                    echo -e ${yellow}正在重启账号 $account_name...${background}
+                    restart_lagrange_for_account "$account_name"
+                    ;;
+                esac
+              fi
+            # 否则是全局配置，询问是否重启全局服务
+            elif tmux_ls lagrangebot > /dev/null 2>&1; then
               echo -en ${cyan}是否立即重启Lagrange? [Y/n]: ${background};read restart_now
               case ${restart_now} in
                 n|N)
@@ -1029,12 +1172,123 @@ manage_implementations(){
               esac
             fi
           ;;
+          3)
+            # 从TRSS配置导入AccessToken
+            local trss_config="$HOME/TRSS-Yunzai/config/config/server.yaml"
+            
+            # 检查TRSS-Yunzai配置文件是否存在
+            if [ ! -f "$trss_config" ]; then
+              echo -e ${red}未找到TRSS-Yunzai配置文件: ${yellow}$trss_config${background}
+              echo -e ${yellow}请检查TRSS-Yunzai是否已安装或配置路径是否正确${background}
+              echo -en ${cyan}回车返回${background};read
+              continue
+            fi
+            
+            echo -e ${yellow}正在从TRSS-Yunzai配置中读取AccessToken...${background}
+            
+            # 检查配置中是否有auth部分和authorization
+            if grep -q "auth:" "$trss_config" && grep -q "authorization:" "$trss_config"; then
+              # 提取authorization值，格式通常是"Bearer token"
+              trss_auth=$(grep "authorization:" "$trss_config" | sed 's/.*authorization: *"\(.*\)".*/\1/')
+              
+              # 如果以Bearer开头，去掉Bearer和空格
+              if [[ "$trss_auth" == Bearer* ]]; then
+                import_token=$(echo "$trss_auth" | sed 's/Bearer *//')
+                
+                # 确认是否导入
+                echo -e ${cyan}从TRSS配置中找到AccessToken: ${yellow}$import_token${background}
+                echo -en ${cyan}是否导入此Token? [Y/n]: ${background};read confirm_import
+                
+                case $confirm_import in
+                  n|N)
+                    echo -e ${yellow}已取消导入${background}
+                    ;;
+                  *)
+                    # 更新AccessToken
+                    jq --argjson idx "$idx" --arg token "$import_token" \
+                      '.Implementations[$idx].AccessToken = $token' \
+                      "$config_path" > "$config_path.tmp" && mv "$config_path.tmp" "$config_path"
+                    
+                    echo -e ${green}AccessToken已从TRSS配置成功导入${background}
+                    
+                    # 提示需要重启并询问是否立即重启
+                    echo -e ${yellow}注意: 修改AccessToken后需要重启Lagrange才能生效${background}
+                    # 如果是特定账号的配置，需要重启该账号
+                    if [ -n "$account_name" ]; then
+                      local tmux_name="lagrange_$account_name"
+                      if tmux_ls $tmux_name > /dev/null 2>&1; then
+                        echo -en ${cyan}是否立即重启账号 $account_name? [Y/n]: ${background};read restart_now
+                        case ${restart_now} in
+                          n|N)
+                            echo -e ${yellow}请记得稍后手动重启该账号${background}
+                            ;;
+                          *)
+                            echo -e ${yellow}正在重启账号 $account_name...${background}
+                            restart_lagrange_for_account "$account_name"
+                            ;;
+                        esac
+                      fi
+                    # 否则是全局配置，询问是否重启全局服务
+                    elif tmux_ls lagrangebot > /dev/null 2>&1; then
+                      echo -en ${cyan}是否立即重启Lagrange? [Y/n]: ${background};read restart_now
+                      case ${restart_now} in
+                        n|N)
+                          echo -e ${yellow}请记得稍后手动重启Lagrange${background}
+                          ;;
+                        *)
+                          echo -e ${yellow}正在重启Lagrange...${background}
+                          restart_Lagrange
+                          ;;
+                      esac
+                    fi
+                    ;;
+                esac
+              else
+                echo -e ${yellow}在TRSS配置中找到authorization，但格式不是"Bearer token"${background}
+                echo -e ${yellow}找到的值: ${cyan}$trss_auth${background}
+                echo -en ${cyan}是否还要导入此值? [y/N]: ${background};read force_import
+                
+                case $force_import in
+                  y|Y)
+                    # 更新AccessToken
+                    jq --argjson idx "$idx" --arg token "$trss_auth" \
+                      '.Implementations[$idx].AccessToken = $token' \
+                      "$config_path" > "$config_path.tmp" && mv "$config_path.tmp" "$config_path"
+                    
+                    echo -e ${green}AccessToken已从TRSS配置成功导入${background}
+                    
+                    # 提示需要重启
+                    echo -e ${yellow}注意: 修改AccessToken后需要重启Lagrange才能生效${background}
+                    if [ -n "$account_name" ]; then
+                      echo -en ${cyan}是否立即重启账号 $account_name? [Y/n]: ${background};read restart_now
+                      case ${restart_now} in
+                        n|N)
+                          echo -e ${yellow}请记得稍后手动重启该账号${background}
+                          ;;
+                        *)
+                          echo -e ${yellow}正在重启账号 $account_name...${background}
+                          restart_lagrange_for_account "$account_name"
+                          ;;
+                      esac
+                    fi
+                    ;;
+                  *)
+                    echo -e ${yellow}已取消导入${background}
+                    ;;
+                esac
+              fi
+            else
+              echo -e ${red}未在TRSS配置中找到AccessToken${background}
+              echo -e ${yellow}请确保TRSS-Yunzai配置中包含auth.authorization配置项${background}
+            fi
+            echo -en ${cyan}回车返回${background};read
+          ;;
           0)
             continue
           ;;
           *)
             echo -e ${red}无效选项${background}
-            sleep 2
+            echo -en ${cyan}回车返回${background};read
           ;;
         esac
       ;;
@@ -1044,191 +1298,41 @@ manage_implementations(){
         
       *)
         echo -e ${red}无效选项${background}
-        sleep 2
+        echo -en ${cyan}回车返回${background};read
         ;;
     esac
   done
 }
 
-switch_account() {
-  if [ ! -d $INSTALL_DIR ]; then
-    echo -en ${red}您还没有部署拉格朗日签名服务器!!! ${cyan}回车返回${background};read
+manage_implementations_for_account(){
+  local qq_name="$1"
+  local config_file="$INSTALL_DIR/accounts/$qq_name/appsettings.json"
+  
+  if [ ! -f "$config_file" ]; then
+    echo -e ${red}配置文件不存在${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+  fi
+  
+  # 检查jq是否安装
+  if ! check_jq; then
+    echo -en ${yellow}"由于缺少jq命令，无法使用此功能，按回车返回"${background};read
     return
   fi
 
-  # 停止当前运行的服务
-  if tmux_ls lagrangebot > /dev/null 2>&1; then
-    echo -e ${yellow}正在停止拉格朗日签名服务器${background}
-    tmux_kill_session lagrangebot > /dev/null 2>&1
-    PID=$(ps aux | grep Lagrange.OneBot | sed '/grep/d' | awk '{print $2}')
-    if [ ! -z ${PID} ]; then
-      kill -9 ${PID}
-    fi
-  fi
+  # 备份配置文件
+  cp "$config_file" "$config_file.bak"
 
-  # 创建账号保存目录
-  accounts_dir="$INSTALL_DIR/accounts"
-  mkdir -p $accounts_dir
-  
-  # 检查是否存在已有账号数据
-  existing_count=0
-  echo -e ${yellow}检查现有账号数据...${background}
-  echo -e ${cyan}已存在的账号保存目录:${background}
-  
-  for acc_dir in "$accounts_dir"/*; do
-    if [ -d "$acc_dir" ];then
-      acc_name=$(basename "$acc_dir")
-      echo -e ${green}$((existing_count+1)). ${cyan}$acc_name${background}
-      existing_count=$((existing_count+1))
-    fi
-  done
-  
-  if [ $existing_count -eq 0 ]; then
-    echo -e ${yellow}没有找到已存在的账号目录${background}
-  fi
-  
-  echo -e ${green}$((existing_count+1)). ${cyan}创建新的保存目录${background}
-  echo -e ${green}0. ${cyan}不保存当前配置${background}
-  echo
-  
-  # 询问用户要保存的方式
-  echo -en ${cyan}请选择保存当前配置的方式\(输入编号\): ${background};read save_choice
-  
-  account_name=""
-  if [[ "$save_choice" =~ ^[0-9]+$ ]] && [ $save_choice -gt 0 ] && [ $save_choice -le $existing_count ]; then
-    # 选择已存在的目录
-    count=0
-    for acc_dir in "$accounts_dir"/*; do
-      if [ -d "$acc_dir" ];then
-        count=$((count+1))
-        if [ $count -eq $save_choice ]; then
-          account_name=$(basename "$acc_dir")
-          echo -e ${yellow}将覆盖保存到: ${cyan}$account_name${background}
-          echo -en ${cyan}确认覆盖? [Y/n]: ${background};read confirm
-          case ${confirm} in
-          n|N)
-            account_name=""
-            echo -e ${yellow}已取消保存${background}
-            ;;
-          *)
-            ;;
-          esac
-          break
-        fi
-      fi
-    done
-  elif [ $save_choice -eq $((existing_count+1)) ]; then
-    # 创建新目录
-    echo -en ${cyan}请输入新的保存目录名称\(建议使用昵称或QQ号\): ${background};read account_name
-    if [ -z "$account_name" ]; then
-      echo -e ${yellow}目录名称不能为空，已取消保存${background}
-      account_name=""
-    fi
-  elif [ $save_choice -eq 0 ]; then
-    echo -e ${yellow}不保存当前配置${background}
-  else
-    echo -e ${red}选择无效，不保存当前配置${background}
-  fi
-  
-  if [ ! -z "$account_name" ]; then
-    # 保存当前账号数据
-    save_dir="$accounts_dir/$account_name"
-    mkdir -p $save_dir
-    
-    echo -e ${yellow}正在保存当前账号数据到: ${cyan}$account_name${background}
-    
-    # 拷贝相关文件到保存目录
-    if [ -f "$INSTALL_DIR/device.json" ]; then
-      cp "$INSTALL_DIR/device.json" "$save_dir/"
-      echo -e ${green}已保存 device.json${background}
-    fi
-    
-    if [ -f "$INSTALL_DIR/keystore.json" ]; then
-      cp "$INSTALL_DIR/keystore.json" "$save_dir/"
-      echo -e ${green}已保存 keystore.json${background}
-    fi
-    
-    echo -e ${green}账号数据保存完成: ${yellow}$account_name${background}
-  fi
-  
-  # 询问是否要切换到其他账号
-  echo
-  echo -e ${yellow}可用的账号列表:${background}
-  
-  # 重新列出所有保存的账号
-  account_count=0
-  for acc_dir in "$accounts_dir"/*; do
-    if [ -d "$acc_dir" ];then
-      acc_name=$(basename "$acc_dir")
-      echo -e ${green}$((account_count+1)). ${cyan}$acc_name${background}
-      account_count=$((account_count+1))
-    fi
-  done
-  
-  if [ $account_count -eq 0 ]; then
-    echo -e ${yellow}没有找到保存的账号数据${background}
-  fi
-  
-  echo -e ${green}0. ${cyan}全新登录${background}
-  echo
-  
-  echo -en ${yellow}请选择要切换的账号\(输入编号\),或输入0重新登录: ${background};read switch_choice
-  
-  # 删除当前账号数据文件
-  echo -e ${yellow}正在清除当前账号数据...${background}
-  rm -f "$INSTALL_DIR/device.json"
-  rm -f "$INSTALL_DIR/keystore.json"
-  echo -e ${yellow}将不会删除数据库文件...${background}
-  # rm -rf "$INSTALL_DIR/lagrange-0-db"
-  
-  if [[ "$switch_choice" =~ ^[0-9]+$ ]] && [ $switch_choice -gt 0 ] && [ $switch_choice -le $account_count ]; then
-    # 获取选择的账号名称
-    selected_account=""
-    count=0
-    for acc_dir in "$accounts_dir"/*; do
-      if [ -d "$acc_dir" ];then
-        count=$((count+1))
-        if [ $count -eq $switch_choice ]; then
-          selected_account=$(basename "$acc_dir")
-          break
-        fi
-      fi
-    done
-    
-    if [ ! -z "$selected_account" ]; then
-      echo -e ${yellow}正在恢复账号 ${cyan}$selected_account${yellow} 的数据...${background}
-      
-      # 恢复账号数据
-      if [ -f "$accounts_dir/$selected_account/device.json" ]; then
-        cp "$accounts_dir/$selected_account/device.json" "$INSTALL_DIR/"
-        echo -e ${green}已恢复 device.json${background}
-      fi
-      
-      if [ -f "$accounts_dir/$selected_account/keystore.json" ]; then
-        cp "$accounts_dir/$selected_account/keystore.json" "$INSTALL_DIR/"
-        echo -e ${green}已恢复 keystore.json${background}
-      fi
-      
-      echo -e ${green}账号数据恢复完成${background}
-      echo -e ${yellow}已成功切换到 ${cyan}$selected_account${yellow} ，按回车返回主菜单${background};read
-    fi
-  else
-    echo -e ${yellow}将使用全新账号登录${background}
-    # 前台启动
-    echo -e ${yellow}启动前台模式进行登录...${background}
-    echo -e ${cyan}提示: 登录完成后，可以按 Ctrl+C 退出，然后使用后台模式重新启动${background}
-    sleep 2
-    
-    cd $INSTALL_DIR
-    $INSTALL_DIR/Lagrange.OneBot
-    
-    echo -en ${cyan}登录操作已完成，按回车返回主菜单${background};read
-  fi
+  # 调用原来的管理实现函数，但传入自定义的配置文件路径
+  manage_implementations_with_path "$config_file" "$qq_name"
 }
 
-change_log_level(){
-  if [ ! -f $CONFIG_FILE ]; then
-    echo -e ${red}配置文件不存在，请先安装拉格朗日签名服务器${background}
+change_log_level_for_account(){
+  local qq_name="$1"
+  local config_file="$INSTALL_DIR/accounts/$qq_name/appsettings.json"
+  
+  if [ ! -f "$config_file" ]; then
+    echo -e ${red}配置文件不存在，请先创建配置文件${background}
     echo -en ${cyan}回车返回${background};read
     return
   fi
@@ -1240,9 +1344,10 @@ change_log_level(){
   fi
 
   # 读取当前日志等级
-  current_level=$(jq -r '.Logging.LogLevel.Default' $CONFIG_FILE)
+  current_level=$(jq -r '.Logging.LogLevel.Default' "$config_file")
   
   echo -e ${white}"====="${green}修改日志等级${white}"====="${background}
+  echo -e ${cyan}当前账号: ${yellow}$qq_name${background}
   echo -e ${cyan}当前日志等级: ${green}${current_level}${background}
   echo -e ${cyan}请选择新的日志等级:${background}
   echo -e  ${green}1. ${cyan}Trace（最详细）${background}
@@ -1267,69 +1372,316 @@ change_log_level(){
     0) return ;;
     *) 
       echo -e ${red}输入错误${background}
-      sleep 2
+      echo -en ${cyan}回车返回${background};read
       return ;;
   esac
   
   # 备份配置文件
-  cp $CONFIG_FILE $CONFIG_FILE.bak
+  cp "$config_file" "$config_file.bak"
   
   # 更新日志等级
-  jq --arg level "$new_level" '.Logging.LogLevel.Default = $level' $CONFIG_FILE > $CONFIG_FILE.tmp && mv $CONFIG_FILE.tmp $CONFIG_FILE
+  jq --arg level "$new_level" '.Logging.LogLevel.Default = $level' "$config_file" > "$config_file.tmp" && mv "$config_file.tmp" "$config_file"
   
-  echo -e ${green}日志等级已更新为: ${cyan}${new_level}${background}
+  echo -e ${green}账号 ${cyan}$qq_name ${green}的日志等级已更新为: ${cyan}${new_level}${background}
   echo -en ${cyan}回车返回${background};read
 }
 
-reWrite_config(){
-  if [ -f $CONFIG_FILE ]; then
-      echo -e ${yellow}警告: 这将覆盖您当前的配置文件${background}
-      echo -en ${cyan}是否继续重写配置文件? [y/N]:${background};read confirm
-      case ${confirm} in
-      y|Y)
-          write_config
-          echo -en ${cyan}回车返回${background};read
-          ;;
-      *)
-          echo -e ${yellow}操作已取消${background}
-          echo -en ${cyan}回车返回${background};read
-          ;;
-      esac
+manage_single_qq(){
+  local qq_name="$1"
+  local QQ_DIR="$INSTALL_DIR/accounts/$qq_name"
+  
+  # 检查目录是否存在
+  if [ ! -d "$QQ_DIR" ]; then
+    echo -e ${red}账号目录不存在${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+  fi
+  
+  # 检查QQ是否已启动
+  local tmux_name="lagrange_$qq_name"
+  if tmux_ls $tmux_name > /dev/null 2>&1; then
+    local status="${green}[已启动]"
   else
-      write_config
+    local status="${red}[未启动]"
+  fi
+  
+  clear
+  echo -e ${white}"====="${green}账号管理: ${cyan}$qq_name ${status}${white}"====="${background}
+  echo -e  ${green} 1.  ${cyan}启动Lagrange${background}
+  echo -e  ${green} 2.  ${cyan}关闭Lagrange${background}
+  echo -e  ${green} 3.  ${cyan}重启Lagrange${background}
+  echo -e  ${green} 4.  ${cyan}查看日志${background}
+  echo -e  ${green} 5.  ${cyan}重写配置文件${background}
+  echo -e  ${green} 6.  ${cyan}更换签名版本${background}
+  echo -e  ${green} 7.  ${cyan}管理OneBot连接配置${background}
+  echo -e  ${green} 8.  ${cyan}修改日志等级${background}
+  echo -e  ${green} 9.  ${cyan}重新登录QQ${background}
+  echo -e  ${green} 10. ${cyan}删除此QQ${background}
+  echo -e  ${green} 0.  ${cyan}返回上级菜单${background}
+  echo "========================="
+  echo -en ${green}请输入您的选项: ${background};read option
+  
+  case $option in
+    1)
+      start_lagrange_for_account "$qq_name"
+      ;;
+    2)
+      stop_lagrange_for_account "$qq_name"
+      ;;
+    3)
+      restart_lagrange_for_account "$qq_name"
+      ;;
+    4)
+      view_log_for_account "$qq_name"
+      ;;
+    5)
+      rewrite_config_for_account "$qq_name"
+      ;;
+    6)
+      change_sign_version_for_account "$qq_name"
+      ;;
+    7)
+      manage_implementations_for_account "$qq_name"
+      ;;
+    8)
+      change_log_level_for_account "$qq_name"
+      ;;
+    9)
+      relogin_qq "$qq_name"
+      ;;
+    10)
+      delete_qq "$qq_name"
+      return  # 删除后返回上级菜单
+      ;;
+    0)
+      return
+      ;;
+    *)
+      echo -e ${red}输入错误${background}
       echo -en ${cyan}回车返回${background};read
+      ;;
+  esac
+  
+  # 返回到当前账号管理
+  manage_single_qq "$qq_name"
+}
+
+create_config_for_account(){
+  local qq_name="$1"
+  local config_file="$INSTALL_DIR/accounts/$qq_name/appsettings.json"
+  
+  echo -e ${yellow}正在为账号 ${cyan}$qq_name ${yellow}创建配置文件...${background}
+  
+  cat > "$config_file" << EOF
+{
+    "\$schema": "https://raw.githubusercontent.com/LagrangeDev/Lagrange.Core/master/Lagrange.OneBot/Resources/appsettings_schema.json",
+    "Logging": {
+        "LogLevel": {
+            "Default": "Information",
+            "Microsoft": "Warning",
+            "Microsoft.Hosting.Lifetime": "Information"
+        }
+    },
+    "SignServerUrl": "https://sign.lagrangecore.org/api/sign/30366",
+    "SignProxyUrl": "",
+    "MusicSignServerUrl": "https://ss.xingzhige.com/music_card/card",
+    "Account": {
+        "Uin": 0,
+        "Protocol": "Linux",
+        "AutoReconnect": true,
+        "GetOptimumServer": true
+    },
+    "Message": {
+        "IgnoreSelf": true,
+        "StringPost": false
+    },
+    "QrCode": {
+        "ConsoleCompatibilityMode": false
+    },
+    "Implementations": [
+        {
+            "Type": "ReverseWebSocket",
+            "Host": "127.0.0.1",
+            "Port": 2536,
+            "Suffix": "/OneBotv11",
+            "ReconnectInterval": 5000,
+            "HeartBeatInterval": 5000,
+            "AccessToken": ""
+        }
+    ]
+}
+EOF
+  echo -e ${green}配置文件创建完成${background}
+}
+
+create_new_qq(){
+  clear
+  echo -e ${white}"====="${green}新增QQ账号${white}"====="${background}
+  echo -en ${cyan}请输入QQ昵称或标识\(用于文件夹命名\): ${background};read qq_name
+  
+  if [ -z "$qq_name" ]; then
+    echo -e ${red}昵称不能为空${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+  fi
+  
+  # 检查目录是否已存在
+  QQ_DIR="$INSTALL_DIR/accounts/$qq_name"
+  if [ -d "$QQ_DIR" ]; then
+    echo -e ${red}该昵称已存在，请使用其他昵称${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+  fi
+  
+  # 创建账号目录
+  mkdir -p "$QQ_DIR"
+  
+  # 创建配置文件
+  create_config_for_account "$qq_name"
+  
+  echo -e ${green}账号 ${cyan}$qq_name ${green}创建成功${background}
+  echo -en ${cyan}是否立即进入该账号管理? [Y/n]: ${background};read start_now
+  
+  case $start_now in
+    n|N)
+      return
+      ;;
+    *)
+      manage_single_qq "$qq_name"
+      start_lagrange_for_account "$qq_name"
+      ;;
+  esac
+}
+
+manage_multi_qq(){
+  if ! is_lagrange_installed; then
+    echo -e ${red}"Lagrange未安装，请先安装Lagrange"${background}
+    echo -en ${cyan}"按回车返回主菜单"${background};read
+    return
+  fi
+
+  clear
+  # 创建账号保存主目录
+  ACCOUNTS_DIR="$INSTALL_DIR/accounts"
+  mkdir -p $ACCOUNTS_DIR
+  
+  echo -e ${white}"====="${green}多开QQ管理${white}"====="${background}  
+
+  # 显示运行状态
+  show_lagrange_status
+  echo
+  
+  echo -e ${cyan}当前已创建的QQ账号:${background}
+  
+  # 列出所有账号文件夹
+  account_count=0
+  account_list=()
+  for acc_dir in "$ACCOUNTS_DIR"/*; do
+    if [ -d "$acc_dir" ]; then
+      acc_name=$(basename "$acc_dir")
+      account_list+=("$acc_name")
+
+      # 检查该账号是否正在运行
+      local tmux_name="lagrange_$acc_name"
+      if tmux_ls $tmux_name &>/dev/null; then
+        echo -e ${green}$((account_count+1)). ${cyan}$acc_name ${green}[运行中]${background}
+      else
+        echo -e ${green}$((account_count+1)). ${cyan}$acc_name ${red}[未运行]${background}
+      fi
+
+      account_count=$((account_count+1))
+    fi
+  done
+  
+  if [ $account_count -eq 0 ]; then
+    echo -e ${yellow}还没有创建任何QQ账号${background}
+  fi
+  
+  echo "========================="
+  echo -e  ${green}N.  ${cyan}新增QQ账号${background}
+  echo -e  ${green}0.  ${cyan}返回上级菜单${background}
+  echo "========================="
+  echo -en ${green}请输入选项\(数字或N\): ${background};read choice
+  
+  case $choice in
+    [Nn])
+      create_new_qq
+      ;;
+    0)
+      return
+      ;;
+    *)
+      if [[ "$choice" =~ ^[0-9]+$ ]] && [ $choice -ge 1 ] && [ $choice -le $account_count ]; then
+        # 进入单个账号管理
+        selected_account=${account_list[$((choice-1))]}
+        manage_single_qq "$selected_account"
+      else
+        echo -e ${red}输入错误${background}
+        echo -en ${cyan}回车返回${background};read
+      fi
+      ;;
+  esac
+  
+  # 返回多开管理菜单
+  manage_multi_qq
+}
+
+# 获取当前运行中的QQ账号数量
+get_running_qq_count(){
+  local count=0
+  # 检查tmux会话列表
+  if tmux ls &>/dev/null; then
+    # 计算以lagrange_开头的tmux会话数量
+    count=$(tmux ls 2>/dev/null | grep -c "^lagrange_")
+  fi
+  echo $count
+}
+
+# 显示当前运行状态
+show_lagrange_status(){
+  if ! is_lagrange_installed; then
+    echo -e ${red}"● 拉格朗日状态: 未安装"${background}
+    return
+  fi
+  
+  local running_count=$(get_running_qq_count)
+  local total_count=0
+  
+  # 计算总QQ数量
+  if [ -d "$INSTALL_DIR/accounts" ]; then
+    total_count=$(find "$INSTALL_DIR/accounts" -maxdepth 1 -type d | grep -v "^$INSTALL_DIR/accounts$" | wc -l)
+  fi
+  
+  if [ $running_count -eq 0 ]; then
+    echo -e ${yellow}"● 拉格朗日状态: 未运行"${background}
+  else
+    echo -e ${green}"● 拉格朗日状态: 运行中 (${cyan}${running_count}/${total_count}${green} 个QQ账号已启动)"${background}
+  fi
+}
+
+# 检查Lagrange是否已安装
+is_lagrange_installed() {
+  if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/Lagrange.OneBot" ]; then
+    return 0  # 已安装
+  else
+    return 1  # 未安装
   fi
 }
 
 main(){
-if [ -d $INSTALL_DIR ];then
-    if tmux_ls lagrangebot > /dev/null 2>&1 
-    then
-        condition="${green}[已启动]"
-    else
-        condition="${red}[未启动]"
-    fi
-else
-    condition="${red}[未部署]"
-fi
-
 echo -e ${white}"====="${green}呆毛版-拉格朗日签名服务器${white}"====="${background}
+
+# 显示运行状态
+show_lagrange_status
+echo
+
 echo -e  ${green} 1.  ${cyan}安装Lagrange${background}
-echo -e  ${green} 2.  ${cyan}启动Lagrange${background}
-echo -e  ${green} 3.  ${cyan}关闭Lagrange${background}
-echo -e  ${green} 4.  ${cyan}重启Lagrange${background}
-echo -e  ${green} 5.  ${cyan}更新Lagrange${background}
-echo -e  ${green} 6.  ${cyan}卸载Lagrange${background}
-echo -e  ${green} 7. ${cyan}切换并备份QQ账号${background}
-echo -e  ${green} 8.  ${cyan}查看日志${background}
-echo -e  ${green} 9.  ${cyan}重写配置文件${background}
-echo -e  ${green} 10.  ${cyan}更换签名版本${background}
-echo -e  ${green} 11. ${cyan}管理OneBot连接配置${background}
-echo -e  ${green} 12. ${cyan}修改日志等级${background}
+echo -e  ${green} 2.  ${cyan}更新Lagrange${background}
+echo -e  ${green} 3.  ${cyan}卸载Lagrange${background}
+echo -e  ${green} 4.  ${cyan}登陆/多开QQ管理${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
-echo -e ${green}拉格朗日状态: ${condition}${background}
-echo -e ${green}说明: ${cyan}安装后“管理OneBot连接配置”（已默认配置trss连接），启动-扫码登录-转后台运行，启动TRSS即可。${background}
+echo -e ${green}说明: ${cyan}安装后（已默认配置trss连接），启动-扫码登录-转后台运行，启动TRSS即可。${background}
 echo -e ${green}呆毛版-QQ群: ${cyan}285744328${background}
 echo "========================="
 echo
@@ -1341,46 +1693,15 @@ install_Lagrange
 ;;
 2)
 echo
-start_Lagrange
+update_Lagrange
 ;;
 3)
 echo
-stop_Lagrange
+uninstall_Lagrange
 ;;
 4)
 echo
-restart_Lagrange
-;;
-5)
-echo
-update_Lagrange
-;;
-6)
-echo
-uninstall_Lagrange
-;;
-7)
-echo
-switch_account
-;;
-8)
-log_Lagrange
-;;
-9)
-echo
-reWrite_config
-;;
-10)
-echo
-change_lagrange_version
-;;
-11)
-echo
-manage_implementations
-;;
-12)
-echo
-change_log_level
+manage_multi_qq
 ;;
 0)
 exit
@@ -1398,7 +1719,6 @@ function mainbak()
     while true
     do
         main
-        mainbak
     done
 }
 mainbak
