@@ -732,7 +732,7 @@ manage_webui_config() {
         echo -e ${green}0. ${cyan}返回主菜单${background}
         echo "========================="
         echo -en ${green}WebUI 访问地址: ${cyan}http://${HOST}:${PORT}${background}
-        echo -e ${green}登录密钥: ${cyan}${TOKEN}${background}
+        echo -en ${green}登录密钥: ${cyan}${TOKEN}${background}
         echo "========================="
         
         echo -en ${green}请输入选项: ${background};read option
