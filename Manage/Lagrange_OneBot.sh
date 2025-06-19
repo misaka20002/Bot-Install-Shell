@@ -349,7 +349,7 @@ sync_token_to_trss() {
   local new_token="$1"
   local trss_config="$HOME/TRSS-Yunzai/config/config/server.yaml"
   
-  echo -en ${cyan}是否同步修改TRSS-Yunzai的配置文件? [Y/n]: ${background};read sync_choice
+  echo -en ${cyan}是否同步修改本地TRSS-Yunzai的配置文件? [Y/n]: ${background};read sync_choice
   case $sync_choice in
     n|N)
       echo -e ${yellow}跳过修改TRSS-Yunzai配置${background}
@@ -633,7 +633,7 @@ rewrite_config_for_account(){
   local config_file="$INSTALL_DIR/accounts/$qq_name/appsettings.json"
   
   if [ -f "$config_file" ]; then
-    echo -e ${yellow}警告: 这将覆盖账号 ${cyan}$qq_name ${yellow}的配置文件${background}
+    echo -e ${yellow}警告: 这将覆盖账号 ${cyan}$qq_name ${yellow}的配置文件，恢复为默认的TRSS接口的配置文件。${background}
     echo -en ${cyan}是否继续重写配置文件? [y/N]:${background};read confirm
     case $confirm in
     y|Y)

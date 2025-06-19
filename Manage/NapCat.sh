@@ -2176,7 +2176,7 @@ main() {
         echo "========================="
     fi
     
-    echo -e ${green}说明: ${cyan}安装后“配置反向WebSocket”（推荐trss或喵崽+lain），启动-扫码登录-转后台运行，启动云崽即可。${background}
+    echo -e ${green}说明: ${cyan}安装后“配置反向WebSocket”（推荐trss或喵崽+napcat插件），启动-扫码登录-转后台运行，启动云崽即可。${background}
     echo -e ${green}呆毛版-QQ群: ${cyan}285744328${background}
     echo "========================="
     echo
