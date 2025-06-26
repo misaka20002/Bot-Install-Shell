@@ -51,12 +51,25 @@ fi
 }
 function MirrorCheck(){
 URL="https://ipinfo.io"
-Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
-if [ ${Address} = "CN" ]
+# 设置超时时间为10秒，如果连接失败或超时则使用备用镜像
+Address=$(timeout 5 curl -sL ${URL} 2>/dev/null | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
+
+# 检查curl命令是否成功执行且返回了有效的国家代码
+if [ $? -eq 0 ] && [ ! -z "${Address}" ] && [ "${Address}" = "CN" ]
 then
+    # echo -e ${cyan}检测到中国大陆地区，使用国内镜像源${background}
     export GitMirror="https://gitee.com/Misaka21011/Yunzai-Bot-Shell"
-else 
+    export Git_proxy="https://ghfast.top/"
+elif [ $? -eq 0 ] && [ ! -z "${Address}" ] && [ "${Address}" != "CN" ]
+then
+    # echo -e ${cyan}检测到海外地区，使用GitHub源${background}
     export GitMirror="https://github.com/misaka20002/Bot-Install-Shell"
+    export Git_proxy=""
+else
+    # 连接失败、超时或返回空值时使用备用镜像
+    # echo -e ${yellow}网络检测失败或超时，使用备用镜像源${background}
+    export GitMirror="https://gitee.com/Misaka21011/Yunzai-Bot-Shell"
+    export Git_proxy="https://ghfast.top/"
 fi
 }
 ##############################
@@ -113,17 +126,19 @@ exit
 
 function help(){
 echo -e ${green}===============================${background}
-echo -e ${green}         快捷方式${cyan}${background}
+echo -e ${yellow}"         "快捷方式${cyan}${background}
 echo -e ${green}===============================${background}
-echo -e ${cyan} xdm"        | "${blue}呆毛版脚本${background}
-echo -e ${cyan} xdm help"   | "${blue}呆毛版脚本帮助${background}
-echo -e ${cyan} xdm PI"     | "${blue}插件管理脚本${background}
-echo -e ${cyan} xdm SWPKG"  | "${blue}修复软件包依赖${background}
+echo -e ${cyan} xdm"        | "${blue}呆毛版脚本入口${background}
+# echo -e ${cyan} xdm help"   | "${blue}呆毛版脚本帮助${background}
+echo -e ${cyan} xdm lag"    | "${blue}拉格朗日脚本${background}
+echo -e ${cyan} xdm nap"    | "${blue}NapCat 脚本${background}
+echo -e ${cyan} xdm plugin" | "${blue}插件管理脚本${background}
+echo -e ${cyan} xdm meme"   | "${blue}meme 管理脚本${background}
 echo -e ${green}===============================${background}
 echo -e ${cyan} xdm mz ${blue}Miao-Yunzai根目录${background}
 echo -e ${cyan} xdm tz ${blue}TRSS-Yunzai根目录${background}
 echo -e ${green}===============================${background}
-echo -e ${green} QQ群:${cyan}呆毛版-QQ群:285744328${background}
+echo -e ${yellow} Bot-Shell ${cyan}呆毛版-QQ群: 285744328${background}
 echo -e ${green}=============================${background}
 }
 case $1 in
@@ -131,12 +146,33 @@ help)
 help
 exit
 ;;
-PI)
-bash <(curl -sL https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
+plugin)
+MirrorCheck
+bash <(curl -sL ${Git_proxy}https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
+exit
+;;
+meme)
+MirrorCheck
+URL="${GitMirror}/raw/master/Manage"
+bash <(curl -sL ${URL}/meme_generator.sh)
 exit
 ;;
 SWPKG)
-bash <(curl -sL ${GitMirror}/raw/master/Manage/BOT_INSTALL.sh)
+MirrorCheck
+URL="${GitMirror}/raw/master/Manage"
+bash <(curl -sL ${URL}/BOT_INSTALL.sh)
+exit
+;;
+lag)
+MirrorCheck
+URL="${GitMirror}/raw/master/Manage"
+bash <(curl -sL ${URL}/Lagrange_OneBot.sh)
+exit
+;;
+nap)
+MirrorCheck
+URL="${GitMirror}/raw/master/Manage"
+bash <(curl -sL ${URL}/NapCat.sh)
 exit
 ;;
 YZ|Yunzai|Yunzai-Bot)
@@ -228,7 +264,7 @@ function UPDATE(){
         fi
     fi
 }
-old_version="1.1.51"
+old_version="1.1.58"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -406,6 +442,7 @@ case $1 in
     ;;
   plugin_1)
         bash <(curl -sL https://mirrors.chenby.cn/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
+        # bash <(curl -sL https://github.moeyy.xyz/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
     ;;
   plugin_2)
         bash <(curl -sL https://ghfast.top/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
@@ -671,7 +708,7 @@ function BotPath(){
 function master(){
 Number=$(${DialogWhiptail} \
 --title "呆毛版 QQ群:285744328" \
---menu "请选择bot" \
+--menu "💡 提示: 发送 xdm help 获取更多快捷键" \
 20 38 10 \
 "1" "Miao-Yunzai" \
 "2" "TRSS-Yunzai" \
