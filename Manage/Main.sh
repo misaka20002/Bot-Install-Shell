@@ -264,7 +264,7 @@ function UPDATE(){
         fi
     fi
 }
-old_version="1.1.58"
+old_version="1.1.60"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -331,6 +331,7 @@ AttachPage(){
 RunningState="$1"
 TWPL="$2"
 RunningState
+res=$?
 if (${DialogWhiptail} --yesno "${BotName} [已"${RunningState}"] \n是否打开${BotName}${TWPL}" 8 50)
 then
   if [ ${res} -eq 1 ];then
@@ -342,6 +343,7 @@ then
   fi
 fi
 }
+
 BOT(){
 case $1 in
   start)
@@ -354,12 +356,38 @@ case $1 in
     elif [ ${res} -eq 3 ];then
       AttachPage "在Pm2后台启动" "日志"
     else
-      if tmux new -s ${TmuxName} -d "xdm ${BotName} n"
-      then
-        ProgressBar "启动"
-      else
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 启动失败" 10 60
-      fi
+      # 添加选择启动方式的对话框
+      start_option=$(${DialogWhiptail} --title "呆毛版-Script" \
+      --menu "请选择启动方式" 10 50 2 \
+      "1" "在TMUX窗口启动" \
+      "2" "在Pm2后台启动" \
+      3>&1 1>&2 2>&3)
+      
+      case ${start_option} in
+        1)
+          if tmux new -s ${TmuxName} -d "xdm ${BotName} n"
+          then
+            ProgressBar "启动"
+          else
+            ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 启动失败" 10 60
+          fi
+          ;;
+        2)
+          pnpm pm2 stop ${BotName}
+          pnpm pm2 delete ${BotName}
+          RedisServerStart
+          pnpm pm2 start
+          if pnpm pm2 show ${BotName} 2>&1 | grep -q online
+          then
+            AttachPage "在Pm2后台启动" "日志"
+          else
+            ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 启动失败" 10 60
+          fi
+          ;;
+        *)
+          ${DialogWhiptail} --title "呆毛版-Script" --msgbox "已取消启动" 10 60
+          ;;
+      esac
     fi
     ;;
   ForegroundStart)
@@ -392,7 +420,8 @@ case $1 in
       pnpm pm2 delete ${BotName}
       ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止成功" 10 60
     elif [ ${res} -eq 3 ];then
-      if kill $(ps all | sed /grep/d | grep -q "${BOT_COMMAND}")
+      PIDS=$(ps -ef | grep "${BOT_COMMAND}" | grep -v grep | awk '{print $2}')
+      if [ -n "${PIDS}" ] && kill ${PIDS}
       then
         ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止成功" 10 60
       else
