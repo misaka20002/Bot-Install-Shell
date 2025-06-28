@@ -264,7 +264,7 @@ function UPDATE(){
         fi
     fi
 }
-old_version="1.1.60"
+old_version="1.1.63"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -373,10 +373,9 @@ case $1 in
           fi
           ;;
         2)
-          pnpm pm2 stop ${BotName}
-          pnpm pm2 delete ${BotName}
           RedisServerStart
-          pnpm pm2 start
+          cd ${BotPath}
+          pnpm run restart
           if pnpm pm2 show ${BotName} 2>&1 | grep -q online
           then
             AttachPage "在Pm2后台启动" "日志"
@@ -385,7 +384,7 @@ case $1 in
           fi
           ;;
         *)
-          ${DialogWhiptail} --title "呆毛版-Script" --msgbox "已取消启动" 10 60
+          ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 已取消启动" 10 60
           ;;
       esac
     fi
@@ -411,21 +410,26 @@ case $1 in
     if [ ${res} -eq 1 ];then
       if tmux kill-session -t ${TmuxName}
       then
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止成功" 10 60
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止成功" 10 60
       else
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止失败" 10 60
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止失败" 10 60
       fi
     elif [ ${res} -eq 2 ];then
-      pnpm pm2 stop ${BotName}
-      pnpm pm2 delete ${BotName}
-      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止成功" 10 60
-    elif [ ${res} -eq 3 ];then
       PIDS=$(ps -ef | grep "${BOT_COMMAND}" | grep -v grep | awk '{print $2}')
       if [ -n "${PIDS}" ] && kill ${PIDS}
       then
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止成功" 10 60
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止成功" 10 60
       else
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "停止失败" 10 60
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止失败" 10 60
+      fi
+    elif [ ${res} -eq 3 ];then
+      cd ${BotPath}
+      pnpm run stop
+      if pnpm pm2 show ${BotName} 2>&1 | grep -q online
+      then
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止失败" 10 60
+      else
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止成功" 10 60
       fi
     else
       ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未启动]" 10 60
@@ -442,15 +446,19 @@ case $1 in
         ${DialogWhiptail} --title "呆毛版-Script" --msgbox "重启成功" 10 60
       fi
     elif [ ${res} -eq 2 ];then
-      pnpm pm2 stop ${BotName}
-      pnpm pm2 delete ${BotName}
-      RedisServerStart
-      pnpm pm2 start
-      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "重启成功" 10 60
-    elif [ ${res} -eq 3 ];then
       if kill $(ps all | sed /grep/d | grep -q "${BOT_COMMAND}")
       then
         xdm ${BotName} n
+      fi
+    elif [ ${res} -eq 3 ];then
+      RedisServerStart
+      cd ${BotPath}
+      pnpm run restart
+      if pnpm pm2 show ${BotName} 2>&1 | grep -q online
+      then
+        AttachPage "在Pm2后台启动" "日志"
+      else
+        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 启动失败" 10 60
       fi
     else
       ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未启动]" 10 60
