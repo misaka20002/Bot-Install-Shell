@@ -264,7 +264,7 @@ function UPDATE(){
         fi
     fi
 }
-old_version="1.1.66"
+old_version="1.1.68"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -561,6 +561,26 @@ echo
 echo -en ${cyan}回车返回${background};read
 }
 
+function ShowHelpDocument(){
+    echo -e ${cyan}"========================================="${background}
+    echo -e ${yellow}"           呆毛版脚本帮助文档"${background}
+    echo -e ${cyan}"========================================="${background}
+    echo -e ${green}"详细使用说明请查看以下链接:"${background}
+    echo
+    echo -e ${blue}"https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Markdown/Tmoe.md"${background}
+    echo -e ${blue}"https://github.com/misaka20002/Bot-Install-Shell/blob/master/Markdown/Tmoe.md"${background}
+    echo
+    echo -e ${cyan}"========================================="${background}
+    echo -e ${yellow}"说明:"${background}
+    echo -e ${green}"- 安装教程和常见问题解答"${background}
+    echo -e ${green}"- 各种功能的详细使用方法"${background}
+    echo -e ${green}"- 故障排除和技术支持"${background}
+    echo -e ${cyan}"========================================="${background}
+    echo
+    echo -en ${cyan}回车返回${background}
+    read
+}
+
 function OperatingEnvironmentInstall(){
   echo -e ${yellow}"确认要重新安装环境吗? 这将重新安装以下依赖( ffmpeg, gzip, redis, tmux, chromium, fonts-wqy-zenhei, node.JS ... ) [y/n]"${background}
   read -p "" confirm
@@ -643,6 +663,7 @@ Number=$(${DialogWhiptail} \
 "8" "填写签名" \
 "9" "重装环境" \
 "10" "其他功能" \
+"11" "帮助文档" \
 "0" "返回" \
 3>&1 1>&2 2>&3)
 feedback=$?
@@ -678,6 +699,9 @@ case ${Number} in
     10)
         MirrorCheck
         bash <(curl -sL ${GitMirror}/raw/master/Manage/OtherFunctions.sh)
+        ;;
+    11)
+        ShowHelpDocument
         ;;
     0)
         return
