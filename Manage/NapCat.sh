@@ -1086,12 +1086,15 @@ configure_ws() {
         
         # 检查当前配置
         if [ -f "$CONFIG_FILE" ]; then
-            # 获取当前WebSocket客户端数量
-            WS_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
+            # 获取当前反向WebSocket客户端数量
+            WS_CLIENT_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
+            # 获取当前正向WebSocket服务器数量
+            WS_SERVER_COUNT=$(jq '.network.websocketServers | length // 0' "$CONFIG_FILE")
             
-            if [ "$WS_COUNT" -gt 0 ]; then
-                echo -e ${yellow}当前配置的WebSocket接口 \(${WS_COUNT}个\):${background}
-                for ((i=0; i<$WS_COUNT; i++)); do
+            # 显示反向WebSocket接口信息
+            if [ "$WS_CLIENT_COUNT" -gt 0 ]; then
+                echo -e ${yellow}当前配置的反向WebSocket接口 \(${WS_CLIENT_COUNT}个\):${background}
+                for ((i=0; i<$WS_CLIENT_COUNT; i++)); do
                     WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
                     WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
                     WS_ENABLE=$(jq -r ".network.websocketClients[$i].enable // false" "$CONFIG_FILE")
@@ -1111,7 +1114,34 @@ configure_ws() {
                     echo -e ${green}[$((i+1))] ${cyan}${WS_NAME} ${yellow}- ${cyan}${WS_URL} ${yellow}- ${status} ${token_status}${background}
                 done
             else
-                echo -e ${yellow}未配置任何WebSocket接口${background}
+                echo -e ${yellow}未配置任何反向WebSocket接口${background}
+            fi
+            
+            # 显示正向WebSocket接口信息
+            if [ "$WS_SERVER_COUNT" -gt 0 ]; then
+                echo -e ${yellow}当前配置的正向WebSocket接口 \(${WS_SERVER_COUNT}个\):${background}
+                for ((i=0; i<$WS_SERVER_COUNT; i++)); do
+                    WS_NAME=$(jq -r ".network.websocketServers[$i].name // \"未命名\"" "$CONFIG_FILE")
+                    WS_HOST=$(jq -r ".network.websocketServers[$i].host // \"0.0.0.0\"" "$CONFIG_FILE")
+                    WS_PORT=$(jq -r ".network.websocketServers[$i].port // 3001" "$CONFIG_FILE")
+                    WS_ENABLE=$(jq -r ".network.websocketServers[$i].enable // false" "$CONFIG_FILE")
+                    WS_TOKEN=$(jq -r ".network.websocketServers[$i].token // \"\"" "$CONFIG_FILE")
+                    
+                    if [ "$WS_ENABLE" = "true" ]; then
+                        status="${green}已启用"
+                    else
+                        status="${red}已禁用"
+                    fi
+                    
+                    token_status=""
+                    if [ -n "$WS_TOKEN" ]; then
+                        token_status="${green}[已设置token]"
+                    fi
+                    
+                    echo -e ${green}[$((i+1))] ${cyan}${WS_NAME} ${yellow}- ${cyan}${WS_HOST}:${WS_PORT} ${yellow}- ${status} ${token_status}${background}
+                done
+            else
+                echo -e ${yellow}未配置任何正向WebSocket接口${background}
             fi
         else
             echo -e ${red}配置文件不存在或损坏${background}
@@ -1119,11 +1149,12 @@ configure_ws() {
         
         echo -e ${yellow}"==========================="${background}
         echo -e ${green}1. ${cyan}使用预设模板${background}
-        echo -e ${green}2. ${cyan}添加新的WebSocket接口${background}
-        echo -e ${green}3. ${cyan}编辑WebSocket接口${background}
-        echo -e ${green}4. ${cyan}删除WebSocket接口${background}
-        echo -e ${green}5. ${cyan}启用/禁用WebSocket接口${background}
-        echo -e ${green}6. ${cyan}管理WebSocket Token${background}
+        echo -e ${green}2. ${cyan}添加新的反向WebSocket接口${background}
+        echo -e ${green}3. ${cyan}添加新的正向WebSocket接口${background}
+        echo -e ${green}4. ${cyan}编辑WebSocket接口${background}
+        echo -e ${green}5. ${cyan}删除WebSocket接口${background}
+        echo -e ${green}6. ${cyan}启用/禁用WebSocket接口${background}
+        echo -e ${green}7. ${cyan}管理WebSocket Token${background}
         echo -e ${green}0. ${cyan}返回上级菜单${background}
         echo -e ${yellow}"==========================="${background}
         
@@ -1134,8 +1165,8 @@ configure_ws() {
                 # 使用预设模板子菜单
                 clear
                 echo -e ${white}"====="${green}WebSocket预设模板${white}"====="${background}
-                echo -e ${green}1. ${cyan}使用 lain 配置${background}
-                echo -e ${green}2. ${cyan}使用 trss 配置${background}
+                echo -e ${green}1. ${cyan}使用 lain 反向WebSocket配置${background}
+                echo -e ${green}2. ${cyan}使用 trss 反向WebSocket配置${background}
                 echo -e ${green}0. ${cyan}返回上级菜单${background}
                 echo -e ${yellow}"==========================="${background}
                 
@@ -1182,12 +1213,12 @@ configure_ws() {
                 ;;
             2)
                 # 添加新的WebSocket接口
-                echo -e ${yellow}添加新的WebSocket接口${background}
+                echo -e ${yellow}添加新的反向WebSocket接口${background}
                 
                 echo -en ${cyan}请输入名称 \(默认: custom\): ${background};read ws_name
                 ws_name=${ws_name:-custom}
                 
-                echo -en ${cyan}请输入WebSocket URL: ${background};read ws_url
+                echo -en ${cyan}请输入WebSocket URL \(例如: ws://0.0.0.0:2536/OneBotv11\): ${background};read ws_url
                 if [ -z "$ws_url" ]; then
                     echo -e ${red}URL不能为空${background}
                     sleep 1
@@ -1245,283 +1276,273 @@ EOF
                 sleep 1
                 ;;
             3)
-                # 编辑WebSocket接口
-                WS_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
+                # 添加新的正向WebSocket接口
+                echo -e ${yellow}添加新的正向WebSocket接口${background}
                 
-                if [ "$WS_COUNT" -eq 0 ]; then
-                    echo -e ${red}没有可编辑的WebSocket接口${background}
-                    sleep 1
-                    continue
-                fi
+                echo -en ${cyan}请输入名称 \(默认: WsServer\): ${background};read ws_name
+                ws_name=${ws_name:-WsServer}
                 
-                echo -e ${yellow}请选择要编辑的WebSocket接口:${background}
-                for ((i=0; i<$WS_COUNT; i++)); do
-                    WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
-                    WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
-                    echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_URL}${background}
-                done
-                echo -e ${green}0. ${cyan}返回${background}
+                echo -en ${cyan}请输入主机地址 \(默认: 0.0.0.0\): ${background};read ws_host
+                ws_host=${ws_host:-0.0.0.0}
                 
-                echo -en ${green}请输入编号: ${background};read edit_choice
+                echo -en ${cyan}请输入端口 \(默认: 3001\): ${background};read ws_port
+                ws_port=${ws_port:-3001}
                 
-                if [ "$edit_choice" = "0" ]; then
-                    continue
-                fi
+                echo -en ${cyan}请输入token \(可留空\): ${background};read ws_token
                 
-                if ! [[ "$edit_choice" =~ ^[0-9]+$ ]] || [ "$edit_choice" -lt 1 ] || [ "$edit_choice" -gt "$WS_COUNT" ]; then
-                    echo -e ${red}无效的选择${background}
-                    sleep 1
-                    continue
-                fi
-                
-                edit_index=$((edit_choice-1))
-                
-                # 获取当前配置
-                current_name=$(jq -r ".network.websocketClients[$edit_index].name // \"\"" "$CONFIG_FILE")
-                current_url=$(jq -r ".network.websocketClients[$edit_index].url // \"\"" "$CONFIG_FILE")
-                current_token=$(jq -r ".network.websocketClients[$edit_index].token // \"\"" "$CONFIG_FILE")
-                current_enable=$(jq -r ".network.websocketClients[$edit_index].enable // false" "$CONFIG_FILE")
-                
-                # 编辑配置
-                echo -e ${yellow}编辑WebSocket接口 ${edit_choice}:${background}
-                
-                echo -en ${cyan}请输入名称 \(当前: ${current_name}\): ${background};read ws_name
-                ws_name=${ws_name:-$current_name}
-                
-                echo -en ${cyan}请输入WebSocket URL \(当前: ${current_url}\): ${background};read ws_url
-                ws_url=${ws_url:-$current_url}
-                
-                echo -en ${cyan}请输入token \(当前: ${current_token}\): ${background};read ws_token
-                ws_token=${ws_token:-$current_token}
-                
-                echo -en ${cyan}是否启用该WebSocket连接? [Y/n]: ${background};read ws_enable
+                echo -en ${cyan}是否启用该正向WebSocket连接? [Y/n]: ${background};read ws_enable
                 if [[ "$ws_enable" =~ ^[Nn]$ ]]; then
                     enable_ws="false"
                 else
                     enable_ws="true"
                 fi
                 
-                # 更新配置
-                jq \
-                --arg name "$ws_name" \
-                --arg url "$ws_url" \
-                --arg token "$ws_token" \
-                --argjson enable "$enable_ws" \
-                ".network.websocketClients[$edit_index].name = \$name | 
-                 .network.websocketClients[$edit_index].url = \$url | 
-                 .network.websocketClients[$edit_index].token = \$token | 
-                 .network.websocketClients[$edit_index].enable = \$enable" \
-                "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
-                mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-                
-                echo -e ${green}已更新WebSocket接口配置${background}
-                
-                # 如果修改了token，询问是否要同步到TRSS
-                if [ "$ws_token" != "$current_token" ] && [ -n "$ws_token" ]; then
-                    echo -e ${yellow}检测到Token已修改${background}
-                    sync_token_to_trss "$ws_token"
+                echo -en ${cyan}是否上报自身消息? [y/N]: ${background};read report_self
+                if [[ "$report_self" =~ ^[Yy]$ ]]; then
+                    report_self_msg="true"
+                else
+                    report_self_msg="false"
                 fi
                 
+                echo -en ${cyan}消息上报格式\(array/string\) \(默认: array\): ${background};read msg_format
+                if [[ "$msg_format" == "string" ]]; then
+                    msg_post_format="string"
+                else
+                    msg_post_format="array"
+                fi
+                
+                # 创建新的正向WebSocket配置对象
+                new_ws=$(cat << EOF
+{
+  "name": "${ws_name}",
+  "enable": ${enable_ws},
+  "host": "${ws_host}",
+  "port": ${ws_port},
+  "messagePostFormat": "${msg_post_format}",
+  "reportSelfMessage": ${report_self_msg},
+  "token": "${ws_token}",
+  "enableForcePushEvent": true,
+  "debug": false,
+  "heartInterval": 30000
+}
+EOF
+                )
+                
+                # 检查配置文件是否存在
+                if [ ! -f "$CONFIG_FILE" ] || ! jq -e '.' "$CONFIG_FILE" &>/dev/null; then
+                    # 如果配置文件不存在或无效，创建新配置文件
+                    echo '{
+  "network": {
+    "httpServers": [],
+    "httpSseServers": [],
+    "httpClients": [],
+    "websocketServers": [],
+    "websocketClients": [],
+    "plugins": []
+  },
+  "musicSignUrl": "https://oiapi.net/API/QQMusic/SONArk",
+  "enableLocalFile2Url": false,
+  "parseMultMsg": false
+}' > "$CONFIG_FILE"
+                fi
+                
+                # 添加新的正向WebSocket配置
+                jq --argjson ws "$new_ws" '.network.websocketServers += [$ws]' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
+                mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                
+                echo -e ${green}已添加新的正向WebSocket接口: ${cyan}${ws_name} - ${ws_host}:${ws_port}${background}
+                echo -e ${green}可使用地址: ${cyan}ws://${ws_host}:${ws_port}${background}
                 sleep 1
                 ;;
             4)
-                # 删除WebSocket接口
-                WS_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
-                
-                if [ "$WS_COUNT" -eq 0 ]; then
-                    echo -e ${red}没有可删除的WebSocket接口${background}
-                    sleep 1
-                    continue
-                fi
-                
-                echo -e ${yellow}请选择要删除的WebSocket接口:${background}
-                for ((i=0; i<$WS_COUNT; i++)); do
-                    WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
-                    WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
-                    echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_URL}${background}
-                done
+                # 编辑WebSocket接口
+                echo -e ${yellow}请选择要编辑的WebSocket接口类型:${background}
+                echo -e ${green}1. ${cyan}反向WebSocket \(websocketClients\)${background}
+                echo -e ${green}2. ${cyan}正向WebSocket \(websocketServers\)${background}
                 echo -e ${green}0. ${cyan}返回${background}
                 
-                echo -en ${green}请输入编号: ${background};read del_choice
+                echo -en ${green}请选择: ${background};read ws_type
                 
-                if [ "$del_choice" = "0" ]; then
-                    continue
-                fi
-                
-                if ! [[ "$del_choice" =~ ^[0-9]+$ ]] || [ "$del_choice" -lt 1 ] || [ "$del_choice" -gt "$WS_COUNT" ]; then
-                    echo -e ${red}无效的选择${background}
-                    sleep 1
-                    continue
-                fi
-                
-                del_index=$((del_choice-1))
-                WS_NAME=$(jq -r ".network.websocketClients[$del_index].name // \"未命名\"" "$CONFIG_FILE")
-                
-                echo -en ${yellow}确认删除WebSocket接口 "${WS_NAME}"? [y/N]: ${background};read confirm
-                
-                if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                    # 删除指定索引的WebSocket配置
-                    jq "del(.network.websocketClients[$del_index])" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
-                    mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-                    
-                    echo -e ${green}已删除WebSocket接口${background}
-                else
-                    echo -e ${yellow}已取消删除操作${background}
-                fi
-                sleep 1
-                ;;
-            5)
-                # 启用/禁用WebSocket接口
-                WS_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
-                
-                if [ "$WS_COUNT" -eq 0 ]; then
-                    echo -e ${red}没有可管理的WebSocket接口${background}
-                    sleep 1
-                    continue
-                fi
-                
-                echo -e ${yellow}请选择要启用/禁用的WebSocket接口:${background}
-                for ((i=0; i<$WS_COUNT; i++)); do
-                    WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
-                    WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
-                    WS_ENABLE=$(jq -r ".network.websocketClients[$i].enable // false" "$CONFIG_FILE")
-                    
-                    if [ "$WS_ENABLE" = "true" ]; then
-                        status="${green}已启用"
-                    else
-                        status="${red}已禁用"
-                    fi
-                    
-                    echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_URL} ${yellow}- ${status}${background}
-                done
-                echo -e ${green}0. ${cyan}返回${background}
-                
-                echo -en ${green}请输入编号: ${background};read toggle_choice
-                
-                if [ "$toggle_choice" = "0" ]; then
-                    continue
-                fi
-                
-                if ! [[ "$toggle_choice" =~ ^[0-9]+$ ]] || [ "$toggle_choice" -lt 1 ] || [ "$toggle_choice" -gt "$WS_COUNT" ]; then
-                    echo -e ${red}无效的选择${background}
-                    sleep 1
-                    continue
-                fi
-                
-                toggle_index=$((toggle_choice-1))
-                WS_NAME=$(jq -r ".network.websocketClients[$toggle_index].name // \"未命名\"" "$CONFIG_FILE")
-                current_enable=$(jq -r ".network.websocketClients[$toggle_index].enable // false" "$CONFIG_FILE")
-                
-                # 切换启用/禁用状态
-                if [ "$current_enable" = "true" ]; then
-                    new_enable="false"
-                    action="禁用"
-                else
-                    new_enable="true"
-                    action="启用"
-                fi
-                
-                echo -en ${yellow}确认${action} WebSocket接口 "${WS_NAME}"? [Y/n]: ${background};read confirm
-                
-                if [[ ! "$confirm" =~ ^[Nn]$ ]]; then
-                    # 更新启用/禁用状态
-                    jq --argjson enable "$new_enable" ".network.websocketClients[$toggle_index].enable = \$enable" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
-                    mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-                    
-                    echo -e ${green}已${action} WebSocket接口 "${WS_NAME}"${background}
-                else
-                    echo -e ${yellow}已取消操作${background}
-                fi
-                sleep 1
-                ;;
-            6)
-                # 管理WebSocket Token
-                WS_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
-                
-                if [ "$WS_COUNT" -eq 0 ]; then
-                    echo -e ${red}没有可管理的WebSocket接口${background}
-                    sleep 1
-                    continue
-                fi
-                
-                echo -e ${yellow}请选择要管理Token的WebSocket接口:${background}
-                for ((i=0; i<$WS_COUNT; i++)); do
-                    WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
-                    WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
-                    WS_TOKEN=$(jq -r ".network.websocketClients[$i].token // \"\"" "$CONFIG_FILE")
-                    
-                    token_status=""
-                    if [ -n "$WS_TOKEN" ]; then
-                        token_status="${green}[已设置token]"
-                    else
-                        token_status="${red}[未设置token]"
-                    fi
-                    
-                    echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_URL} ${token_status}${background}
-                done
-                echo -e ${green}0. ${cyan}返回${background}
-                
-                echo -en ${green}请输入编号: ${background};read token_choice
-                
-                if [ "$token_choice" = "0" ]; then
-                    continue
-                fi
-                
-                if ! [[ "$token_choice" =~ ^[0-9]+$ ]] || [ "$token_choice" -lt 1 ] || [ "$token_choice" -gt "$WS_COUNT" ]; then
-                    echo -e ${red}无效的选择${background}
-                    sleep 1
-                    continue
-                fi
-                
-                token_index=$((token_choice-1))
-                WS_NAME=$(jq -r ".network.websocketClients[$token_index].name // \"未命名\"" "$CONFIG_FILE")
-                current_token=$(jq -r ".network.websocketClients[$token_index].token // \"\"" "$CONFIG_FILE")
-                
-                echo -e ${yellow}管理 "${WS_NAME}" 的Token${background}
-                echo -e ${cyan}当前Token: ${yellow}${current_token:-"未设置"}${background}
-                echo
-                echo -e ${green}1. ${cyan}修改Token${background}
-                echo -e ${green}2. ${cyan}清除Token${background}
-                echo -e ${green}0. ${cyan}返回${background}
-                
-                echo -en ${green}请选择操作: ${background};read token_op
-                
-                case $token_op in
+                case $ws_type in
                     1)
-                        echo -en ${cyan}请输入新的Token: ${background};read new_token
+                        # 编辑反向WebSocket接口
+                        WS_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
                         
-                        if [ -n "$new_token" ]; then
-                            # 更新Token
-                            jq --argjson idx "$token_index" --arg token "$new_token" \
-                                '.network.websocketClients[$idx].token = $token' \
-                                "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-                            
-                            echo -e ${green}Token已更新${background}
-                            
-                            # 询问是否同步到TRSS-Yunzai配置
-                            sync_token_to_trss "$new_token"
-                        else
-                            echo -e ${yellow}Token未修改${background}
+                        if [ "$WS_COUNT" -eq 0 ]; then
+                            echo -e ${red}没有可编辑的反向WebSocket接口${background}
+                            sleep 1
+                            continue
                         fi
-                        sleep 1
+                        
+                        echo -e ${yellow}请选择要编辑的反向WebSocket接口:${background}
+                        for ((i=0; i<$WS_COUNT; i++)); do
+                            WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
+                            WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
+                            echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_URL}${background}
+                        done
+                        echo -e ${green}0. ${cyan}返回${background}
+                        
+                        echo -en ${green}请输入编号: ${background};read edit_choice
+                        
+                        if [ "$edit_choice" = "0" ]; then
+                            continue
+                        fi
+                        
+                        if ! [[ "$edit_choice" =~ ^[0-9]+$ ]] || [ "$edit_choice" -lt 1 ] || [ "$edit_choice" -gt "$WS_COUNT" ]; then
+                            echo -e ${red}无效的选择${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        edit_index=$((edit_choice-1))
+                        
+                        # 获取当前配置
+                        current_name=$(jq -r ".network.websocketClients[$edit_index].name // \"\"" "$CONFIG_FILE")
+                        current_url=$(jq -r ".network.websocketClients[$edit_index].url // \"\"" "$CONFIG_FILE")
+                        current_token=$(jq -r ".network.websocketClients[$edit_index].token // \"\"" "$CONFIG_FILE")
+                        current_enable=$(jq -r ".network.websocketClients[$edit_index].enable // false" "$CONFIG_FILE")
+                        
+                        # 编辑配置
+                        echo -e ${yellow}编辑反向WebSocket接口 ${edit_choice}:${background}
+                        
+                        echo -en ${cyan}请输入名称 \(当前: ${current_name}\): ${background};read ws_name
+                        ws_name=${ws_name:-$current_name}
+                        
+                        echo -en ${cyan}请输入WebSocket URL \(例如: ws://0.0.0.0:2536/OneBotv11\) \(当前: ${current_url}\): ${background};read ws_url
+                        ws_url=${ws_url:-$current_url}
+                        
+                        echo -en ${cyan}请输入token \(当前: ${current_token}\): ${background};read ws_token
+                        ws_token=${ws_token:-$current_token}
+                        
+                        echo -en ${cyan}是否启用该WebSocket连接? [Y/n]: ${background};read ws_enable
+                        if [[ "$ws_enable" =~ ^[Nn]$ ]]; then
+                            enable_ws="false"
+                        else
+                            enable_ws="true"
+                        fi
+                        
+                        # 更新配置
+                        jq \
+                        --arg name "$ws_name" \
+                        --arg url "$ws_url" \
+                        --arg token "$ws_token" \
+                        --argjson enable "$enable_ws" \
+                        ".network.websocketClients[$edit_index].name = \$name | 
+                         .network.websocketClients[$edit_index].url = \$url | 
+                         .network.websocketClients[$edit_index].token = \$token | 
+                         .network.websocketClients[$edit_index].enable = \$enable" \
+                        "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
+                        mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                        
+                        echo -e ${green}已更新反向WebSocket接口配置${background}
+                        
+                        # 如果修改了token，询问是否要同步到TRSS
+                        if [ "$ws_token" != "$current_token" ] && [ -n "$ws_token" ]; then
+                            echo -e ${yellow}检测到Token已修改${background}
+                            sync_token_to_trss "$ws_token"
+                        fi
                         ;;
                     2)
-                        echo -en ${yellow}确认清除Token? [y/N]: ${background};read confirm
+                        # 编辑正向WebSocket接口
+                        WS_COUNT=$(jq '.network.websocketServers | length // 0' "$CONFIG_FILE")
                         
-                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                            # 清除Token
-                            jq --argjson idx "$token_index" \
-                                '.network.websocketClients[$idx].token = ""' \
-                                "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-                            
-                            echo -e ${green}Token已清除${background}
-                            
-                            # 询问是否同步到TRSS-Yunzai配置
-                            sync_token_to_trss ""
-                        else
-                            echo -e ${yellow}操作已取消${background}
+                        if [ "$WS_COUNT" -eq 0 ]; then
+                            echo -e ${red}没有可编辑的正向WebSocket接口${background}
+                            sleep 1
+                            continue
                         fi
-                        sleep 1
+                        
+                        echo -e ${yellow}请选择要编辑的正向WebSocket接口:${background}
+                        for ((i=0; i<$WS_COUNT; i++)); do
+                            WS_NAME=$(jq -r ".network.websocketServers[$i].name // \"未命名\"" "$CONFIG_FILE")
+                            WS_HOST=$(jq -r ".network.websocketServers[$i].host // \"0.0.0.0\"" "$CONFIG_FILE")
+                            WS_PORT=$(jq -r ".network.websocketServers[$i].port // \"3001\"" "$CONFIG_FILE")
+                            echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_HOST}:${WS_PORT}${background}
+                        done
+                        echo -e ${green}0. ${cyan}返回${background}
+                        
+                        echo -en ${green}请输入编号: ${background};read edit_choice
+                        
+                        if [ "$edit_choice" = "0" ]; then
+                            continue
+                        fi
+                        
+                        if ! [[ "$edit_choice" =~ ^[0-9]+$ ]] || [ "$edit_choice" -lt 1 ] || [ "$edit_choice" -gt "$WS_COUNT" ]; then
+                            echo -e ${red}无效的选择${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        edit_index=$((edit_choice-1))
+                        
+                        # 获取当前配置
+                        current_name=$(jq -r ".network.websocketServers[$edit_index].name // \"\"" "$CONFIG_FILE")
+                        current_host=$(jq -r ".network.websocketServers[$edit_index].host // \"0.0.0.0\"" "$CONFIG_FILE")
+                        current_port=$(jq -r ".network.websocketServers[$edit_index].port // 3001" "$CONFIG_FILE")
+                        current_token=$(jq -r ".network.websocketServers[$edit_index].token // \"\"" "$CONFIG_FILE")
+                        current_enable=$(jq -r ".network.websocketServers[$edit_index].enable // false" "$CONFIG_FILE")
+                        current_report_self=$(jq -r ".network.websocketServers[$edit_index].reportSelfMessage // false" "$CONFIG_FILE")
+                        current_format=$(jq -r ".network.websocketServers[$edit_index].messagePostFormat // \"array\"" "$CONFIG_FILE")
+                        
+                        # 编辑配置
+                        echo -e ${yellow}编辑正向WebSocket接口 ${edit_choice}:${background}
+                        
+                        echo -en ${cyan}请输入名称 \(当前: ${current_name}\): ${background};read ws_name
+                        ws_name=${ws_name:-$current_name}
+                        
+                        echo -en ${cyan}请输入主机地址 \(当前: ${current_host}\): ${background};read ws_host
+                        ws_host=${ws_host:-$current_host}
+                        
+                        echo -en ${cyan}请输入端口 \(当前: ${current_port}\): ${background};read ws_port
+                        ws_port=${ws_port:-$current_port}
+                        
+                        echo -en ${cyan}请输入token \(当前: ${current_token}\): ${background};read ws_token
+                        ws_token=${ws_token:-$current_token}
+                        
+                        echo -en ${cyan}是否启用该WebSocket连接? [Y/n]: ${background};read ws_enable
+                        if [[ "$ws_enable" =~ ^[Nn]$ ]]; then
+                            enable_ws="false"
+                        else
+                            enable_ws="true"
+                        fi
+                        
+                        echo -en ${cyan}是否上报自身消息? [y/N]: ${background};read report_self
+                        if [[ "$report_self" =~ ^[Yy]$ ]]; then
+                            report_self_msg="true"
+                        else
+                            report_self_msg="false"
+                        fi
+                        
+                        echo -en ${cyan}消息上报格式\(array/string\) \(当前: ${current_format}\): ${background};read msg_format
+                        if [[ "$msg_format" == "string" ]]; then
+                            msg_post_format="string"
+                        elif [[ -n "$msg_format" ]]; then
+                            msg_post_format="array"
+                        else
+                            msg_post_format=${current_format}
+                        fi
+                        
+                        # 更新配置
+                        jq \
+                        --arg name "$ws_name" \
+                        --arg host "$ws_host" \
+                        --argjson port "$ws_port" \
+                        --arg token "$ws_token" \
+                        --argjson enable "$enable_ws" \
+                        --argjson report "$report_self_msg" \
+                        --arg format "$msg_post_format" \
+                        ".network.websocketServers[$edit_index].name = \$name | 
+                         .network.websocketServers[$edit_index].host = \$host | 
+                         .network.websocketServers[$edit_index].port = \$port | 
+                         .network.websocketServers[$edit_index].token = \$token | 
+                         .network.websocketServers[$edit_index].enable = \$enable |
+                         .network.websocketServers[$edit_index].reportSelfMessage = \$report |
+                         .network.websocketServers[$edit_index].messagePostFormat = \$format" \
+                        "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
+                        mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                        
+                        echo -e ${green}已更新正向WebSocket接口配置${background}
+                        echo -e ${green}可使用地址: ${cyan}ws://${ws_host}:${ws_port}${background}
                         ;;
                     0)
                         continue
@@ -1529,6 +1550,468 @@ EOF
                     *)
                         echo -e ${red}无效选项${background}
                         sleep 1
+                        ;;
+                esac
+                sleep 1
+                ;;
+            5)
+                # 删除WebSocket接口
+                echo -e ${yellow}请选择要删除的WebSocket接口类型:${background}
+                echo -e ${green}1. ${cyan}反向WebSocket \(websocketClients\)${background}
+                echo -e ${green}2. ${cyan}正向WebSocket \(websocketServers\)${background}
+                echo -e ${green}0. ${cyan}返回${background}
+                
+                echo -en ${green}请选择: ${background};read ws_type
+                
+                case $ws_type in
+                    1)
+                        # 删除反向WebSocket接口
+                        WS_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
+                        
+                        if [ "$WS_COUNT" -eq 0 ]; then
+                            echo -e ${red}没有可删除的反向WebSocket接口${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        echo -e ${yellow}请选择要删除的反向WebSocket接口:${background}
+                        for ((i=0; i<$WS_COUNT; i++)); do
+                            WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
+                            WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
+                            echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_URL}${background}
+                        done
+                        echo -e ${green}0. ${cyan}返回${background}
+                        
+                        echo -en ${green}请输入编号: ${background};read del_choice
+                        
+                        if [ "$del_choice" = "0" ]; then
+                            continue
+                        fi
+                        
+                        if ! [[ "$del_choice" =~ ^[0-9]+$ ]] || [ "$del_choice" -lt 1 ] || [ "$del_choice" -gt "$WS_COUNT" ]; then
+                            echo -e ${red}无效的选择${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        del_index=$((del_choice-1))
+                        WS_NAME=$(jq -r ".network.websocketClients[$del_index].name // \"未命名\"" "$CONFIG_FILE")
+                        
+                        echo -en ${yellow}确认删除反向WebSocket接口 "${WS_NAME}"? [y/N]: ${background};read confirm
+                        
+                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                            # 删除指定索引的WebSocket配置
+                            jq "del(.network.websocketClients[$del_index])" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
+                            mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                            
+                            echo -e ${green}已删除反向WebSocket接口${background}
+                        else
+                            echo -e ${yellow}已取消删除操作${background}
+                        fi
+                        ;;
+                    2)
+                        # 删除正向WebSocket接口
+                        WS_COUNT=$(jq '.network.websocketServers | length // 0' "$CONFIG_FILE")
+                        
+                        if [ "$WS_COUNT" -eq 0 ]; then
+                            echo -e ${red}没有可删除的正向WebSocket接口${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        echo -e ${yellow}请选择要删除的正向WebSocket接口:${background}
+                        for ((i=0; i<$WS_COUNT; i++)); do
+                            WS_NAME=$(jq -r ".network.websocketServers[$i].name // \"未命名\"" "$CONFIG_FILE")
+                            WS_HOST=$(jq -r ".network.websocketServers[$i].host // \"0.0.0.0\"" "$CONFIG_FILE")
+                            WS_PORT=$(jq -r ".network.websocketServers[$i].port // \"3001\"" "$CONFIG_FILE")
+                            echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_HOST}:${WS_PORT}${background}
+                        done
+                        echo -e ${green}0. ${cyan}返回${background}
+                        
+                        echo -en ${green}请输入编号: ${background};read del_choice
+                        
+                        if [ "$del_choice" = "0" ]; then
+                            continue
+                        fi
+                        
+                        if ! [[ "$del_choice" =~ ^[0-9]+$ ]] || [ "$del_choice" -lt 1 ] || [ "$del_choice" -gt "$WS_COUNT" ]; then
+                            echo -e ${red}无效的选择${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        del_index=$((del_choice-1))
+                        WS_NAME=$(jq -r ".network.websocketServers[$del_index].name // \"未命名\"" "$CONFIG_FILE")
+                        
+                        echo -en ${yellow}确认删除正向WebSocket接口 "${WS_NAME}"? [y/N]: ${background};read confirm
+                        
+                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                            # 删除指定索引的WebSocket配置
+                            jq "del(.network.websocketServers[$del_index])" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
+                            mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                            
+                            echo -e ${green}已删除正向WebSocket接口${background}
+                        else
+                            echo -e ${yellow}已取消删除操作${background}
+                        fi
+                        ;;
+                    0)
+                        continue
+                        ;;
+                    *)
+                        echo -e ${red}无效选项${background}
+                        sleep 1
+                        ;;
+                esac
+                sleep 1
+                ;;
+            6)
+                # 启用/禁用WebSocket接口
+                echo -e ${yellow}请选择要启用/禁用的WebSocket接口类型:${background}
+                echo -e ${green}1. ${cyan}反向WebSocket \(websocketClients\)${background}
+                echo -e ${green}2. ${cyan}正向WebSocket \(websocketServers\)${background}
+                echo -e ${green}0. ${cyan}返回${background}
+                
+                echo -en ${green}请选择: ${background};read ws_type
+                
+                case $ws_type in
+                    1)
+                        # 启用/禁用反向WebSocket接口
+                        WS_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
+                        
+                        if [ "$WS_COUNT" -eq 0 ]; then
+                            echo -e ${red}没有可管理的反向WebSocket接口${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        echo -e ${yellow}请选择要启用/禁用的反向WebSocket接口:${background}
+                        for ((i=0; i<$WS_COUNT; i++)); do
+                            WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
+                            WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
+                            WS_ENABLE=$(jq -r ".network.websocketClients[$i].enable // false" "$CONFIG_FILE")
+                            
+                            if [ "$WS_ENABLE" = "true" ]; then
+                                status="${green}已启用"
+                            else
+                                status="${red}已禁用"
+                            fi
+                            
+                            echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_URL} ${yellow}- ${status}${background}
+                        done
+                        echo -e ${green}0. ${cyan}返回${background}
+                        
+                        echo -en ${green}请输入编号: ${background};read toggle_choice
+                        
+                        if [ "$toggle_choice" = "0" ]; then
+                            continue
+                        fi
+                        
+                        if ! [[ "$toggle_choice" =~ ^[0-9]+$ ]] || [ "$toggle_choice" -lt 1 ] || [ "$toggle_choice" -gt "$WS_COUNT" ]; then
+                            echo -e ${red}无效的选择${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        toggle_index=$((toggle_choice-1))
+                        WS_NAME=$(jq -r ".network.websocketClients[$toggle_index].name // \"未命名\"" "$CONFIG_FILE")
+                        current_enable=$(jq -r ".network.websocketClients[$toggle_index].enable // false" "$CONFIG_FILE")
+                        
+                        # 切换启用/禁用状态
+                        if [ "$current_enable" = "true" ]; then
+                            new_enable="false"
+                            action="禁用"
+                        else
+                            new_enable="true"
+                            action="启用"
+                        fi
+                        
+                        echo -en ${yellow}确认${action} WebSocket接口 "${WS_NAME}"? [Y/n]: ${background};read confirm
+                        
+                        if [[ ! "$confirm" =~ ^[Nn]$ ]]; then
+                            # 更新启用/禁用状态
+                            jq --argjson enable "$new_enable" ".network.websocketClients[$toggle_index].enable = \$enable" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
+                            mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                            
+                            echo -e ${green}已${action} WebSocket接口 "${WS_NAME}"${background}
+                        else
+                            echo -e ${yellow}已取消操作${background}
+                        fi
+                        ;;
+                    2)
+                        # 启用/禁用正向WebSocket接口
+                        WS_COUNT=$(jq '.network.websocketServers | length // 0' "$CONFIG_FILE")
+                        
+                        if [ "$WS_COUNT" -eq 0 ]; then
+                            echo -e ${red}没有可管理的正向WebSocket接口${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        echo -e ${yellow}请选择要启用/禁用的正向WebSocket接口:${background}
+                        for ((i=0; i<$WS_COUNT; i++)); do
+                            WS_NAME=$(jq -r ".network.websocketServers[$i].name // \"未命名\"" "$CONFIG_FILE")
+                            WS_HOST=$(jq -r ".network.websocketServers[$i].host // \"0.0.0.0\"" "$CONFIG_FILE")
+                            WS_PORT=$(jq -r ".network.websocketServers[$i].port // 3001" "$CONFIG_FILE")
+                            WS_ENABLE=$(jq -r ".network.websocketServers[$i].enable // false" "$CONFIG_FILE")
+                            
+                            if [ "$WS_ENABLE" = "true" ]; then
+                                status="${green}已启用"
+                            else
+                                status="${red}已禁用"
+                            fi
+                            
+                            echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_HOST}:${WS_PORT} ${yellow}- ${status}${background}
+                        done
+                        echo -e ${green}0. ${cyan}返回${background}
+                        
+                        echo -en ${green}请输入编号: ${background};read toggle_choice
+                        
+                        if [ "$toggle_choice" = "0" ]; then
+                            continue
+                        fi
+                        
+                        if ! [[ "$toggle_choice" =~ ^[0-9]+$ ]] || [ "$toggle_choice" -lt 1 ] || [ "$toggle_choice" -gt "$WS_COUNT" ]; then
+                            echo -e ${red}无效的选择${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        toggle_index=$((toggle_choice-1))
+                        WS_NAME=$(jq -r ".network.websocketServers[$toggle_index].name // \"未命名\"" "$CONFIG_FILE")
+                        current_enable=$(jq -r ".network.websocketServers[$toggle_index].enable // false" "$CONFIG_FILE")
+                        
+                        # 切换启用/禁用状态
+                        if [ "$current_enable" = "true" ]; then
+                            new_enable="false"
+                            action="禁用"
+                        else
+                            new_enable="true"
+                            action="启用"
+                        fi
+                        
+                        echo -en ${yellow}确认${action} WebSocket接口 "${WS_NAME}"? [Y/n]: ${background};read confirm
+                        
+                        if [[ ! "$confirm" =~ ^[Nn]$ ]]; then
+                            # 更新启用/禁用状态
+                            jq --argjson enable "$new_enable" ".network.websocketServers[$toggle_index].enable = \$enable" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
+                            mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                            
+                            echo -e ${green}已${action} WebSocket接口 "${WS_NAME}"${background}
+                        else
+                            echo -e ${yellow}已取消操作${background}
+                        fi
+                        ;;
+                    0)
+                        continue
+                        ;;
+                    *)
+                        echo -e ${red}无效选项${background}
+                        sleep 1
+                        ;;
+                esac
+                sleep 1
+                ;;
+            7)
+                # 管理WebSocket Token
+                echo -e ${yellow}请选择要管理Token的WebSocket接口类型:${background}
+                echo -e ${green}1. ${cyan}反向WebSocket \(websocketClients\)${background}
+                echo -e ${green}2. ${cyan}正向WebSocket \(websocketServers\)${background}
+                echo -e ${green}0. ${cyan}返回${background}
+                
+                echo -en ${green}请选择: ${background};read ws_type
+                
+                case $ws_type in
+                    1)
+                        # 管理反向WebSocket Token
+                        WS_COUNT=$(jq '.network.websocketClients | length // 0' "$CONFIG_FILE")
+                        
+                        if [ "$WS_COUNT" -eq 0 ]; then
+                            echo -e ${red}没有可管理的反向WebSocket接口${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        echo -e ${yellow}请选择要管理Token的反向WebSocket接口:${background}
+                        for ((i=0; i<$WS_COUNT; i++)); do
+                            WS_NAME=$(jq -r ".network.websocketClients[$i].name // \"未命名\"" "$CONFIG_FILE")
+                            WS_URL=$(jq -r ".network.websocketClients[$i].url // \"未设置\"" "$CONFIG_FILE")
+                            WS_TOKEN=$(jq -r ".network.websocketClients[$i].token // \"\"" "$CONFIG_FILE")
+                            
+                            token_status=""
+                            if [ -n "$WS_TOKEN" ]; then
+                                token_status="${green}[已设置token]"
+                            else
+                                token_status="${red}[未设置token]"
+                            fi
+                            
+                            echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_URL} ${token_status}${background}
+                        done
+                        echo -e ${green}0. ${cyan}返回${background}
+                        
+                        echo -en ${green}请输入编号: ${background};read token_choice
+                        
+                        if [ "$token_choice" = "0" ]; then
+                            continue
+                        fi
+                        
+                        if ! [[ "$token_choice" =~ ^[0-9]+$ ]] || [ "$token_choice" -lt 1 ] || [ "$token_choice" -gt "$WS_COUNT" ]; then
+                            echo -e ${red}无效的选择${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        token_index=$((token_choice-1))
+                        WS_NAME=$(jq -r ".network.websocketClients[$token_index].name // \"未命名\"" "$CONFIG_FILE")
+                        current_token=$(jq -r ".network.websocketClients[$token_index].token // \"\"" "$CONFIG_FILE")
+                        
+                        echo -e ${yellow}管理 "${WS_NAME}" 的Token${background}
+                        echo -e ${cyan}当前Token: ${yellow}${current_token:-"未设置"}${background}
+                        echo
+                        echo -e ${green}1. ${cyan}修改Token${background}
+                        echo -e ${green}2. ${cyan}清除Token${background}
+                        echo -e ${green}0. ${cyan}返回${background}
+                        
+                        echo -en ${green}请选择操作: ${background};read token_op
+                        
+                        case $token_op in
+                            1)
+                                echo -en ${cyan}请输入新的Token: ${background};read new_token
+                                
+                                if [ -n "$new_token" ]; then
+                                    # 更新Token
+                                    jq --argjson idx "$token_index" --arg token "$new_token" \
+                                        '.network.websocketClients[$idx].token = $token' \
+                                        "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                                    
+                                    echo -e ${green}Token已更新${background}
+                                    
+                                    # 询问是否同步到TRSS-Yunzai配置
+                                    sync_token_to_trss "$new_token"
+                                else
+                                    echo -e ${yellow}Token未修改${background}
+                                fi
+                                sleep 1
+                                ;;
+                            2)
+                                echo -en ${yellow}确认清除Token? [y/N]: ${background};read confirm
+                                
+                                if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                                    # 清除Token
+                                    jq --argjson idx "$token_index" \
+                                        '.network.websocketClients[$idx].token = ""' \
+                                        "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                                    
+                                    echo -e ${green}Token已清除${background}
+                                    
+                                    # 询问是否同步到TRSS-Yunzai配置
+                                    sync_token_to_trss ""
+                                else
+                                    echo -e ${yellow}操作已取消${background}
+                                fi
+                                sleep 1
+                                ;;
+                            0)
+                                continue
+                                ;;
+                            *)
+                                echo -e ${red}无效选项${background}
+                                sleep 1
+                                ;;
+                        esac
+                        ;;
+                    2)
+                        # 管理正向WebSocket Token
+                        WS_COUNT=$(jq '.network.websocketServers | length // 0' "$CONFIG_FILE")
+                        
+                        if [ "$WS_COUNT" -eq 0 ]; then
+                            echo -e ${red}没有可管理的正向WebSocket接口${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        echo -e ${yellow}请选择要管理Token的正向WebSocket接口:${background}
+                        for ((i=0; i<$WS_COUNT; i++)); do
+                            WS_NAME=$(jq -r ".network.websocketServers[$i].name // \"未命名\"" "$CONFIG_FILE")
+                            WS_HOST=$(jq -r ".network.websocketServers[$i].host // \"0.0.0.0\"" "$CONFIG_FILE")
+                            WS_PORT=$(jq -r ".network.websocketServers[$i].port // 3001" "$CONFIG_FILE")
+                            WS_TOKEN=$(jq -r ".network.websocketServers[$i].token // \"\"" "$CONFIG_FILE")
+                            
+                            token_status=""
+                            if [ -n "$WS_TOKEN" ]; then
+                                token_status="${green}[已设置token]"
+                            else
+                                token_status="${red}[未设置token]"
+                            fi
+                            
+                            echo -e ${green}$((i+1)). ${cyan}${WS_NAME} - ${WS_HOST}:${WS_PORT} ${token_status}${background}
+                        done
+                        echo -e ${green}0. ${cyan}返回${background}
+                        
+                        echo -en ${green}请输入编号: ${background};read token_choice
+                        
+                        if [ "$token_choice" = "0" ]; then
+                            continue
+                        fi
+                        
+                        if ! [[ "$token_choice" =~ ^[0-9]+$ ]] || [ "$token_choice" -lt 1 ] || [ "$token_choice" -gt "$WS_COUNT" ]; then
+                            echo -e ${red}无效的选择${background}
+                            sleep 1
+                            continue
+                        fi
+                        
+                        token_index=$((token_choice-1))
+                        WS_NAME=$(jq -r ".network.websocketServers[$token_index].name // \"未命名\"" "$CONFIG_FILE")
+                        current_token=$(jq -r ".network.websocketServers[$token_index].token // \"\"" "$CONFIG_FILE")
+                        
+                        echo -e ${yellow}管理 "${WS_NAME}" 的Token${background}
+                        echo -e ${cyan}当前Token: ${yellow}${current_token:-"未设置"}${background}
+                        echo
+                        echo -e ${green}1. ${cyan}修改Token${background}
+                        echo -e ${green}2. ${cyan}清除Token${background}
+                        echo -e ${green}0. ${cyan}返回${background}
+                        
+                        echo -en ${green}请选择操作: ${background};read token_op
+                        
+                        case $token_op in
+                            1)
+                                echo -en ${cyan}请输入新的Token: ${background};read new_token
+                                
+                                if [ -n "$new_token" ]; then
+                                    # 更新Token
+                                    jq --argjson idx "$token_index" --arg token "$new_token" \
+                                        '.network.websocketServers[$idx].token = $token' \
+                                        "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                                    
+                                    echo -e ${green}Token已更新${background}
+                                else
+                                    echo -e ${yellow}Token未修改${background}
+                                fi
+                                sleep 1
+                                ;;
+                            2)
+                                echo -en ${yellow}确认清除Token? [y/N]: ${background};read confirm
+                                
+                                if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                                    # 清除Token
+                                    jq --argjson idx "$token_index" \
+                                        '.network.websocketServers[$idx].token = ""' \
+                                        "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                                    
+                                    echo -e ${green}Token已清除${background}
+                                else
+                                    echo -e ${yellow}操作已取消${background}
+                                fi
+                                sleep 1
+                                ;;
+                            0)
+                                continue
+                                ;;
+                            *)
+                                echo -e ${red}无效选项${background}
+                                sleep 1
+                                ;;
+                        esac
                         ;;
                 esac
                 ;;
@@ -2163,7 +2646,7 @@ main() {
     echo -e ${green}8.  ${cyan}WebUI 配置${background}
     echo -e ${green}9.  ${cyan}切换QQ账号${background}
     echo -e ${green}10. ${cyan}多开QQ管理${background}
-    echo -e ${green}11. ${cyan}配置反向WebSocket${background}
+    echo -e ${green}11. ${cyan}配置WebSocket接口${background}
     echo -e ${green}12. ${cyan}音乐签名配置${background}
     echo -e ${green}0.  ${cyan}退出${background}
     echo "========================="

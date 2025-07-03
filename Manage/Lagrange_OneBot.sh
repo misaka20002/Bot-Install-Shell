@@ -909,10 +909,10 @@ manage_implementations_with_path(){
             esac
             ;;
           2) 
-            conn_type="Http" 
+            conn_type="Http"
             # 对Http类型进行自定义配置
-            echo -en ${cyan}请输入主机地址 \(默认: 127.0.0.1\): ${background};read host
-            host=${host:-127.0.0.1}
+            echo -en ${cyan}请输入主机地址 \(默认: 0.0.0.0\): ${background};read host
+            host=${host:-0.0.0.0}
             
             echo -en ${cyan}请输入端口 \(默认: 2956\): ${background};read port
             port=${port:-2956}
@@ -921,10 +921,10 @@ manage_implementations_with_path(){
             token=${token:-""}
             ;;
           3) 
-            conn_type="HttpPost" 
+            conn_type="HttpPost"
             # 对HttpPost类型进行自定义配置
-            echo -en ${cyan}请输入主机地址 \(默认: 127.0.0.1\): ${background};read host
-            host=${host:-127.0.0.1}
+            echo -en ${cyan}请输入主机地址 \(默认: 0.0.0.0\): ${background};read host
+            host=${host:-0.0.0.0}
             
             echo -en ${cyan}请输入端口 \(默认: 2956\): ${background};read port
             port=${port:-2956}
@@ -949,10 +949,10 @@ manage_implementations_with_path(){
             secret=${secret:-""}
             ;;
           4) 
-            conn_type="ForwardWebSocket" 
+            conn_type="ForwardWebSocket"
             # 对ForwardWebSocket类型进行自定义配置
-            echo -en ${cyan}请输入主机地址 \(默认: 127.0.0.1\): ${background};read host
-            host=${host:-127.0.0.1}
+            echo -en ${cyan}请输入主机地址 \(默认: 0.0.0.0\): ${background};read host
+            host=${host:-0.0.0.0}
             
             echo -en ${cyan}请输入端口 \(默认: 2956\): ${background};read port
             port=${port:-2956}
