@@ -30,11 +30,13 @@ if [ "${Address}" = "CN" ]
 then
   GitMirror="gitee.com"
   GithubMirror_1="https://ghfast.top/"
-  GithubMirror_2="https://github.moeyy.xyz/"
+  GithubMirror_2="https://git.ppp.ac.cn/"
+  GithubMirror_3="https://gh-proxy.com/"
 else
   GitMirror="github.com"
   GithubMirror_1=""
   GithubMirror_2=""
+  GithubMirror_3=""
 fi
 
 config=$HOME/.config/meme_generator/config.toml
@@ -852,6 +854,147 @@ view_auto_update_log(){
   echo -en ${yellow}回车返回${background};read
 }
 
+# 添加更换Github代理的函数
+change_github_proxy(){
+    if [ ! -d ${install_path}/meme-generator ]; then
+        echo -e ${red}您还没有安装meme生成器！${background}
+        echo -en ${yellow}回车返回${background};read
+        return
+    fi
+
+    echo -e ${white}"====="${green}更换GitHub代理${white}"====="${background}
+    echo -e ${cyan}当前可用的GitHub代理:${background}
+    echo -e ${green}1.${cyan} 无代理 \(直接访问github.com\)${background}
+    echo -e ${green}2.${cyan} ghfast.top \(${GithubMirror_1:-"https://ghfast.top/"}\)${background}
+    echo -e ${green}3.${cyan} git.ppp.ac.cn \(${GithubMirror_2:-"https://git.ppp.ac.cn/"}\)${background}
+    echo -e ${green}4.${cyan} gh-proxy.com \(${GithubMirror_3:-"https://gh-proxy.com/"}\)${background}
+    echo -e ${green}5.${cyan} 自定义代理${background}
+    echo "========================="
+    
+    # 显示当前各仓库的远程URL
+    echo -e ${cyan}当前仓库远程URL:${background}
+    if [ -d "${install_path}/meme-generator" ]; then
+        echo -n -e ${yellow}meme-generator: ${background}
+        cd "${install_path}/meme-generator" && git remote get-url origin 2>/dev/null || echo -e ${red}未找到${background}
+    fi
+    if [ -d "${install_path}/meme-generator-contrib" ]; then
+        echo -n -e ${yellow}meme-generator-contrib: ${background}
+        cd "${install_path}/meme-generator-contrib" && git remote get-url origin 2>/dev/null || echo -e ${red}未找到${background}
+    fi
+    if [ -d "${install_path}/meme_emoji" ]; then
+        echo -n -e ${yellow}meme_emoji: ${background}
+        cd "${install_path}/meme_emoji" && git remote get-url origin 2>/dev/null || echo -e ${red}未找到${background}
+    fi
+    echo "========================="
+    
+    echo -en ${green}请选择要使用的GitHub代理 [1-5]: ${background};read proxy_choice
+    
+    case ${proxy_choice} in
+    1)
+        new_proxy=""
+        proxy_name="无代理"
+        ;;
+    2)
+        new_proxy="${GithubMirror_1:-"https://ghfast.top/"}"
+        proxy_name="ghfast.top"
+        ;;
+    3)
+        new_proxy="${GithubMirror_2:-"https://git.ppp.ac.cn/"}"
+        proxy_name="git.ppp.ac.cn"
+        ;;
+    4)
+        new_proxy="${GithubMirror_3:-"https://gh-proxy.com/"}"
+        proxy_name="gh-proxy.com"
+        ;;
+    5)
+        echo -en ${cyan}请输入自定义代理地址 \(如: https://mirror.example.com/\): ${background};read custom_proxy
+        if [[ ! ${custom_proxy} =~ ^https?:// ]]; then
+            echo -e ${red}代理地址格式错误，请以http://或https://开头${background}
+            echo -en ${yellow}回车返回${background};read
+            return
+        fi
+        new_proxy="${custom_proxy}"
+        proxy_name="自定义代理"
+        ;;
+    *)
+        echo -e ${red}选择无效${background}
+        echo -en ${yellow}回车返回${background};read
+        return
+        ;;
+    esac
+    
+    echo -e ${yellow}正在更换GitHub代理为: ${green}${proxy_name}${background}
+    
+    # 更新各个仓库的远程URL
+    repos=(
+        "${install_path}/meme-generator:https://github.com/MemeCrafters/meme-generator.git"
+        "${install_path}/meme-generator-contrib:https://github.com/MemeCrafters/meme-generator-contrib.git"
+        "${install_path}/meme_emoji:https://github.com/anyliew/meme_emoji.git"
+    )
+    
+    success_count=0
+    total_count=0
+    
+    for repo_info in "${repos[@]}"; do
+        repo_path="${repo_info%%:*}"
+        original_url="${repo_info##*:}"
+        
+        if [ -d "${repo_path}" ]; then
+            total_count=$((total_count + 1))
+            echo -e ${yellow}正在更新 $(basename ${repo_path}) 的远程URL...${background}
+            
+            cd "${repo_path}"
+            if [ -z "${new_proxy}" ]; then
+                # 无代理，使用原始URL
+                new_url="${original_url}"
+            else
+                # 使用代理
+                new_url="${new_proxy}${original_url}"
+            fi
+            
+            if git remote set-url origin "${new_url}" 2>/dev/null; then
+                echo -e ${green}✓ $(basename ${repo_path}): ${new_url}${background}
+                success_count=$((success_count + 1))
+            else
+                echo -e ${red}✗ $(basename ${repo_path}): 更新失败${background}
+            fi
+        fi
+    done
+    
+    echo "========================="
+    if [ ${success_count} -eq ${total_count} ] && [ ${total_count} -gt 0 ]; then
+        echo -e ${green}所有仓库的GitHub代理已成功更换为: ${proxy_name}${background}
+        
+        # 测试连接
+        echo -e ${yellow}正在测试新代理的连接性...${background}
+        cd "${install_path}/meme-generator"
+        if git ls-remote origin >/dev/null 2>&1; then
+            echo -e ${green}✓ 代理连接测试成功${background}
+        else
+            echo -e ${red}✗ 代理连接测试失败，您可能需要尝试其他代理${background}
+        fi
+        
+        echo -en ${yellow}是否立即测试更新功能? [Y/n]: ${background};read test_update
+        case ${test_update} in
+        N|n)
+            ;;
+        *)
+            echo -e ${yellow}正在测试更新meme-generator...${background}
+            cd "${install_path}/meme-generator"
+            if git fetch --dry-run 2>/dev/null; then
+                echo -e ${green}✓ 更新测试成功，新代理工作正常${background}
+            else
+                echo -e ${red}✗ 更新测试失败，可能需要更换其他代理${background}
+            fi
+            ;;
+        esac
+    else
+        echo -e ${red}部分仓库的代理更换失败 \(${success_count}/${total_count}\)${background}
+    fi
+    
+    echo -en ${yellow}回车返回${background};read
+}
+
 main(){
 # 如果是首次通过curl执行，确保先保存脚本
 if [[ "$0" == *"/dev/fd/"* || "$0" == "bash" ]]; then
@@ -888,6 +1031,7 @@ echo -e  ${green} 8.  ${cyan}查看自动更新服务日志${background}
 echo -e  ${green} 9.  ${cyan}修改meme端口号${background}
 echo -e  ${green} 10.  ${cyan}切换自动更新设置${background}
 echo -e  ${green} 11.  ${cyan}重写配置文件${background}
+echo -e  ${green} 12.  ${cyan}更换Github代理${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}meme生成器状态: ${condition}${background}
@@ -939,6 +1083,10 @@ toggle_auto_update
 11)
 echo
 rewrite_config
+;;
+12)
+echo
+change_github_proxy
 ;;
 0)
 exit

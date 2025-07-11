@@ -479,7 +479,8 @@ case $1 in
     ;;
   plugin_1)
         bash <(curl -sL https://mirrors.chenby.cn/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
-        # bash <(curl -sL https://github.moeyy.xyz/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
+        # bash <(curl -sL https://git.ppp.ac.cn/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
+        # bash <(curl -sL https://gh-proxy.com/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
     ;;
   plugin_2)
         bash <(curl -sL https://ghfast.top/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
