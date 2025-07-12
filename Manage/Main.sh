@@ -116,6 +116,47 @@ else
 fi
 }
 
+function QuickLog(){
+    local bot_name="$1"
+    local bot_command="$2" 
+    local tmux_name="$3"
+    
+    # 检查运行状态
+    if TmuxLs ${tmux_name}
+    then
+        # 在tmux中运行，进入滚动模式
+        if ! tmux has-session -t ${tmux_name} 2>/dev/null
+        then
+            echo -e ${red}Tmux会话 ${tmux_name} 不存在${background}
+            return 1
+        fi
+        
+        echo -e ${cyan}正在打开 ${bot_name} 日志（滚动模式）...${background}
+        # attach到tmux会话并进入复制模式（滚动模式）
+        if tmux attach -t ${tmux_name} \; copy-mode 2>/dev/null
+        then
+            return 0
+        else
+            # 如果进入复制模式失败，尝试普通attach
+            echo -e ${yellow}进入滚动模式失败，使用普通模式${background}
+            tmux attach -t ${tmux_name}
+        fi
+    elif ps all | sed /grep/d | grep -q "${bot_command}"
+    then
+        # 在前台运行
+        echo -e ${red}${bot_name} 在前台运行，无法打开日志${background}
+        return 1
+    elif pnpm pm2 show ${bot_name} 2>&1 | grep -q online
+    then
+        # 在pm2后台运行
+        echo -e ${cyan}正在打开 ${bot_name} PM2日志...${background}
+        pnpm pm2 log ${bot_name}
+    else
+        echo -e ${red}${bot_name} 未运行${background}
+        return 1
+    fi
+}
+
 function backmain(){
 echo
 echo -en ${cyan}回车返回${background}
@@ -137,6 +178,8 @@ echo -e ${cyan} xdm meme"   | "${blue}meme 管理脚本${background}
 echo -e ${green}===============================${background}
 echo -e ${cyan} xdm mz ${blue}Miao-Yunzai根目录${background}
 echo -e ${cyan} xdm tz ${blue}TRSS-Yunzai根目录${background}
+echo -e ${cyan} xdm mzlog ${blue}打开 Miao 运行日志${background}
+echo -e ${cyan} xdm tzlog ${blue}打开 TRSS 运行日志${background}
 echo -e ${green}===============================${background}
 echo -e ${yellow} Bot-Shell ${cyan}呆毛版-QQ群: 285744328${background}
 echo -e ${green}=============================${background}
@@ -173,6 +216,30 @@ nap)
 MirrorCheck
 URL="${GitMirror}/raw/master/Manage"
 bash <(curl -sL ${URL}/NapCat.sh)
+exit
+;;
+mzlog)
+export BotName=Miao-Yunzai
+export BOT_COMMAND="Miao-Yun"
+export TmuxName=MZ
+if BotPathCheck
+then
+    QuickLog "Miao-Yunzai" "Miao-Yun" "MZ"
+else
+    echo -e ${red}Miao-Yunzai 未安装${background}
+fi
+exit
+;;
+tzlog)
+export BotName=TRSS-Yunzai
+export BOT_COMMAND="TRSS Yun" 
+export TmuxName=TZ
+if BotPathCheck
+then
+    QuickLog "TRSS-Yunzai" "TRSS Yun" "TZ"
+else
+    echo -e ${red}TRSS-Yunzai 未安装${background}
+fi
 exit
 ;;
 YZ|Yunzai|Yunzai-Bot)
@@ -264,7 +331,7 @@ function UPDATE(){
         fi
     fi
 }
-old_version="1.1.68"
+old_version="1.1.70"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -325,6 +392,28 @@ if ! tmux attach -t ${TmuxName} > /dev/null 2>&1
 then
   error=$(tmux attach -t ${TmuxName} 2>&1)
   ${DialogWhiptail} --title "呆毛版-Script" --msgbox "窗口打开错误\n原因: ${error}" 10 60
+fi
+}
+TmuxAttachWithScrollMode(){
+#echo $TmuxName
+# 首先检查tmux会话是否存在
+if ! tmux has-session -t ${TmuxName} 2>/dev/null
+then
+  ${DialogWhiptail} --title "呆毛版-Script" --msgbox "Tmux会话 ${TmuxName} 不存在" 10 60
+  return 1
+fi
+
+# 尝试attach到tmux会话并进入复制模式（滚动模式）
+if tmux attach -t ${TmuxName} \; copy-mode 2>/dev/null
+then
+  return 0
+else
+  # 如果进入复制模式失败，尝试普通attach
+  if ! tmux attach -t ${TmuxName} > /dev/null 2>&1
+  then
+    error=$(tmux attach -t ${TmuxName} 2>&1)
+    ${DialogWhiptail} --title "呆毛版-Script" --msgbox "窗口打开错误\n原因: ${error}" 10 60
+  fi
 fi
 }
 AttachPage(){
@@ -468,7 +557,7 @@ case $1 in
     RunningState
     res="$?"
     if [ ${res} -eq 1 ];then
-      TmuxAttach
+      TmuxAttachWithScrollMode
     elif [ ${res} -eq 2 ];then
       ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [前台运行]\n无法打开日志" 10 60
     elif [ ${res} -eq 3 ];then
