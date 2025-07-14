@@ -48,7 +48,7 @@
 su
 bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/install.sh)
 # 或
-bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/install.sh)
 ```
 
 - 使用 `xdm` 命令打开呆毛版脚本
@@ -80,7 +80,7 @@ bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/inst
 ```sh
 bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/install.sh)
 # 或
-bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/install.sh)
 ```
 
 </details>
@@ -101,7 +101,7 @@ bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/inst
     ```sh
     bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/install.sh)
     #或
-    bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/install.sh)
+    bash <(curl -sL https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/install.sh)
     ```
 - 删除呆毛版脚本的命令
     ```sh

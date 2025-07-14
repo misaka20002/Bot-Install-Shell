@@ -356,7 +356,7 @@ apt install git curl wget -y
 ```sh
 bash <(curl -sL https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/install.sh)
 # 或
-bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/install.sh)
 ```
 
 请阅读\[[用户协议](../Manage/用户协议.txt)\]

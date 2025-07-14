@@ -331,7 +331,7 @@ function UPDATE(){
         fi
     fi
 }
-old_version="1.1.70"
+old_version="1.1.71"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -339,8 +339,8 @@ then
   UPDATE
 elif ping -c 1 github.com > /dev/null 2>&1
 then
-  VersionURL="https://github.com/misaka20002/Bot-Install-Shell/raw/master/version"
-  URL="https://github.com/misaka20002/Bot-Install-Shell/raw/master/Manage/Main.sh"
+  VersionURL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/version"
+  URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/Main.sh"
   UPDATE
 fi
 ##############################
@@ -718,7 +718,7 @@ function OperatingEnvironmentInstall(){
     URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
   elif ping -c 1 github.com > /dev/null 2>&1
   then
-    URL="https://github.com/misaka20002/Bot-Install-Shell/raw/master/Manage"
+    URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage"
   fi
   for command in ${command_all}
   do
@@ -818,7 +818,7 @@ then
   URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
 elif ping -c 1 github.com > /dev/null 2>&1
 then
-  URL="https://github.com/misaka20002/Bot-Install-Shell/raw/master/Manage"
+  URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage"
 fi
 for command in ${command_all}
 do

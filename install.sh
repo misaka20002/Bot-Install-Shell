@@ -101,19 +101,20 @@ function Script_Install(){
           URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
       else 
           GitMirror="github.com"
-          URL="https://github.com/misaka20002/Bot-Install-Shell/raw/master/version"
+          URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/version"
       fi
     fi
-    version_date=$(curl ${URL})
-    version="$(echo ${version_date} | grep version | awk '{print $2}' )"
-    date="$(echo ${version_date} | grep date | awk '{print $4}' )"
+    version_date=$(curl -sL ${URL})
+    version="$(echo "${version_date}" | grep 'version:' | awk '{print $2}')"
+    date="$(echo "${version_date}" | grep 'date:' | awk '{print $2}')"
     echo -e ${cyan}获取成功${background}
     echo
     echo -e ${white}=========================${background}
     echo -e ${red}" "呆毛版 ${yellow}BOT ${green}Install ${cyan}Script ${background}
     echo -e "  "————"  "————"  "————"  "————"  "
-    echo -e ${green}" "版本:" "v${version} ${cyan}\(${date}\) ${background}
-    echo -e ${green}" "作者:" "${cyan}呆毛版"   "\(Misaka21011\) ${background}
+    echo -e ${green}" "版本:" "v${version} ${cyan}\(date: ${date}\) ${background}
+    echo -e ${green}" "作者:" "${cyan}小呆毛"   "\(Misaka21011\) ${background}
+    echo -e ${green}" "镜像:" "${cyan}${GitMirror}${background}
     echo -e ${white}=========================${background}
     echo
     echo -e ${white}=========================${background}
@@ -124,12 +125,10 @@ function Script_Install(){
     echo -en ${green}请选择: ${background};read Choice
     case ${Choice} in 
         1)
-            export Git_Mirror=gitee.com
             URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/Main.sh"
             ;;
         2)
-            export Git_Mirror=github
-            URL="https://github.com/misaka20002/Bot-Install-Shell/raw/master/Manage/Main.sh"
+            URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/Main.sh"
             ;;
         *)
             echo -e ${red}输入错误${background}
@@ -144,16 +143,27 @@ function Script_Install(){
     mv -f xdm /usr/local/bin/xdm
     chmod +x /usr/local/bin/xdm
     echo
-    if ! xdm help > /dev/null 2>&1;then
-        echo -e ${yellow} - ${red}安装失败${background}
-        echo -e ${yellow} - ${cyan}正在尝试解决${background}
+    if ! /usr/local/bin/xdm help; then
+        echo -e ${yellow} - ${red}安装失败，脚本无法正常运行${background}
+        echo -e ${yellow} - ${cyan}正在尝试解决shebang问题${background}
+        
+        # 尝试修复shebang
         old_xdm_bash='#!/bin/env bash'
         new_xdm_bash=$(command -v bash)
-        sed -i "s|${old_xdm_bash}|#!${new_xdm_bash}|g" /usr/local/bin/xdm
-        #sed -i "s|'#!/bin/env bash'|#!$(command -v bash)|g" /usr/local/bin/xdm
-        if ! xdm help > /dev/null 2>&1;then
-            echo -e ${yellow} - ${red}解决失败${background}
-            exit
+        if [ -n "${new_xdm_bash}" ]; then
+            sed -i "s|${old_xdm_bash}|#!${new_xdm_bash}|g" /usr/local/bin/xdm
+            
+            # 再次测试
+            if /usr/local/bin/xdm help; then
+                echo -e ${yellow} - ${green}shebang修复成功${background}
+            else
+                echo -e ${yellow} - ${red}修复失败，请手动检查脚本${background}
+                echo -e ${yellow} - ${cyan}脚本位置: /usr/local/bin/xdm${background}
+                exit 1
+            fi
+        else
+            echo -e ${yellow} - ${red}无法找到bash路径，修复失败${background}
+            exit 1
         fi
     fi
     echo -e ${yellow} - ${yellow}安装成功${background}
@@ -168,13 +178,13 @@ echo -e ${cyan}呆毛版 Script ${yellow}不会执行任何恶意命令${backgro
 echo -e ${cyan}如果您同意安装 请输入 ${green}同意安装${background}
 echo -e ${cyan}注意：同意安装即同意本项目的用户协议${background}
 echo -e ${cyan}用户协议链接: ${background}
-echo -e ${cyan}https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Manage/用户协议.txt${background}
+echo -e ${cyan}https://gitee.com/Misaka21011/Yunzai-Bot-Shell/blob/master/Manage/用户协议.txt ${background}
 echo -e ${white}"=========================="${background}
 echo -en ${green}请输入:${background};read yn
 if [  "${yn}" == "同意安装" ]
 then
-    echo -e ${green}3秒后开始安装${background}
-    sleep 2s
+    echo -e ${green}2秒后开始安装${background}
+    sleep 1s
     SystemCheck
     Dependency
     echo

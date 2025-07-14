@@ -6,7 +6,7 @@ then
 elif ping -c 1 github.com > /dev/null 2>&1
 then
   GitMirror=""
-  URL="https://github.com/misaka20002/Bot-Install-Shell/raw/master/Manage"
+  URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage"
 fi
 
 install_Bot(){
