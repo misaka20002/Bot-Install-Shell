@@ -669,17 +669,22 @@ change_sign_version_for_account(){
   
   echo -e ${cyan}当前签名版本: ${green}${current_version}${background}
   echo -e ${cyan}请选择签名服务器版本${background}
-  echo -e  ${green} 1.  ${cyan}版本: 30366 \(lagrangecore.org\)${background}
-  echo -e  ${green} 2.  ${cyan}版本: 25765 \(0w0.ing\)${background}
+  echo -e  ${green} 1.  ${cyan}版本: cn 30366 \(lagrangecore.org\)${background}
+  echo -e  ${green} 2.  ${cyan}版本: hk 30366 \(0w0.ing\)${background}
+  echo -e  ${green} 3.  ${cyan}版本: hk 25765 \(0w0.ing\)${background}
   echo "========================="
   echo -en ${green}请输入您的选项: ${background};read num
   
   case ${num} in
-  1|30366)
+  1)
       new_url="https://sign.lagrangecore.org/api/sign/30366"
       new_version="30366"
       ;;
-  2|25765)
+  2)
+      new_url="https://sign.0w0.ing/api/sign/30366"
+      new_version="30366"
+      ;;
+  3)
       new_url="https://sign.0w0.ing/api/sign/25765"
       new_version="25765"
       ;;
