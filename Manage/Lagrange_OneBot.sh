@@ -1420,8 +1420,8 @@ manage_single_qq(){
   echo -e  ${green} 6.  ${cyan}更换签名版本${background}
   echo -e  ${green} 7.  ${cyan}管理OneBot连接配置${background}
   echo -e  ${green} 8.  ${cyan}修改日志等级${background}
-  echo -e  ${green} 9.  ${cyan}重新登录QQ${background}
-  echo -e  ${green} 10. ${cyan}删除此QQ${background}
+  echo -e  ${green} 9.  ${cyan}重新授权登录QQ${background}
+  echo -e  ${green} 10. ${cyan}删除此QQ全部配置${background}
   echo -e  ${green} 0.  ${cyan}返回上级菜单${background}
   echo "========================="
   echo -en ${green}请输入您的选项: ${background};read option
