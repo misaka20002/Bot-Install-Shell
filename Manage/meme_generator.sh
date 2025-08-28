@@ -1,5 +1,5 @@
 #!/bin/env bash
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.21"
 
 export red="\033[31m"
 export green="\033[32m"
@@ -743,7 +743,7 @@ EOF
 
 setup_auto_update(){
   echo -en ${yellow}是否开启meme生成器自动更新? [Y/n]:${background};read yn
-  echo -e ${cyan}启动meme生成器之后将会在每天凌晨1点自动同步更新 meme GitHub 仓库并重启${background}
+  echo -e ${cyan}启动meme生成器之后将会在每天凌晨1点到6点随机时间自动同步更新 meme GitHub 仓库并重启${background}
   case ${yn} in
   N|n)
     # 如果用户选择不开启自动更新，但已经存在cron任务，则删除它
@@ -758,8 +758,11 @@ setup_auto_update(){
     
     # 检查是否已经存在相同的cron任务
     if ! crontab -l 2>/dev/null | grep -q "meme_generator_auto_update"; then
-      (crontab -l 2>/dev/null; echo "0 1 * * * /bin/bash -c 'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; export HOME=/root; ${SCRIPT_SYSTEM_PATH} auto_update' # meme_generator_auto_update") | crontab -
-      echo -e ${green}已设置每天凌晨1点自动更新meme生成器${background}
+      # 生成随机时间：1-6点之间的随机小时，0-59分钟之间的随机分钟
+      random_hour=$((1 + RANDOM % 6))
+      random_minute=$((RANDOM % 60))
+      (crontab -l 2>/dev/null; echo "${random_minute} ${random_hour} * * * /bin/bash -c 'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; export HOME=/root; ${SCRIPT_SYSTEM_PATH} auto_update' # meme_generator_auto_update") | crontab -
+      echo -e ${green}已设置每天凌晨${random_hour}:$(printf "%02d" ${random_minute})自动更新meme生成器${background}
       echo -e ${cyan}自动更新日志位置: ${HOME}/.config/meme_generator/auto_update.log${background}
     fi
     ;;
@@ -798,9 +801,12 @@ toggle_auto_update(){
     esac
   else
     # 如果不存在，则添加自动更新的cron任务
-    (crontab -l 2>/dev/null; echo "0 1 * * * /bin/bash -c 'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; export HOME=/root; ${SCRIPT_SYSTEM_PATH} auto_update' # meme_generator_auto_update") | crontab -
+    # 生成随机时间：1-6点之间的随机小时，0-59分钟之间的随机分钟
+    random_hour=$((1 + RANDOM % 6))
+    random_minute=$((RANDOM % 60))
+    (crontab -l 2>/dev/null; echo "${random_minute} ${random_hour} * * * /bin/bash -c 'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; export HOME=/root; ${SCRIPT_SYSTEM_PATH} auto_update' # meme_generator_auto_update") | crontab -
     echo -e ${green}已开启meme生成器的自动更新${background}
-    echo -e ${cyan}启动meme生成器之后将会在每天凌晨1点自动同步更新 meme GitHub 仓库并重启${background}
+    echo -e ${cyan}将在每天凌晨${random_hour}:$(printf "%02d" ${random_minute})自动同步更新 meme GitHub 仓库并重启${background}
     echo -e ${cyan}自动更新日志位置: ${HOME}/.config/meme_generator/auto_update.log${background}
   fi
   echo -en ${yellow}回车返回${background};read
