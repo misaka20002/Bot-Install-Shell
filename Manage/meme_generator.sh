@@ -1,5 +1,5 @@
 #!/bin/env bash
-SCRIPT_VERSION="1.0.01"
+SCRIPT_VERSION="1.0.2"
 
 export red="\033[31m"
 export green="\033[32m"
@@ -24,6 +24,15 @@ if [ ! "$(id -u)" = "0" ]; then
     exit 0
 fi
 
+# 检查是否为 Debian 系系统
+if [ ! -f /etc/debian_version ] && [ ! -f /etc/lsb-release ]; then
+    if ! command -v apt >/dev/null 2>&1 && ! command -v apt-get >/dev/null 2>&1; then
+        echo -e ${red}此脚本仅支持基于 Debian 的 Linux 发行版（如 Ubuntu、Debian 等）${background}
+        echo -e ${red}检测到您的系统不是 Debian 系，程序将退出${background}
+        exit 1
+    fi
+fi
+
 URL="https://ipinfo.io"
 Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
 if [ "${Address}" = "CN" ]
@@ -41,7 +50,7 @@ fi
 
 config=$HOME/.config/meme_generator/config.toml
 install_path=$HOME/memeGenerator
-SCRIPT_LOCAL_PATH="$HOME/.config/meme_generator/update_script.sh"
+SCRIPT_SYSTEM_PATH="/usr/local/bin/meme_generator.sh"
 
 function tmux_new(){
 Tmux_Name="$1"
@@ -575,31 +584,28 @@ esac
 }
 
 ensure_script_saved() {
-  script_dir="$(dirname "$SCRIPT_LOCAL_PATH")"
-  mkdir -p "$script_dir"
   current_version=${SCRIPT_VERSION}
-  # 检查本地脚本版本
+  # 检查系统脚本版本
   local_version=""
-  if [[ -f "$SCRIPT_LOCAL_PATH" ]]; then
-    local_version=$(grep "^SCRIPT_VERSION=" "$SCRIPT_LOCAL_PATH" | head -n 1 | cut -d'"' -f2)
+  if [[ -f "$SCRIPT_SYSTEM_PATH" ]]; then
+    local_version=$(grep "^SCRIPT_VERSION=" "$SCRIPT_SYSTEM_PATH" | head -n 1 | cut -d'"' -f2)
   fi
-  # 如果本地脚本不存在或版本不同，则需要更新
-  if [[ ! -f "$SCRIPT_LOCAL_PATH" ]] || [[ -z "$local_version" ]] || [[ "$current_version" != "$local_version" ]]; then
+  # 如果系统脚本不存在或版本不同，则需要更新
+  if [[ ! -f "$SCRIPT_SYSTEM_PATH" ]] || [[ -z "$local_version" ]] || [[ "$current_version" != "$local_version" ]]; then
     download_script() {
-      # 如果当前脚本是从标准输入或临时文件运行的，则从远程下载
-      curl -sL "https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/meme_generator.sh" > "$SCRIPT_LOCAL_PATH"
-      if [ $? -eq 0 ]; then
-          chmod +x "$SCRIPT_LOCAL_PATH"
+      # 从远程下载脚本到系统目录
+      if curl -sL "https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/meme_generator.sh" > "$SCRIPT_SYSTEM_PATH"; then
+        chmod +x "$SCRIPT_SYSTEM_PATH"
+        return 0
       else
-          curl -sL "https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/refs/heads/master/Manage/meme_generator.sh" > "$SCRIPT_LOCAL_PATH"
-          if [ $? -eq 0 ]; then
-            chmod +x "$SCRIPT_LOCAL_PATH"
-          else
-            echo "警告: 脚本更新失败，meme服务器自动更新服务可能出错，请检查网络连接"
-            return 1
-          fi
+        if curl -sL "https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/refs/heads/master/Manage/meme_generator.sh" > "$SCRIPT_SYSTEM_PATH"; then
+          chmod +x "$SCRIPT_SYSTEM_PATH"
+          return 0
+        else
+          echo "警告: 脚本更新失败，meme服务器自动更新服务可能出错，请检查网络连接"
+          return 1
+        fi
       fi
-      return 0
     }
     download_script
   else
@@ -629,15 +635,32 @@ auto_update_meme_generator(){
   # 先检查并限制日志行数
   log_file
   
+  # 设置 cron 环境变量
+  export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  export HOME="${HOME:-/root}"
+  export SHELL="${SHELL:-/bin/bash}"
+  
   echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 开始自动更新meme生成器...${background}" >> ${log_file}
+  echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 当前PATH: $PATH${background}" >> ${log_file}
+  echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 当前HOME: $HOME${background}" >> ${log_file}
+  
+  # 检查关键命令是否可用
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] 错误: 找不到 tmux 命令${background}" >> ${log_file}
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] 错误: 找不到 python3 命令${background}" >> ${log_file}
+  fi
   
   # 检查meme生成器是否在运行
   was_running=false
   if meme_curl; then
     was_running=true
     echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在停止meme生成器${background}" >> ${log_file}
-    tmux_kill_session meme_generator > /dev/null 2>&1
-    pm2 delete meme_generator > /dev/null 2>&1
+    /usr/bin/tmux kill-session -t meme_generator > /dev/null 2>&1
+    if command -v pm2 >/dev/null 2>&1; then
+      pm2 delete meme_generator > /dev/null 2>&1
+    fi
     PID=$(ps aux | grep "meme_generator.app" | sed '/grep/d' | awk '{print $2}')
     if [ ! -z "${PID}" ]; then
       kill -9 ${PID}
@@ -649,12 +672,14 @@ auto_update_meme_generator(){
   if ! git_update "${install_path}/meme-generator" "${log_file}"; then
     echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] meme-generator更新失败${background}" >> ${log_file}
   else
-    source venv/bin/activate
-    python -m pip install . >> ${log_file} 2>&1
+    cd "${install_path}/meme-generator"
+    if [ -f "venv/bin/activate" ]; then
+      source venv/bin/activate >> ${log_file} 2>&1
+      python -m pip install . >> ${log_file} 2>&1
+    else
+      echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] 虚拟环境不存在${background}" >> ${log_file}
+    fi
   fi
-
-  source venv/bin/activate
-  python -m pip install . >> ${log_file} 2>&1
 
   # 更新meme-generator-contrib
   echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在更新meme-generator-contrib...${background}" >> ${log_file}
@@ -670,27 +695,53 @@ auto_update_meme_generator(){
 
   echo -e "${green}[$(date "+%Y-%m-%d %H:%M:%S")] 更新完成！${background}" >> ${log_file}
   
-  # 如果之前在运行，则重新启动 - 修复启动部分
+  # 如果之前在运行，则重新启动 - 使用完整路径和环境变量
   if $was_running; then
     echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在重新启动meme生成器...${background}" >> ${log_file}
-    export Boolean=true
-    # 将输出重定向从tmux_new命令中移出，确保tmux命令能正常执行
-    tmux_new meme_generator "cd ${install_path}/meme-generator && source venv/bin/activate && while ${Boolean}; do python -m meme_generator.app; echo -e ${red}meme生成器关闭 正在重启${background}; sleep 2s; done"
-    # 记录启动结果
-    if tmux_ls meme_generator; then
-      echo -e "${green}[$(date "+%Y-%m-%d %H:%M:%S")] meme生成器成功启动${background}" >> ${log_file}
-    else
-      echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] meme生成器启动失败${background}" >> ${log_file}
+    
+    # 检查虚拟环境和必要文件
+    if [ ! -f "${install_path}/meme-generator/venv/bin/activate" ]; then
+      echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] 虚拟环境不存在，无法启动${background}" >> ${log_file}
+      return 1
     fi
+    
+    # 创建启动脚本
+    start_script="/tmp/meme_start.sh"
+    cat > ${start_script} << 'EOF'
+#!/bin/bash
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export HOME="/root"
+cd /root/memeGenerator/meme-generator
+source venv/bin/activate
+while true; do
+    python -m meme_generator.app
+    echo "meme生成器关闭，2秒后重启..."
+    sleep 2
+done
+EOF
+    chmod +x ${start_script}
+    
+    # 使用完整路径启动 tmux
+    if /usr/bin/tmux new -s meme_generator -d "/bin/bash ${start_script}" 2>>${log_file}; then
+      echo -e "${green}[$(date "+%Y-%m-%d %H:%M:%S")] tmux 会话创建成功${background}" >> ${log_file}
+      
+      # 等待服务启动
+      sleep 15
+      if meme_curl; then
+        echo -e "${green}[$(date "+%Y-%m-%d %H:%M:%S")] meme生成器成功启动${background}" >> ${log_file}
+      else
+        echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] meme生成器启动失败${background}" >> ${log_file}
+      fi
+    else
+      echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] tmux 命令执行失败${background}" >> ${log_file}
+    fi
+    
+    # 清理临时脚本
+    rm -f ${start_script}
   fi
 }
 
 setup_auto_update(){
-      # 禁用cron定时自动更新
-      echo -en ${yellow}cron定时方案无法执行自动更新，已禁用cron定时自动更新功能，请自己有空的时候手动更新哦${background};read
-      return
-
-
   echo -en ${yellow}是否开启meme生成器自动更新? [Y/n]:${background};read yn
   echo -e ${cyan}启动meme生成器之后将会在每天凌晨1点自动同步更新 meme GitHub 仓库并重启${background}
   case ${yn} in
@@ -702,12 +753,12 @@ setup_auto_update(){
     fi
     ;;
   *)
-    # 确保脚本已保存到固定位置
+    # 确保脚本已保存到系统位置
     ensure_script_saved
     
     # 检查是否已经存在相同的cron任务
     if ! crontab -l 2>/dev/null | grep -q "meme_generator_auto_update"; then
-      (crontab -l 2>/dev/null; echo "0 1 * * * bash ${SCRIPT_LOCAL_PATH} auto_update # meme_generator_auto_update") | crontab -
+      (crontab -l 2>/dev/null; echo "0 1 * * * /bin/bash -c 'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; export HOME=/root; ${SCRIPT_SYSTEM_PATH} auto_update' # meme_generator_auto_update") | crontab -
       echo -e ${green}已设置每天凌晨1点自动更新meme生成器${background}
       echo -e ${cyan}自动更新日志位置: ${HOME}/.config/meme_generator/auto_update.log${background}
     fi
@@ -716,21 +767,38 @@ setup_auto_update(){
 }
 
 toggle_auto_update(){
-  # 确保脚本已保存到固定位置
+  # 确保脚本已保存到系统位置
   ensure_script_saved
   
   if crontab -l 2>/dev/null | grep -q "meme_generator_auto_update"; then
     # 如果已经存在，则删除自动更新的cron任务
     crontab -l 2>/dev/null | grep -v "meme_generator_auto_update" | crontab -
     echo -e ${yellow}已关闭meme生成器的自动更新${background}
+    
+    # 询问是否删除相关文件
+    echo -en ${cyan}是否删除系统脚本文件和日志文件? [Y/n]: ${background};read delete_files
+    case ${delete_files} in
+    N|n)
+      echo -e ${yellow}保留了系统脚本文件和日志文件${background}
+      ;;
+    *)
+      # 删除系统脚本文件
+      if [ -f "$SCRIPT_SYSTEM_PATH" ]; then
+        rm -f "$SCRIPT_SYSTEM_PATH"
+        echo -e ${green}已删除系统脚本文件: $SCRIPT_SYSTEM_PATH${background}
+      fi
+      
+      # 删除日志文件
+      log_file="${HOME}/.config/meme_generator/auto_update.log"
+      if [ -f "$log_file" ]; then
+        rm -f "$log_file"
+        echo -e ${green}已删除自动更新日志文件: $log_file${background}
+      fi
+      ;;
+    esac
   else
-      # 禁用cron定时自动更新
-      echo -en ${yellow}cron定时方案无法执行自动更新，已禁用cron定时自动更新功能，请自己有空的时候手动更新哦${background};read
-      return
-
-
     # 如果不存在，则添加自动更新的cron任务
-    (crontab -l 2>/dev/null; echo "0 1 * * * bash ${SCRIPT_LOCAL_PATH} auto_update # meme_generator_auto_update") | crontab -
+    (crontab -l 2>/dev/null; echo "0 1 * * * /bin/bash -c 'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; export HOME=/root; ${SCRIPT_SYSTEM_PATH} auto_update' # meme_generator_auto_update") | crontab -
     echo -e ${green}已开启meme生成器的自动更新${background}
     echo -e ${cyan}启动meme生成器之后将会在每天凌晨1点自动同步更新 meme GitHub 仓库并重启${background}
     echo -e ${cyan}自动更新日志位置: ${HOME}/.config/meme_generator/auto_update.log${background}
@@ -996,7 +1064,7 @@ change_github_proxy(){
 }
 
 main(){
-# 如果是首次通过curl执行，确保先保存脚本
+# 如果是首次通过curl执行，确保先保存脚本到系统目录
 if [[ "$0" == *"/dev/fd/"* || "$0" == "bash" ]]; then
   ensure_script_saved
 fi
@@ -1027,11 +1095,12 @@ echo -e  ${green} 4.  ${cyan}重启meme生成器${background}
 echo -e  ${green} 5.  ${cyan}更新meme生成器${background}
 echo -e  ${green} 6.  ${cyan}卸载meme生成器${background}
 echo -e  ${green} 7.  ${cyan}meme生成器日志${background}
-echo -e  ${green} 8.  ${cyan}查看自动更新服务日志${background}
-echo -e  ${green} 9.  ${cyan}修改meme端口号${background}
-echo -e  ${green} 10.  ${cyan}切换自动更新设置${background}
-echo -e  ${green} 11.  ${cyan}重写配置文件${background}
-echo -e  ${green} 12.  ${cyan}更换Github代理${background}
+echo -e  ${green} 8.  ${cyan}切换自动更新设置${background}
+echo -e  ${green} 9.  ${cyan}查看自动更新服务日志${background}
+echo -e  ${green} 10.  ${cyan}测试自动更新功能${background}
+echo -e  ${green} 11.  ${cyan}修改meme端口号${background}
+echo -e  ${green} 12.  ${cyan}重写配置文件${background}
+echo -e  ${green} 13.  ${cyan}更换Github代理${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}meme生成器状态: ${condition}${background}
@@ -1070,21 +1139,27 @@ log_meme_generator
 ;;
 8)
 echo
-view_auto_update_log
+toggle_auto_update
 ;;
 9)
 echo
-change_port
+view_auto_update_log
 ;;
 10)
 echo
-toggle_auto_update
+echo -e ${yellow}正在测试自动更新功能...${background}
+auto_update_meme_generator
+echo -en ${yellow}回车返回${background};read
 ;;
 11)
 echo
-rewrite_config
+change_port
 ;;
 12)
+echo
+rewrite_config
+;;
+13)
 echo
 change_github_proxy
 ;;
