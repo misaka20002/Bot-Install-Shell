@@ -1156,7 +1156,6 @@ echo -e  ${green} 9. ${cyan}修改浏览器路径${background}
 echo -e  ${green}10. ${cyan}修改锅巴插件端口${background}
 echo -e  ${green}11. ${cyan}修改锅巴插件地址${background}
 echo -e  ${green}12. ${cyan}插件GitHub加速${background}
-echo -e  ${green} 0. ${cyan}返回${background}
 echo "========================="
 echo -en ${green}请输入您的选项: ${background};read num
 case ${num} in
@@ -1196,9 +1195,9 @@ case ${num} in
   12)
     change_github_proxy
     ;;
-  0)
-    BotBackup
-    ;;
+#   99)
+#     BotBackup
+#     ;;
   *)
     echo -e ${red}输入错误${background}
     exit
