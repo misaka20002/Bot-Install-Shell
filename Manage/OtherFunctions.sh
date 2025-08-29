@@ -1100,6 +1100,75 @@ test_ssh_connection(){
     configure_github_ssh_port
 }
 
+ChangeLogLevel(){
+file="config/config/bot.yaml"
+if [ ! -e ${file} ];then
+    echo -e ${red}文件不存在${background}
+    echo -en ${cyan}回车返回${background}
+    read
+    return
+fi
+
+# 读取并显示当前日志等级
+current_log_level=$(grep "log_level:" ${file} | awk '{print $2}')
+if [ -z "${current_log_level}" ]; then
+    current_log_level="未设置"
+fi
+
+echo -e ${white}"====="${green}日志等级${white}"====="${background}
+echo -e ${cyan}当前日志等级: ${yellow}${current_log_level}${background}
+echo ""
+echo -e ${green}请选择日志等级${background}
+echo -e  ${green} 1. ${cyan}trace${background}
+echo -e  ${green} 2. ${cyan}debug${background}
+echo -e  ${green} 3. ${cyan}info ${yellow}\(默认\)${background}
+echo -e  ${green} 4. ${cyan}mark ${yellow}\(不显示聊天记录\)${background}
+echo -e  ${green} 5. ${cyan}warn${background}
+echo -e  ${green} 6. ${cyan}fatal${background}
+echo -e  ${green} 7. ${cyan}error${background}
+echo -e  ${green} 8. ${cyan}off${background}
+echo "========================="
+echo -en ${green}请输入您的选项: ${background};read num
+case ${num} in
+  1)
+    LogLevel="trace"
+    ;;
+  2)
+    LogLevel="debug"
+    ;;
+  3)
+    LogLevel="info"
+    ;;
+  4)
+    LogLevel="mark"
+    ;;
+  5)
+    LogLevel="warn"
+    ;;
+  6)
+    LogLevel="fatal"
+    ;;
+  7)
+    LogLevel="error"
+    ;;
+  8)
+    LogLevel="off"
+    ;;
+  *)
+    echo -e ${red}输入错误${background}
+    echo -en ${cyan}回车返回${background}
+    read
+    return
+    ;;
+esac
+OldLogLevel=$(grep "log_level:" ${file})
+NewLogLevel="log_level: ${LogLevel}"
+sed -i "s/${OldLogLevel}/${NewLogLevel}/g" ${file}
+echo -e ${green}日志等级已修改为: ${cyan}${LogLevel}${background}
+echo -en ${green}修改完成 ${cyan}回车返回${background}
+read
+}
+
 # GitHub加速主函数
 change_github_proxy(){
     while true; do
@@ -1155,7 +1224,8 @@ echo -e  ${green} 8. ${cyan}修改ffmpeg路径${background}
 echo -e  ${green} 9. ${cyan}修改浏览器路径${background}
 echo -e  ${green}10. ${cyan}修改锅巴插件端口${background}
 echo -e  ${green}11. ${cyan}修改锅巴插件地址${background}
-echo -e  ${green}12. ${cyan}插件GitHub加速${background}
+echo -e  ${green}12. ${cyan}修改日志等级${background}
+echo -e  ${green}13. ${cyan}插件GitHub加速${background}
 echo "========================="
 echo -en ${green}请输入您的选项: ${background};read num
 case ${num} in
@@ -1193,6 +1263,9 @@ case ${num} in
     ChangeHost
     ;;
   12)
+    ChangeLogLevel
+    ;;
+  13)
     change_github_proxy
     ;;
 #   99)
