@@ -1,5 +1,5 @@
 #!/bin/env bash
-SCRIPT_VERSION="1.0.21"
+SCRIPT_VERSION="1.0.22"
 
 export red="\033[31m"
 export green="\033[32m"
@@ -1102,11 +1102,10 @@ echo -e  ${green} 5.  ${cyan}更新meme生成器${background}
 echo -e  ${green} 6.  ${cyan}卸载meme生成器${background}
 echo -e  ${green} 7.  ${cyan}meme生成器日志${background}
 echo -e  ${green} 8.  ${cyan}切换自动更新设置${background}
-echo -e  ${green} 9.  ${cyan}查看自动更新服务日志${background}
-echo -e  ${green} 10.  ${cyan}测试自动更新功能${background}
-echo -e  ${green} 11.  ${cyan}修改meme端口号${background}
-echo -e  ${green} 12.  ${cyan}重写配置文件${background}
-echo -e  ${green} 13.  ${cyan}更换Github代理${background}
+echo -e  ${green} 9.  ${cyan}查看自动更新服务${background}
+echo -e  ${green} 10.  ${cyan}修改meme端口号${background}
+echo -e  ${green} 11.  ${cyan}重写配置文件${background}
+echo -e  ${green} 12.  ${cyan}更换Github代理${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}meme生成器状态: ${condition}${background}
@@ -1153,19 +1152,13 @@ view_auto_update_log
 ;;
 10)
 echo
-echo -e ${yellow}正在测试自动更新功能...${background}
-auto_update_meme_generator
-echo -en ${yellow}回车返回${background};read
+change_port
 ;;
 11)
 echo
-change_port
-;;
-12)
-echo
 rewrite_config
 ;;
-13)
+12)
 echo
 change_github_proxy
 ;;
