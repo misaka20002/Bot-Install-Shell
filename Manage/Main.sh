@@ -1,4 +1,4 @@
-old_version="1.1.76"
+old_version="1.1.77"
 
 cd $HOME
 export red="\033[31m"
@@ -334,16 +334,18 @@ function UPDATE(){
     fi
 }
 
-if ping -c 1 gitee.com > /dev/null 2>&1
-then
-  VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
-  URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/Main.sh"
-  UPDATE
-elif ping -c 1 github.com > /dev/null 2>&1
-then
-  VersionURL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/version"
-  URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/Main.sh"
-  UPDATE
+if [ "${up}" != "false" ]; then
+  if ping -c 1 gitee.com > /dev/null 2>&1
+  then
+    VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
+    URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/Main.sh"
+    UPDATE
+  elif ping -c 1 github.com > /dev/null 2>&1
+  then
+    VersionURL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/version"
+    URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/Main.sh"
+    UPDATE
+  fi
 fi
 ##############################
 function feedback(){
