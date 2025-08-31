@@ -97,7 +97,7 @@ read
 
 ChangeAdmin(){
 if [ ${BotName} == "TRSS-Yunzai" ];then
-    echo -e ${cyan}TRSS-Yunzai 修改 ${yellow}"在前台登陆的控制台 或 登陆后qq中发送：#设置主人 后查看控制台消息获取设置主人秘钥" ${background}
+    echo -e ${cyan}TRSS-Yunzai 修改 ${yellow}"在前台登陆的控制台 或 登陆后qq中发送：#设置主人 后查看控制台消息获取设置主人秘钥（需要先在“12. 修改日志等级”修改为 info）" ${background}
     echo -en ${cyan}回车返回${background};read
     return
 fi
@@ -1591,7 +1591,7 @@ delete_backup_files(){
 
 function main(){
     echo -e ${white}"====="${green}呆毛版-Script${white}"====="${background}
-    echo -e ${green}请选择您的操作[${Bot_Name}]${background}
+    echo -e ${green}请选择您的操作[${BotName}]${background}
     echo -e  ${green} 1. ${cyan}修改登录账号${background}
     echo -e  ${green} 2. ${cyan}修改登录设备${background}
     echo -e  ${green} 3. ${cyan}修改主人账号${background}
