@@ -1418,8 +1418,10 @@ restore_plugin_config(){
     
     success_count=0
     fail_count=0
+    skip_count=0
     success_list=()
     fail_list=()
+    skip_list=()
     
     # 遍历备份目录
     for backup_item in "$backup_path"/*; do
@@ -1453,8 +1455,10 @@ restore_plugin_config(){
                 # 还原插件配置
                 target_plugin_path="plugins/$item_name"
                 if [ ! -d "$target_plugin_path" ]; then
-                    echo -e ${yellow}  ⚠ 插件目录不存在，创建: $target_plugin_path${background}
-                    mkdir -p "$target_plugin_path"
+                    echo -e ${yellow}  ⚠ 插件目录不存在，跳过还原: $target_plugin_path${background}
+                    skip_list+=("$item_name")
+                    skip_count=$((skip_count+1))
+                    continue
                 fi
                 
                 if copy_files_recursive "$backup_item" "$target_plugin_path"; then
@@ -1476,6 +1480,10 @@ restore_plugin_config(){
     if [ $fail_count -gt 0 ]; then
         echo -e ${red}失败: $fail_count 个${background}
         echo -e ${yellow}失败项目: ${fail_list[*]}${background}
+    fi
+    if [ $skip_count -gt 0 ]; then
+        echo -e ${yellow}跳过: $skip_count 个 \(插件不存在\)${background}
+        echo -e ${yellow}跳过项目: ${skip_list[*]}${background}
     fi
     echo -e ${green}成功项目: ${success_list[*]}${background}
     echo -e ${yellow}建议重启Bot以使配置生效${background}
