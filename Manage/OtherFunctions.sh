@@ -501,15 +501,7 @@ echo -en ${green}修改完成 ${cyan}回车返回${background}
 read
 }
 
-BotBackup(){
-date=$(date +"%Y-%m-%d-%H-%M-%S")
-if [ ! -d "$HOME/BotBackup" ];then
-  mkdir $HOME/BotBackup
-fi
-cp -rf data $HOME/BotBackup/data
-cp -rf config $HOME/BotBackup/config
 
-}
 
 # 获取git仓库列表
 get_git_repos(){
@@ -1211,6 +1203,384 @@ change_github_proxy(){
     done
 }
 
+# 备份还原插件配置主函数
+backup_restore_config(){
+    while true; do
+        echo -e ${white}"====="${green}备份还原插件配置${white}"====="${background}
+        echo -e ${green}请选择您的操作${background}
+        echo -e  ${green} 1. ${cyan}备份插件配置${background}
+        echo -e  ${green} 2. ${cyan}还原插件配置${background}
+        echo -e  ${green} 3. ${cyan}查看备份文件${background}
+        echo -e  ${green} 4. ${cyan}删除备份文件${background}
+        echo -e  ${green} 0. ${cyan}返回上级菜单${background}
+        echo "========================="
+        echo -en ${green}请输入您的选项: ${background}
+        read num
+        
+        case $num in
+            1)
+                backup_plugin_config
+                ;;
+            2)
+                restore_plugin_config
+                ;;
+            3)
+                view_backup_files
+                ;;
+            4)
+                delete_backup_files
+                ;;
+            0)
+                return
+                ;;
+            *)
+                echo -e ${red}输入错误${background}
+                echo -en ${cyan}回车继续${background}
+                read
+                ;;
+        esac
+    done
+}
+
+# 复制文件函数
+copy_files_recursive(){
+    local src_path="$1"
+    local dest_path="$2"
+    
+    if [ ! -d "$src_path" ]; then
+        return 1
+    fi
+    
+    # 创建目标目录
+    mkdir -p "$dest_path"
+    
+    # 使用cp命令递归复制，排除.git目录
+    cp -r "$src_path"/* "$dest_path/" 2>/dev/null
+    
+    return 0
+}
+
+# 备份插件配置
+backup_plugin_config(){
+    echo -e ${cyan}开始备份插件配置文件...${background}
+    
+    # 定义备份路径
+    backup_path="resources/bf"
+    
+    # 创建备份目录
+    if [ ! -d "$backup_path" ]; then
+        mkdir -p "$backup_path"
+        echo -e ${green}创建备份目录: $backup_path${background}
+    fi
+    
+    success_count=0
+    fail_count=0
+    success_list=()
+    fail_list=()
+    
+    echo -e ${cyan}正在备份主配置文件...${background}
+    
+    # 备份主配置文件
+    if [ -d "config/config" ]; then
+        if copy_files_recursive "config/config" "$backup_path/config/config"; then
+            success_list+=("主配置文件(config)")
+            success_count=$((success_count+1))
+            echo -e ${green}✓ 主配置文件备份成功${background}
+        else
+            fail_list+=("主配置文件(config)")
+            fail_count=$((fail_count+1))
+            echo -e ${red}✗ 主配置文件备份失败${background}
+        fi
+    fi
+    
+    # 备份data目录
+    if [ -d "data" ]; then
+        if copy_files_recursive "data" "$backup_path/data"; then
+            success_list+=("数据文件(data)")
+            success_count=$((success_count+1))
+            echo -e ${green}✓ 数据文件备份成功${background}
+        else
+            fail_list+=("数据文件(data)")
+            fail_count=$((fail_count+1))
+            echo -e ${red}✗ 数据文件备份失败${background}
+        fi
+    fi
+    
+    echo -e ${cyan}正在备份插件配置文件...${background}
+    
+    # 备份插件配置
+    if [ -d "plugins" ]; then
+        for plugin_dir in plugins/*; do
+            if [ -d "$plugin_dir" ]; then
+                plugin_name=$(basename "$plugin_dir")
+                
+                # 跳过系统目录
+                if [[ "$plugin_name" == "other" || "$plugin_name" == "system" || "$plugin_name" == "adapter" ]]; then
+                    continue
+                fi
+                
+                echo -e ${yellow}正在处理插件: $plugin_name${background}
+                
+                # 备份example插件的所有内容
+                if [ "$plugin_name" == "example" ]; then
+                    if copy_files_recursive "$plugin_dir" "$backup_path/$plugin_name"; then
+                        success_list+=("$plugin_name")
+                        success_count=$((success_count+1))
+                        echo -e ${green}  ✓ $plugin_name 备份成功${background}
+                    else
+                        fail_list+=("$plugin_name")
+                        fail_count=$((fail_count+1))
+                        echo -e ${red}  ✗ $plugin_name 备份失败${background}
+                    fi
+                else
+                    # 备份其他插件的config目录
+                    if [ -d "$plugin_dir/config" ]; then
+                        if copy_files_recursive "$plugin_dir/config" "$backup_path/$plugin_name/config"; then
+                            success_list+=("$plugin_name(config)")
+                            success_count=$((success_count+1))
+                            echo -e ${green}  ✓ $plugin_name 配置备份成功${background}
+                        else
+                            fail_list+=("$plugin_name(config)")
+                            fail_count=$((fail_count+1))
+                            echo -e ${red}  ✗ $plugin_name 配置备份失败${background}
+                        fi
+                    fi
+                    
+                    # 特殊处理xiaoyao-cvs-plugin的data目录
+                    if [ "$plugin_name" == "xiaoyao-cvs-plugin" ] && [ -d "$plugin_dir/data" ]; then
+                        if copy_files_recursive "$plugin_dir/data" "$backup_path/$plugin_name/data"; then
+                            success_list+=("$plugin_name(data)")
+                            success_count=$((success_count+1))
+                            echo -e ${green}  ✓ $plugin_name 数据备份成功${background}
+                        else
+                            fail_list+=("$plugin_name(data)")
+                            fail_count=$((fail_count+1))
+                            echo -e ${red}  ✗ $plugin_name 数据备份失败${background}
+                        fi
+                    fi
+                    
+                    # 特殊处理miao-plugin的resources/help目录
+                    if [ "$plugin_name" == "miao-plugin" ] && [ -d "$plugin_dir/resources/help" ]; then
+                        if copy_files_recursive "$plugin_dir/resources/help" "$backup_path/$plugin_name/resources/help"; then
+                            success_list+=("$plugin_name(help)")
+                            success_count=$((success_count+1))
+                            echo -e ${green}  ✓ $plugin_name 帮助文件备份成功${background}
+                        else
+                            fail_list+=("$plugin_name(help)")
+                            fail_count=$((fail_count+1))
+                            echo -e ${red}  ✗ $plugin_name 帮助文件备份失败${background}
+                        fi
+                    fi
+                fi
+            fi
+        done
+    fi
+    
+    echo ""
+    echo -e ${green}备份完成！${background}
+    echo -e ${cyan}备份路径: $backup_path${background}
+    echo -e ${cyan}成功: $success_count 个${background}
+    if [ $fail_count -gt 0 ]; then
+        echo -e ${red}失败: $fail_count 个${background}
+        echo -e ${yellow}失败项目: ${fail_list[*]}${background}
+    fi
+    echo -e ${green}成功项目: ${success_list[*]}${background}
+    
+    echo -en ${cyan}回车返回${background}
+    read
+}
+
+# 还原插件配置
+restore_plugin_config(){
+    backup_path="resources/bf"
+    
+    if [ ! -d "$backup_path" ]; then
+        echo -e ${red}备份目录不存在: $backup_path${background}
+        echo -e ${yellow}请先进行备份操作${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        return
+    fi
+    
+    echo -e ${yellow}警告：还原操作将覆盖现有配置文件！${background}
+    echo -e ${yellow}建议在还原前先下载所有插件${background}
+    echo -en ${red}确认继续还原操作吗? \(y/N\): ${background}
+    read confirm
+    
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo -e ${cyan}操作已取消${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        return
+    fi
+    
+    echo -e ${cyan}开始还原插件配置文件...${background}
+    
+    success_count=0
+    fail_count=0
+    success_list=()
+    fail_list=()
+    
+    # 遍历备份目录
+    for backup_item in "$backup_path"/*; do
+        if [ -d "$backup_item" ]; then
+            item_name=$(basename "$backup_item")
+            echo -e ${yellow}正在还原: $item_name${background}
+            
+            if [ "$item_name" == "config" ]; then
+                # 还原主配置
+                if copy_files_recursive "$backup_item" "./config"; then
+                    success_list+=("主配置文件")
+                    success_count=$((success_count+1))
+                    echo -e ${green}  ✓ 主配置文件还原成功${background}
+                else
+                    fail_list+=("主配置文件")
+                    fail_count=$((fail_count+1))
+                    echo -e ${red}  ✗ 主配置文件还原失败${background}
+                fi
+            elif [ "$item_name" == "data" ]; then
+                # 还原data目录
+                if copy_files_recursive "$backup_item" "./data"; then
+                    success_list+=("数据文件")
+                    success_count=$((success_count+1))
+                    echo -e ${green}  ✓ 数据文件还原成功${background}
+                else
+                    fail_list+=("数据文件")
+                    fail_count=$((fail_count+1))
+                    echo -e ${red}  ✗ 数据文件还原失败${background}
+                fi
+            else
+                # 还原插件配置
+                target_plugin_path="plugins/$item_name"
+                if [ ! -d "$target_plugin_path" ]; then
+                    echo -e ${yellow}  ⚠ 插件目录不存在，创建: $target_plugin_path${background}
+                    mkdir -p "$target_plugin_path"
+                fi
+                
+                if copy_files_recursive "$backup_item" "$target_plugin_path"; then
+                    success_list+=("$item_name")
+                    success_count=$((success_count+1))
+                    echo -e ${green}  ✓ $item_name 还原成功${background}
+                else
+                    fail_list+=("$item_name")
+                    fail_count=$((fail_count+1))
+                    echo -e ${red}  ✗ $item_name 还原失败${background}
+                fi
+            fi
+        fi
+    done
+    
+    echo ""
+    echo -e ${green}还原完成！${background}
+    echo -e ${cyan}成功: $success_count 个${background}
+    if [ $fail_count -gt 0 ]; then
+        echo -e ${red}失败: $fail_count 个${background}
+        echo -e ${yellow}失败项目: ${fail_list[*]}${background}
+    fi
+    echo -e ${green}成功项目: ${success_list[*]}${background}
+    echo -e ${yellow}建议重启Bot以使配置生效${background}
+    
+    echo -en ${cyan}回车返回${background}
+    read
+}
+
+# 查看备份文件
+view_backup_files(){
+    backup_path="resources/bf"
+    
+    if [ ! -d "$backup_path" ]; then
+        echo -e ${red}备份目录不存在: $backup_path${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        return
+    fi
+    
+    echo -e ${white}"====="${green}备份文件列表${white}"====="${background}
+    echo -e ${cyan}备份路径: $backup_path${background}
+    echo ""
+    
+    file_count=0
+    for item in "$backup_path"/*; do
+        if [ -e "$item" ]; then
+            item_name=$(basename "$item")
+            if [ -d "$item" ]; then
+                echo -e ${green}📁 $item_name/${background}
+                # 显示目录下的文件数量
+                sub_count=$(find "$item" -type f 2>/dev/null | wc -l)
+                echo -e ${yellow}   包含 $sub_count 个文件${background}
+            else
+                echo -e ${blue}📄 $item_name${background}
+            fi
+            file_count=$((file_count+1))
+        fi
+    done
+    
+    if [ $file_count -eq 0 ]; then
+        echo -e ${yellow}备份目录为空${background}
+    else
+        echo ""
+        echo -e ${cyan}共 $file_count 个备份项目${background}
+        
+        # 显示总大小
+        total_size=$(du -sh "$backup_path" 2>/dev/null | cut -f1)
+        echo -e ${cyan}总大小: $total_size${background}
+    fi
+    
+    echo -en ${cyan}回车返回${background}
+    read
+}
+
+# 删除备份文件
+delete_backup_files(){
+    backup_path="resources/bf"
+    
+    if [ ! -d "$backup_path" ]; then
+        echo -e ${red}备份目录不存在: $backup_path${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        return
+    fi
+    
+    echo -e ${white}"====="${red}删除备份文件${white}"====="${background}
+    echo -e ${red}警告：此操作将永久删除所有备份文件！${background}
+    echo -e ${yellow}备份路径: $backup_path${background}
+    
+    # 显示要删除的内容
+    echo -e ${cyan}将要删除的内容：${background}
+    for item in "$backup_path"/*; do
+        if [ -e "$item" ]; then
+            item_name=$(basename "$item")
+            if [ -d "$item" ]; then
+                echo -e ${yellow}📁 $item_name/${background}
+            else
+                echo -e ${yellow}📄 $item_name${background}
+            fi
+        fi
+    done
+    
+    echo ""
+    echo -en ${red}确认删除所有备份文件吗? \(y/N\): ${background}
+    read confirm
+    
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo -e ${cyan}操作已取消${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        return
+    fi
+    
+    echo -e ${cyan}正在删除备份文件...${background}
+    
+    if rm -rf "$backup_path"/* 2>/dev/null; then
+        echo -e ${green}备份文件删除成功${background}
+    else
+        echo -e ${red}删除失败，可能是权限问题${background}
+    fi
+    
+    echo -en ${cyan}回车返回${background}
+    read
+}
+
 echo -e ${white}"====="${green}呆毛版-Script${white}"====="${background}
 echo -e ${green}请选择您的操作[${Bot_Name}]${background}
 echo -e  ${green} 1. ${cyan}修改登录账号${background}
@@ -1226,6 +1596,7 @@ echo -e  ${green}10. ${cyan}修改锅巴插件端口${background}
 echo -e  ${green}11. ${cyan}修改锅巴插件地址${background}
 echo -e  ${green}12. ${cyan}修改日志等级${background}
 echo -e  ${green}13. ${cyan}插件GitHub加速${background}
+echo -e  ${green}14. ${cyan}备份还原插件配置${background}
 echo "========================="
 echo -en ${green}请输入您的选项: ${background};read num
 case ${num} in
@@ -1268,9 +1639,9 @@ case ${num} in
   13)
     change_github_proxy
     ;;
-#   99)
-#     BotBackup
-#     ;;
+  14)
+    backup_restore_config
+    ;;
   *)
     echo -e ${red}输入错误${background}
     exit
