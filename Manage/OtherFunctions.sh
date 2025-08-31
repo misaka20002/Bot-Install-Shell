@@ -95,9 +95,47 @@ echo -en ${green}修改完成 ${cyan}回车返回${background}
 read
 }
 
+QSignAPIChange(){
+if [ ${BotName} == "TRSS-Yunzai" ];then
+    echo -e ${cyan}TRSS崽推荐使用 拉格朗日 或 NapCat 连接QQ； ${background}
+    echo -e ${cyan}若打算继续使用ICQQ则前台启动后使用 ${yellow}"#QQ签名 + 签名服务器地址" ${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+fi
+echo -e ${white}"====="${green}呆毛版-QSign${white}"====="${background}
+echo -e ${green}1. 修改签名服务器链接${background}
+echo -e ${green}2. 修改QQ版本号${background}
+echo -en ${green}请选择要修改的内容 \(输入数字\): ${background};read choice
+
+file="config/config/bot.yaml"
+
+if [ "$choice" == "1" ]; then
+    echo -e ${green}请输入您的新签名服务器链接: ${background};read API
+    old_sign_api_addr=$(grep sign_api_addr ${file})
+    new_sign_api_addr="sign_api_addr: ${API}"
+    sed -i "s|${old_sign_api_addr}|${new_sign_api_addr}|g" ${file}
+    API=$(grep sign_api_addr ${file})
+    API=$(echo ${API} | sed "s/sign_api_addr: //g")
+    echo -e ${cyan}您的API链接已修改为:${green}${API}${background}
+elif [ "$choice" == "2" ]; then
+    echo -e ${green}请输入您的新QQ版本号 \(例如: 9.1.50\): ${background};read VER
+    old_ver=$(grep "ver:" ${file})
+    new_ver="ver: ${VER}"
+    sed -i "s|${old_ver}|${new_ver}|g" ${file}
+    VER=$(grep "ver:" ${file})
+    VER=$(echo ${VER} | sed "s/ver: //g")
+    echo -e ${cyan}您的QQ版本号已修改为:${green}${VER}${background}
+else
+    echo -e ${red}无效的选择，请重试${background}
+fi
+
+echo
+echo -en ${cyan}回车返回${background};read
+}
+
 ChangeAdmin(){
 if [ ${BotName} == "TRSS-Yunzai" ];then
-    echo -e ${cyan}TRSS-Yunzai 修改 ${yellow}"在前台登陆的控制台 或 登陆后qq中发送：#设置主人 后查看控制台消息获取设置主人秘钥（需要先在“12. 修改日志等级”修改为 info）" ${background}
+    echo -e ${cyan}TRSS-Yunzai 修改 ${yellow}在前台登陆的控制台 或 登陆后qq中发送：#设置主人 后查看控制台消息获取设置主人秘钥${cyan}（需要先修改日志等级为 "info"）${background}
     echo -en ${cyan}回车返回${background};read
     return
 fi
@@ -1594,18 +1632,19 @@ function main(){
     echo -e ${green}请选择您的操作[${BotName}]${background}
     echo -e  ${green} 1. ${cyan}修改登录账号${background}
     echo -e  ${green} 2. ${cyan}修改登录设备${background}
-    echo -e  ${green} 3. ${cyan}修改主人账号${background}
-    echo -e  ${green} 4. ${cyan}重装依赖文件${background}
-    echo -e  ${green} 5. ${cyan}修复监听错误${background}
-    echo -e  ${green} 6. ${cyan}降级pptr版本${background}
-    echo -e  ${green} 7. ${cyan}更新NodeJS版本${background}
-    echo -e  ${green} 8. ${cyan}修改ffmpeg路径${background}
-    echo -e  ${green} 9. ${cyan}修改浏览器路径${background}
-    echo -e  ${green}10. ${cyan}修改锅巴插件端口${background}
-    echo -e  ${green}11. ${cyan}修改锅巴插件地址${background}
-    echo -e  ${green}12. ${cyan}修改日志等级${background}
-    echo -e  ${green}13. ${cyan}插件GitHub加速${background}
-    echo -e  ${green}14. ${cyan}备份还原插件配置${background}
+    echo -e  ${green} 3. ${cyan}修改icqq签名${background}
+    echo -e  ${green} 4. ${cyan}修改主人账号${background}
+    echo -e  ${green} 5. ${cyan}重装依赖文件${background}
+    echo -e  ${green} 6. ${cyan}修复监听错误${background}
+    echo -e  ${green} 7. ${cyan}降级pptr版本${background}
+    echo -e  ${green} 8. ${cyan}更新NodeJS版本${background}
+    echo -e  ${green} 9. ${cyan}修改ffmpeg路径${background}
+    echo -e  ${green}10. ${cyan}修改浏览器路径${background}
+    echo -e  ${green}11. ${cyan}修改锅巴插件端口${background}
+    echo -e  ${green}12. ${cyan}修改锅巴插件地址${background}
+    echo -e  ${green}13. ${cyan}修改日志等级${background}
+    echo -e  ${green}14. ${cyan}插件GitHub加速${background}
+    echo -e  ${green}15. ${cyan}备份还原插件配置${background}
     echo -e  ${green} 0. ${cyan}返回上级${background}
     echo "========================="
     echo -en ${green}请输入您的选项: ${background};read num
@@ -1617,39 +1656,42 @@ function main(){
         ChangeDevice
         ;;
     3)
-        ChangeAdmin
+        QSignAPIChange
         ;;
     4)
-        ReloadPackage
+        ChangeAdmin
         ;;
     5)
-        RepairSqlite3
+        ReloadPackage
         ;;
     6)
-        LowerPptr
+        RepairSqlite3
         ;;
     7)
-        UpdateNodeJS
+        LowerPptr
         ;;
     8)
-        FfmpegPath
+        UpdateNodeJS
         ;;
     9)
-        BrowserPath
+        FfmpegPath
         ;;
     10)
-        ChangePort
+        BrowserPath
         ;;
     11)
-        ChangeHost
+        ChangePort
         ;;
     12)
-        ChangeLogLevel
+        ChangeHost
         ;;
     13)
-        change_github_proxy
+        ChangeLogLevel
         ;;
     14)
+        change_github_proxy
+        ;;
+    15)
         backup_restore_config
         ;;
     0)

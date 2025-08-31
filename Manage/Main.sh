@@ -331,7 +331,7 @@ function UPDATE(){
         fi
     fi
 }
-old_version="1.1.72"
+old_version="1.1.73"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -613,44 +613,6 @@ pnpm install -g pnpm@latest
 echo -en ${cyan}更新完成 回车返回${background};read
 }
 
-QSignAPIChange(){
-if [ ${BotName} == "TRSS-Yunzai" ];then
-    echo -e ${cyan}TRSS崽推荐使用 拉格朗日 或 NapCat 连接QQ； ${background}
-    echo -e ${cyan}若打算继续使用ICQQ则前台启动后使用 ${yellow}"#QQ签名 + 签名服务器地址" ${background}
-    echo -en ${cyan}回车返回${background};read
-    return
-fi
-echo -e ${white}"====="${green}呆毛版-QSign${white}"====="${background}
-echo -e ${green}1. 修改签名服务器链接${background}
-echo -e ${green}2. 修改QQ版本号${background}
-echo -en ${green}请选择要修改的内容 \(输入数字\): ${background};read choice
-
-file=config/config/bot.yaml
-
-if [ "$choice" == "1" ]; then
-    echo -e ${green}请输入您的新签名服务器链接: ${background};read API
-    old_sign_api_addr=$(grep sign_api_addr ${file})
-    new_sign_api_addr="sign_api_addr: ${API}"
-    sed -i "s|${old_sign_api_addr}|${new_sign_api_addr}|g" ${file}
-    API=$(grep sign_api_addr ${file})
-    API=$(echo ${API} | sed "s/sign_api_addr: //g")
-    echo -e ${cyan}您的API链接已修改为:${green}${API}${background}
-elif [ "$choice" == "2" ]; then
-    echo -e ${green}请输入您的新QQ版本号 \(例如: 9.1.50\): ${background};read VER
-    old_ver=$(grep "ver:" ${file})
-    new_ver="ver: ${VER}"
-    sed -i "s|${old_ver}|${new_ver}|g" ${file}
-    VER=$(grep "ver:" ${file})
-    VER=$(echo ${VER} | sed "s/ver: //g")
-    echo -e ${cyan}您的QQ版本号已修改为:${green}${VER}${background}
-else
-    echo -e ${red}无效的选择，请重试${background}
-fi
-
-echo
-echo -en ${cyan}回车返回${background};read
-}
-
 function ShowHelpDocument(){
     echo -e ${cyan}"========================================="${background}
     echo -e ${yellow}"           呆毛版脚本帮助文档"${background}
@@ -750,10 +712,9 @@ Number=$(${DialogWhiptail} \
 "5" "打开日志" \
 "6" "插件管理" \
 "7" "全部更新" \
-"8" "填写签名" \
-"9" "重装环境" \
-"10" "其他功能" \
-"11" "帮助文档" \
+"8" "重装环境" \
+"9" "其他功能" \
+"10" "帮助文档" \
 "0" "返回" \
 3>&1 1>&2 2>&3)
 feedback=$?
@@ -781,16 +742,13 @@ case ${Number} in
         GitUpdate
         ;;
     8)
-        QSignAPIChange
-        ;;
-    9)
         OperatingEnvironmentInstall
         ;;
-    10)
+    9)
         MirrorCheck
         bash <(curl -sL ${GitMirror}/raw/master/Manage/OtherFunctions.sh)
         ;;
-    11)
+    10)
         ShowHelpDocument
         ;;
     0)
