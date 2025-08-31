@@ -1,3 +1,5 @@
+old_version="1.1.76"
+
 cd $HOME
 export red="\033[31m"
 export green="\033[32m"
@@ -331,7 +333,7 @@ function UPDATE(){
         fi
     fi
 }
-old_version="1.1.73"
+
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -794,9 +796,9 @@ do
     echo
   done
 done
-BotPath
+gotoBotPath
 }
-function BotPath(){
+function gotoBotPath(){
     if BotPathCheck
     then
         cd ${BotPath}
@@ -830,13 +832,15 @@ case ${Number} in
         export BotName="Miao-Yunzai"
         BOT_COMMAND="Miao-Yun"
         TmuxName=MZ
-        BotPath
+        unset BotPath
+        gotoBotPath
         ;;
     2)
         export BotName="TRSS-Yunzai"
         BOT_COMMAND="TRSS Yun"
         TmuxName=TZ
-        BotPath
+        unset BotPath
+        gotoBotPath
         ;;
     3)
         MirrorCheck
