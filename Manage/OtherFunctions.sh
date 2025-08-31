@@ -1589,69 +1589,83 @@ delete_backup_files(){
     read
 }
 
-echo -e ${white}"====="${green}呆毛版-Script${white}"====="${background}
-echo -e ${green}请选择您的操作[${Bot_Name}]${background}
-echo -e  ${green} 1. ${cyan}修改登录账号${background}
-echo -e  ${green} 2. ${cyan}修改登录设备${background}
-echo -e  ${green} 3. ${cyan}修改主人账号${background}
-echo -e  ${green} 4. ${cyan}重装依赖文件${background}
-echo -e  ${green} 5. ${cyan}修复监听错误${background}
-echo -e  ${green} 6. ${cyan}降级pptr版本${background}
-echo -e  ${green} 7. ${cyan}更新NodeJS版本${background}
-echo -e  ${green} 8. ${cyan}修改ffmpeg路径${background}
-echo -e  ${green} 9. ${cyan}修改浏览器路径${background}
-echo -e  ${green}10. ${cyan}修改锅巴插件端口${background}
-echo -e  ${green}11. ${cyan}修改锅巴插件地址${background}
-echo -e  ${green}12. ${cyan}修改日志等级${background}
-echo -e  ${green}13. ${cyan}插件GitHub加速${background}
-echo -e  ${green}14. ${cyan}备份还原插件配置${background}
-echo "========================="
-echo -en ${green}请输入您的选项: ${background};read num
-case ${num} in
-  1)
-    ChangeAccount
-    ;;
-  2)
-    ChangeDevice
-    ;;
-  3)
-    ChangeAdmin
-    ;;
-  4)
-    ReloadPackage
-    ;;
-  5)
-    RepairSqlite3
-    ;;
-  6)
-    LowerPptr
-    ;;
-  7)
-    UpdateNodeJS
-    ;;
-  8)
-    FfmpegPath
-    ;;
-  9)
-    BrowserPath
-    ;;
-  10)
-    ChangePort
-    ;;
-  11)
-    ChangeHost
-    ;;
-  12)
-    ChangeLogLevel
-    ;;
-  13)
-    change_github_proxy
-    ;;
-  14)
-    backup_restore_config
-    ;;
-  *)
-    echo -e ${red}输入错误${background}
-    exit
-    ;;
-esac
+function main(){
+    echo -e ${white}"====="${green}呆毛版-Script${white}"====="${background}
+    echo -e ${green}请选择您的操作[${Bot_Name}]${background}
+    echo -e  ${green} 1. ${cyan}修改登录账号${background}
+    echo -e  ${green} 2. ${cyan}修改登录设备${background}
+    echo -e  ${green} 3. ${cyan}修改主人账号${background}
+    echo -e  ${green} 4. ${cyan}重装依赖文件${background}
+    echo -e  ${green} 5. ${cyan}修复监听错误${background}
+    echo -e  ${green} 6. ${cyan}降级pptr版本${background}
+    echo -e  ${green} 7. ${cyan}更新NodeJS版本${background}
+    echo -e  ${green} 8. ${cyan}修改ffmpeg路径${background}
+    echo -e  ${green} 9. ${cyan}修改浏览器路径${background}
+    echo -e  ${green}10. ${cyan}修改锅巴插件端口${background}
+    echo -e  ${green}11. ${cyan}修改锅巴插件地址${background}
+    echo -e  ${green}12. ${cyan}修改日志等级${background}
+    echo -e  ${green}13. ${cyan}插件GitHub加速${background}
+    echo -e  ${green}14. ${cyan}备份还原插件配置${background}
+    echo -e  ${green} 0. ${cyan}返回上级${background}
+    echo "========================="
+    echo -en ${green}请输入您的选项: ${background};read num
+    case ${num} in
+    1)
+        ChangeAccount
+        ;;
+    2)
+        ChangeDevice
+        ;;
+    3)
+        ChangeAdmin
+        ;;
+    4)
+        ReloadPackage
+        ;;
+    5)
+        RepairSqlite3
+        ;;
+    6)
+        LowerPptr
+        ;;
+    7)
+        UpdateNodeJS
+        ;;
+    8)
+        FfmpegPath
+        ;;
+    9)
+        BrowserPath
+        ;;
+    10)
+        ChangePort
+        ;;
+    11)
+        ChangeHost
+        ;;
+    12)
+        ChangeLogLevel
+        ;;
+    13)
+        change_github_proxy
+        ;;
+    14)
+        backup_restore_config
+        ;;
+    0)
+        exit 0
+        ;;
+    *)
+        echo -e ${red}输入错误${background}
+        return
+        ;;
+    esac
+}
+function mainbak()
+{
+    while true
+    do
+        main
+    done
+}
+mainbak

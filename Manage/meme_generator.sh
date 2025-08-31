@@ -1178,7 +1178,6 @@ function mainbak()
     while true
     do
         main
-        mainbak
     done
 }
 

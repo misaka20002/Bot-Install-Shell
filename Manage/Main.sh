@@ -331,7 +331,7 @@ function UPDATE(){
         fi
     fi
 }
-old_version="1.1.71"
+old_version="1.1.72"
 if ping -c 1 gitee.com > /dev/null 2>&1
 then
   VersionURL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/version"
@@ -862,7 +862,7 @@ Number=$(${DialogWhiptail} \
 "3" "拉格朗日管理" \
 "4" "NapCat管理" \
 "5" "部署meme服务器" \
-"6" "系统管理" \
+"6" "操作系统管理" \
 "0" "退出" \
 3>&1 1>&2 2>&3)
 feedback=$?
@@ -900,9 +900,9 @@ case ${Number} in
         URL="${GitMirror}/raw/master/Manage"
         bash <(curl -sL ${URL}/SYS_Manage.sh)
         ;;
-          0)
-    	        exit 0
-                ;;
+    0)
+        exit 0
+        ;;
 esac
 }
 function mainbak()
@@ -910,7 +910,6 @@ function mainbak()
     while true
     do
         master
-        mainbak
     done
 }
 mainbak
