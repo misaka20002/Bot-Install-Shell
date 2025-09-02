@@ -249,10 +249,10 @@ UpdateNodeJS(){
     
     echo -e ${green}请选择您的操作${background}
     echo -e  ${green} 1. ${cyan}查看当前 Node.js 版本${background}
-    echo -e  ${green} 2. ${cyan}查看可用的 Node.js 版本${background}
+    echo -e  ${green} 2. ${cyan}查看可安装的 Node.js 版本${background}
     echo -e  ${green} 3. ${cyan}查看已安装的 Node.js 版本${background}
     echo -e  ${green} 4. ${cyan}安装指定版本的 Node.js${background}
-    echo -e  ${green} 5. ${cyan}切换 Node.js 版本${background}
+    echo -e  ${green} 5. ${cyan}切换已安装的 Node.js 版本${background}
     echo -e  ${green} 6. ${cyan}卸载指定版本的 Node.js${background}
     echo -e  ${green} 0. ${cyan}返回上级菜单${background}
     echo "========================="
@@ -324,7 +324,43 @@ CheckInstalledNodeVersions(){
     fi
     
     echo -e ${cyan}已安装的 Node.js 版本:${background}
-    nvm ls
+    echo -e ${white}"========================="${background}
+    
+    # 获取当前使用的版本
+    current_version=$(nvm current 2>/dev/null)
+    if [ -z "$current_version" ] || [ "$current_version" = "none" ]; then
+        current_version="未设置"
+    fi
+    
+    # 获取已安装的版本列表
+    installed_versions=$(nvm ls | grep -E "^\s*v[0-9]" | sed 's/^\s*\(v[0-9][^[:space:]]*\).*/\1/' | sort -V)
+    
+    if [ -z "$installed_versions" ]; then
+        echo -e ${red}没有通过 NVM 安装的 Node.js 版本${background}
+    else
+        echo -e ${green}通过 NVM 安装的版本:${background}
+        for version in $installed_versions; do
+            if [ "$version" = "$current_version" ]; then
+                echo -e "  ${green}● $version ${yellow}\(当前使用\)${background}"
+            else
+                echo -e "  ${white}○ $version${background}"
+            fi
+        done
+    fi
+    
+    # 检查系统版本
+    if nvm ls | grep -q "system"; then
+        system_version=$(node -v 2>/dev/null || echo "未知")
+        echo -e ${green}系统版本:${background}
+        if [ "$current_version" = "system" ]; then
+            echo -e "  ${green}● system \($system_version\) ${yellow}\(当前使用\)${background}"
+        else
+            echo -e "  ${white}○ system \($system_version\)${background}"
+        fi
+    fi
+    
+    echo -e ${white}"========================="${background}
+    echo -e ${cyan}当前使用版本: ${green}$current_version${background}
     echo -en ${cyan}回车返回${background}
     read
     UpdateNodeJS
@@ -343,7 +379,7 @@ InstallNodeVersion(){
     echo -e  ${green} 2. ${cyan}Node.js v19${background}
     echo -e  ${green} 3. ${cyan}Node.js v20 LTS${background}
     echo -e  ${green} 4. ${cyan}Node.js v21${background}
-    echo -e  ${green} 5. ${cyan}Node.js v22${background}
+    echo -e  ${green} 5. ${cyan}Node.js v22（推荐）${background}
     echo -e  ${green} 6. ${cyan}Node.js v23${background}
     echo -e  ${green} 7. ${cyan}Node.js v24${background}
     echo -e  ${green} 8. ${cyan}安装其他版本${background}
@@ -400,13 +436,68 @@ SwitchNodeVersion(){
         return
     fi
     
-    echo -e ${cyan}已安装的 Node.js 版本:${background}
-    nvm ls
-    echo -en ${cyan}请输入要切换的 Node.js 版本 \(例如: 18 或 v18.17.1\): ${background}
+    echo -e ${white}"====="${green}切换 Node.js 版本${white}"====="${background}
+    
+    # 获取当前使用的版本
+    current_version=$(nvm current 2>/dev/null)
+    if [ -z "$current_version" ] || [ "$current_version" = "none" ]; then
+        current_version="未设置"
+    fi
+    
+    # 获取已安装的版本列表
+    installed_versions=$(nvm ls | grep -E "^\s*v[0-9]" | sed 's/^\s*\(v[0-9][^[:space:]]*\).*/\1/' | sort -V)
+    
+    if [ -z "$installed_versions" ]; then
+        echo -e ${red}没有通过 NVM 安装的 Node.js 版本${background}
+        echo -e ${yellow}请先安装 Node.js 版本${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        UpdateNodeJS
+        return
+    fi
+    
+    echo -e ${green}可切换的 Node.js 版本:${background}
+    echo -e ${white}"========================="${background}
+    
+    # 显示 NVM 安装的版本
+    for version in $installed_versions; do
+        if [ "$version" = "$current_version" ]; then
+            echo -e "  ${green}● $version ${yellow}\(当前使用\)${background}"
+        else
+            echo -e "  ${white}○ $version${background}"
+        fi
+    done
+    
+    # 检查系统版本
+    if nvm ls | grep -q "system"; then
+        system_version=$(node -v 2>/dev/null || echo "未知")
+        if [ "$current_version" = "system" ]; then
+            echo -e "  ${green}● system \($system_version\) ${yellow}\(当前使用\)${background}"
+        else
+            echo -e "  ${white}○ system \($system_version)${background}"
+        fi
+    fi
+    
+    echo -e ${white}"========================="${background}
+    echo -en ${cyan}请输入要切换的 Node.js 版本 \(例如: 22 或 v22.19.0 或 system\): ${background}
     read version
-    nvm use ${version}
-    echo -e ${green}当前 Node.js 版本:${background}
-    node -v
+    
+    if [ -z "$version" ]; then
+        echo -e ${red}版本不能为空${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        UpdateNodeJS
+        return
+    fi
+    
+    echo -e ${yellow}正在切换到 $version...${background}
+    if nvm use ${version} 2>/dev/null; then
+        echo -e ${green}✓ 切换成功！${background}
+        echo -e ${cyan}当前 Node.js 版本: ${green}$(node -v)${background}
+    else
+        echo -e ${red}✗ 切换失败，请检查版本号是否正确${background}
+    fi
+    
     echo -en ${cyan}回车返回${background}
     read
     UpdateNodeJS
@@ -419,12 +510,77 @@ UninstallNodeVersion(){
         return
     fi
     
-    echo -e ${cyan}已安装的 Node.js 版本:${background}
-    nvm ls
+    echo -e ${white}"====="${green}卸载 Node.js 版本${white}"====="${background}
+    
+    # 获取当前使用的版本
+    current_version=$(nvm current 2>/dev/null)
+    if [ -z "$current_version" ] || [ "$current_version" = "none" ]; then
+        current_version="未设置"
+    fi
+    
+    # 获取已安装的版本列表
+    installed_versions=$(nvm ls | grep -E "^\s*v[0-9]" | sed 's/^\s*\(v[0-9][^[:space:]]*\).*/\1/' | sort -V)
+    
+    if [ -z "$installed_versions" ]; then
+        echo -e ${red}没有通过 NVM 安装的 Node.js 版本${background}
+        echo -e ${yellow}没有可卸载的版本${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        UpdateNodeJS
+        return
+    fi
+    
+    echo -e ${green}可卸载的 Node.js 版本:${background}
+    echo -e ${white}"========================="${background}
+    
+    # 显示可卸载的版本
+    for version in $installed_versions; do
+        if [ "$version" = "$current_version" ]; then
+            echo -e "  ${red}● $version ${yellow}\(当前使用，建议先切换到其他版本\)${background}"
+        else
+            echo -e "  ${white}○ $version${background}"
+        fi
+    done
+    
+    echo -e ${white}"========================="${background}
+    echo -e ${yellow}⚠️  注意: 不能卸载当前正在使用的版本${background}
+    echo -e ${yellow}⚠️  卸载后该版本的所有全局包也会被删除${background}
     echo -en ${cyan}请输入要卸载的 Node.js 版本 \(例如: 18 或 v18.17.1\): ${background}
     read version
-    nvm uninstall ${version}
-    echo -e ${green}卸载完成${background}
+    
+    if [ -z "$version" ]; then
+        echo -e ${red}版本不能为空${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        UpdateNodeJS
+        return
+    fi
+    
+    # 检查是否试图卸载当前使用的版本
+    if [ "$version" = "$current_version" ] || [ "v$version" = "$current_version" ]; then
+        echo -e ${red}✗ 不能卸载当前正在使用的版本！${background}
+        echo -e ${yellow}请先切换到其他版本再卸载${background}
+        echo -en ${cyan}回车返回${background}
+        read
+        UpdateNodeJS
+        return
+    fi
+    
+    echo -e ${yellow}确定要卸载 Node.js $version 吗？${background}
+    echo -en ${red}输入 'yes' 确认卸载，其他任意键取消: ${background}
+    read confirm
+    
+    if [ "$confirm" = "yes" ]; then
+        echo -e ${yellow}正在卸载 $version...${background}
+        if nvm uninstall ${version} 2>/dev/null; then
+            echo -e ${green}✓ 卸载成功！${background}
+        else
+            echo -e ${red}✗ 卸载失败，请检查版本号是否正确${background}
+        fi
+    else
+        echo -e ${yellow}已取消卸载${background}
+    fi
+    
     echo -en ${cyan}回车返回${background}
     read
     UpdateNodeJS
