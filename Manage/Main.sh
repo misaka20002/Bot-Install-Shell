@@ -1,4 +1,4 @@
-old_version="1.1.77"
+old_version="1.1.83"
 
 cd $HOME
 export red="\033[31m"
@@ -303,6 +303,7 @@ esac
 
 case $2 in
 n)
+CleanupOrphanedProcesses
 RedisServerStart
 node app
 Runing
@@ -437,6 +438,41 @@ then
 fi
 }
 
+# 在启动前清理孤立进程
+CleanupOrphanedProcesses(){
+echo -e ${cyan}正在查找并清理 ${BotName} 孤立进程...${background}
+
+declare -a process_patterns=()
+case ${BotName} in
+  "TRSS-Yunzai")
+    process_patterns=("TRSS Yunzai" "TRSS-Yunzai")
+    ;;
+  "Miao-Yunzai")
+    process_patterns=("Miao-Yunzai" "Miao Yunzai")
+    ;;
+  *)
+    process_patterns=("${BotName}")
+    ;;
+esac
+
+for pattern in "${process_patterns[@]}"; do
+  # 查找不在tmux中运行的进程
+  PIDS=$(ps -ef | grep "${pattern}" | grep -v grep | grep -v tmux | grep -v "$$" | awk '{print $2}')
+  if [ -n "${PIDS}" ]; then
+    echo -e ${yellow}发现孤立进程 [${pattern}]: ${PIDS}${background}
+    for pid in ${PIDS}; do
+      echo -e ${red}终止孤立进程: ${pid}${background}
+      kill -TERM ${pid} 2>/dev/null
+      sleep 2
+      if kill -0 ${pid} 2>/dev/null; then
+        echo -e ${red}强制终止进程: ${pid}${background}
+        kill -KILL ${pid} 2>/dev/null
+      fi
+    done
+  fi
+done
+}
+
 BOT(){
 case $1 in
   start)
@@ -492,6 +528,7 @@ case $1 in
     elif [ ${res} -eq 3 ];then
       AttachPage "在Pm2后台启动" "日志"
     else
+      CleanupOrphanedProcesses
       RedisServerStart
       node app
       Runing
@@ -525,11 +562,13 @@ case $1 in
         ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止成功" 10 60
       fi
     else
+      CleanupOrphanedProcesses
       ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未启动]" 10 60
     fi
     ;;
   restart)
     RunningState
+    CleanupOrphanedProcesses
     res="$?"
     if [ ${res} -eq 1 ];then
       if tmux kill-session -t ${TmuxName}
