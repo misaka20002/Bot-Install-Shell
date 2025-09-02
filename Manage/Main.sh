@@ -1,4 +1,4 @@
-old_version="1.1.87"
+old_version="1.1.88"
 
 cd $HOME
 export red="\033[31m"
@@ -75,56 +75,7 @@ else
 fi
 }
 ##############################
-Runing(){
-local running_loop=true
-while $running_loop; do
-  if $(pnpm pm2 show ${BotName} 2>&1 | grep -q online)
-  then
-    echo -e ${red}程序进入后台运行 ${cyan}正在转为前台${background}
-    pnpm pm2 stop ${BotName}
-    pnpm pm2 delete ${BotName}
-    RedisServerStart
-    node app
-    # 如果node app退出，检查退出码和是否在tmux中
-    exit_code=$?
-    if [ $exit_code -ne 0 ]; then
-      echo -e ${red}应用异常退出，退出码: $exit_code${background}
-      if [ ! -z "$TMUX" ]; then
-        echo -e ${yellow}在tmux环境中，清理孤立进程后等待手动重启...${background}
-        CleanupOrphanedProcesses
-        running_loop=false
-      else
-        echo -e ${yellow}清理孤立进程...${background}
-        CleanupOrphanedProcesses
-        running_loop=false
-      fi
-    else
-      echo -e ${green}应用正常退出${background}
-      running_loop=false
-    fi
-  else
-    # 没有pm2进程在运行，直接启动
-    RedisServerStart
-    node app
-    exit_code=$?
-    if [ $exit_code -ne 0 ]; then
-      echo -e ${red}应用异常退出，退出码: $exit_code${background}
-      if [ ! -z "$TMUX" ]; then
-        echo -e ${yellow}在tmux环境中，清理孤立进程后等待手动重启...${background}
-        CleanupOrphanedProcesses
-        running_loop=false
-      else
-        echo -e ${yellow}清理孤立进程...${background}
-        CleanupOrphanedProcesses
-        running_loop=false
-      fi
-    else
-      echo -e ${green}应用正常退出${background}
-      running_loop=false
-    fi
-  fi
-done
-}
+
 RedisServerStart(){
 PedisCliPing(){
 if [ "$(redis-cli ping 2>&1)" == "PONG" ]
@@ -582,7 +533,6 @@ case $1 in
       CleanupOrphanedProcesses
       RedisServerStart
       node app
-      Runing
     fi
     ;;
   stop)
