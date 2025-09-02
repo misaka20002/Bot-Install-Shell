@@ -1,4 +1,4 @@
-old_version="1.1.83"
+old_version="1.1.87"
 
 cd $HOME
 export red="\033[31m"
@@ -76,14 +76,54 @@ fi
 }
 ##############################
 Runing(){
-if $(pnpm pm2 show ${BotName} 2>&1 | grep -q online)
-then
-  echo -e ${red}程序进入后台运行 ${cyan}正在转为前台${background}
-  pnpm pm2 stop ${BotName}
-  pnpm pm2 delete ${BotName}
-  node app
-  Runing
-fi
+local running_loop=true
+while $running_loop; do
+  if $(pnpm pm2 show ${BotName} 2>&1 | grep -q online)
+  then
+    echo -e ${red}程序进入后台运行 ${cyan}正在转为前台${background}
+    pnpm pm2 stop ${BotName}
+    pnpm pm2 delete ${BotName}
+    RedisServerStart
+    node app
+    # 如果node app退出，检查退出码和是否在tmux中
+    exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+      echo -e ${red}应用异常退出，退出码: $exit_code${background}
+      if [ ! -z "$TMUX" ]; then
+        echo -e ${yellow}在tmux环境中，清理孤立进程后等待手动重启...${background}
+        CleanupOrphanedProcesses
+        running_loop=false
+      else
+        echo -e ${yellow}清理孤立进程...${background}
+        CleanupOrphanedProcesses
+        running_loop=false
+      fi
+    else
+      echo -e ${green}应用正常退出${background}
+      running_loop=false
+    fi
+  else
+    # 没有pm2进程在运行，直接启动
+    RedisServerStart
+    node app
+    exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+      echo -e ${red}应用异常退出，退出码: $exit_code${background}
+      if [ ! -z "$TMUX" ]; then
+        echo -e ${yellow}在tmux环境中，清理孤立进程后等待手动重启...${background}
+        CleanupOrphanedProcesses
+        running_loop=false
+      else
+        echo -e ${yellow}清理孤立进程...${background}
+        CleanupOrphanedProcesses
+        running_loop=false
+      fi
+    else
+      echo -e ${green}应用正常退出${background}
+      running_loop=false
+    fi
+  fi
+done
 }
 RedisServerStart(){
 PedisCliPing(){
@@ -186,6 +226,7 @@ echo -e ${green}===============================${background}
 echo -e ${yellow} Bot-Shell ${cyan}呆毛版-QQ群: 285744328${background}
 echo -e ${green}=============================${background}
 }
+##############################
 case $1 in
 help)
 help
@@ -298,15 +339,6 @@ exit
 ;;
 unup)
 export up="false"
-;;
-esac
-
-case $2 in
-n)
-CleanupOrphanedProcesses
-RedisServerStart
-node app
-Runing
 ;;
 esac
 ##############################
@@ -455,22 +487,36 @@ case ${BotName} in
     ;;
 esac
 
+local found_processes=false
 for pattern in "${process_patterns[@]}"; do
   # 查找不在tmux中运行的进程
   PIDS=$(ps -ef | grep "${pattern}" | grep -v grep | grep -v tmux | grep -v "$$" | awk '{print $2}')
   if [ -n "${PIDS}" ]; then
+    found_processes=true
     echo -e ${yellow}发现孤立进程 [${pattern}]: ${PIDS}${background}
     for pid in ${PIDS}; do
-      echo -e ${red}终止孤立进程: ${pid}${background}
-      kill -TERM ${pid} 2>/dev/null
-      sleep 2
-      if kill -0 ${pid} 2>/dev/null; then
-        echo -e ${red}强制终止进程: ${pid}${background}
-        kill -KILL ${pid} 2>/dev/null
+      echo -e ${red}正在终止孤立进程: ${pid}${background}
+      # 先尝试优雅终止
+      if kill -TERM ${pid} 2>/dev/null; then
+        echo -e ${cyan}已发送TERM信号到进程: ${pid}${background}
+        sleep 2
+        # 检查进程是否还存在
+        if kill -0 ${pid} 2>/dev/null; then
+          echo -e ${red}进程 ${pid} 未响应，强制终止${background}
+          kill -KILL ${pid} 2>/dev/null && echo -e ${green}强制终止成功: ${pid}${background}
+        else
+          echo -e ${green}进程已正常终止: ${pid}${background}
+        fi
+      else
+        echo -e ${yellow}进程 ${pid} 可能已经不存在${background}
       fi
     done
   fi
 done
+
+if ! ${found_processes}; then
+  echo -e ${green}未发现 ${BotName} 孤立进程${background}
+fi
 }
 
 BOT(){
@@ -485,6 +531,7 @@ case $1 in
     elif [ ${res} -eq 3 ];then
       AttachPage "在Pm2后台启动" "日志"
     else
+      CleanupOrphanedProcesses
       # 添加选择启动方式的对话框
       start_option=$(${DialogWhiptail} --title "呆毛版-Script" \
       --menu "请选择启动方式" 10 50 2 \
@@ -494,8 +541,12 @@ case $1 in
       
       case ${start_option} in
         1)
-          if tmux new -s ${TmuxName} -d "xdm ${BotName} n"
+          # 创建tmux会话并保持shell活跃
+          if tmux new-session -s ${TmuxName} -d bash
           then
+            echo -e ${cyan}已创建tmux会话: ${TmuxName}${background}
+            # 直接启动node应用
+            tmux send-keys -t ${TmuxName} "node app" Enter
             ProgressBar "启动"
           else
             ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 启动失败" 10 60
@@ -535,66 +586,74 @@ case $1 in
     fi
     ;;
   stop)
+    echo -e ${cyan}正在停止 ${BotName}...${background}
+    
     RunningState
     res="$?"
+    
+    # 先尝试正常停止方式
     if [ ${res} -eq 1 ];then
+      echo -e ${cyan}正在停止tmux会话...${background}
       if tmux kill-session -t ${TmuxName}
       then
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止成功" 10 60
+        echo -e ${green}Tmux会话已终止${background}
+        stop_success=true
       else
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止失败" 10 60
+        echo -e ${yellow}Tmux会话终止失败${background}
+        stop_success=false
       fi
     elif [ ${res} -eq 2 ];then
+      echo -e ${cyan}正在停止前台进程...${background}
       PIDS=$(ps -ef | grep "${BOT_COMMAND}" | grep -v grep | awk '{print $2}')
       if [ -n "${PIDS}" ] && kill ${PIDS}
       then
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止成功" 10 60
+        echo -e ${green}前台进程已终止${background}
+        stop_success=true
       else
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止失败" 10 60
+        echo -e ${yellow}前台进程终止失败${background}
+        stop_success=false
       fi
     elif [ ${res} -eq 3 ];then
+      echo -e ${cyan}正在停止PM2进程...${background}
       cd ${BotPath}
       pnpm run stop
       if pnpm pm2 show ${BotName} 2>&1 | grep -q online
       then
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止失败" 10 60
+        echo -e ${yellow}PM2停止失败，尝试强制删除${background}
+        pnpm pm2 delete ${BotName} 2>/dev/null
+        stop_success=false
       else
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止成功" 10 60
+        echo -e ${green}PM2进程已停止${background}
+        stop_success=true
       fi
     else
-      CleanupOrphanedProcesses
-      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未启动]" 10 60
+      echo -e ${yellow}${BotName} 未在运行${background}
+      stop_success=true
+    fi
+    
+    # 无论正常停止是否成功，都执行深度清理
+    echo -e ${cyan}执行深度进程清理...${background}
+    CleanupOrphanedProcesses
+    
+    # 显示最终结果
+    if ${stop_success}; then
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 停止成功\n已清理所有相关进程" 10 60
+    else
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 强制停止完成\n已清理所有相关进程" 10 60
     fi
     ;;
   restart)
-    RunningState
-    CleanupOrphanedProcesses
-    res="$?"
-    if [ ${res} -eq 1 ];then
-      if tmux kill-session -t ${TmuxName}
-      then
-        tmux new -s ${TmuxName} -d "xdm ${BotName} n"
-        ProgressBar "启动"
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "重启成功" 10 60
-      fi
-    elif [ ${res} -eq 2 ];then
-      if kill $(ps all | sed /grep/d | grep -q "${BOT_COMMAND}")
-      then
-        xdm ${BotName} n
-      fi
-    elif [ ${res} -eq 3 ];then
-      RedisServerStart
-      cd ${BotPath}
-      pnpm run restart
-      if pnpm pm2 show ${BotName} 2>&1 | grep -q online
-      then
-        AttachPage "在Pm2后台启动" "日志"
-      else
-        ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 启动失败" 10 60
-      fi
-    else
-      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未启动]" 10 60
-    fi
+    echo -e ${cyan}正在重启 ${BotName}...${background}
+    
+    # 先执行完整的停止流程
+    BOT stop
+    
+    # 等待一下确保进程完全清理
+    sleep 2
+    
+    # 再执行启动流程
+    echo -e ${cyan}正在启动 ${BotName}...${background}
+    BOT start
     ;;
   log)
     RunningState
