@@ -69,12 +69,20 @@ case $(uname -m) in
 esac
 
 function node_install(){
-if ping -c 1 gitee.com > /dev/null 2>&1
+if [ "${GitMirror}" == "gitee.com" ]
 then
-    NodeJS_URL="https://registry.npmmirror.com/-/binary/node/latest-${version1}.x/node-${version2}-linux-${ARCH}.tar.xz"
-elif ping -c 1 github.com > /dev/null 2>&1
+    WebURL="https://registry.npmmirror.com/-/binary/node/latest-${version1}.x/"
+    version3=$(curl -s ${WebURL} | grep -o '"name":"node-'${version2}'[^"]*-linux-'${ARCH}'.tar.xz"' | grep -o 'node-[^"]*' | head -n 1)
+    if [ -z "$version3" ]; then
+        # 如果没有找到精确版本，获取同系列最新版本
+        version3=$(curl -s ${WebURL} | grep -o '"name":"node-v'$(echo ${version2} | cut -d'.' -f1-2)'[^"]*-linux-'${ARCH}'.tar.xz"' | grep -o 'node-[^"]*' | sort -V | tail -n 1)
+    fi
+    NodeJS_URL="${WebURL}${version3}"
+elif [ "${GitMirror}" == "github.com" ]
 then
-    NodeJS_URL="https://nodejs.org/dist/latest-${version1}.x/node-${version2}-linux-${ARCH}.tar.xz"
+    WebURL="https://nodejs.org/dist/latest-${version1}.x/"
+    version3=$(curl ${WebURL} | grep ${version2} | grep -oP 'href=\K[^ ]+' | awk -F'"' '{print $2}' | grep pkg  | sed 's|node-||g' | sed 's|.pkg||g')
+    NodeJS_URL="https://nodejs.org/dist/latest-${version1}.x/node-${version3}-linux-${ARCH}.tar.xz"
 fi
 until wget -O node.tar.xz -c ${NodeJS_URL}
 do
@@ -89,31 +97,9 @@ do
 done
 }
 
-if ! [[ "$Nodsjs_Version" == "v16" || "$Nodsjs_Version" == "v18" ]];then
+if ! [[ "$Nodsjs_Version" == "v16" || "$Nodsjs_Version" == "v18" || "$Nodsjs_Version" == "v19" || "$Nodsjs_Version" == "v20" || "$Nodsjs_Version" == "v21"|| "$Nodsjs_Version" == "v22"|| "$Nodsjs_Version" == "v23"|| "$Nodsjs_Version" == "v24" || "$Nodsjs_Version" == "v25" ]];then
     echo -e ${yellow}安装软件 Node.JS${background}
-        if awk '{print $2}' /etc/os-release | grep -q -E 9
-        then
-            version1=v18
-            version2=v18.19.1
-            node_install
-    elif cat /etc/os-release | grep VERSION | grep -q -E 8
-        then
-            version1=v18
-            version2=v18.19.1
-            node_install
-    elif cat /etc/os-release | grep VERSION | grep -q -E 7
-        then
-            version1=v16
-            version2=v16.20.2
-            node_install
-    elif cat /etc/os-release | grep VERSION | grep -q -E 6
-        then
-            version1=v16
-            version2=v16.20.2
-            node_install
-    else
-            version1=v16
-            version2=v16.20.2
-            node_install
-    fi
+        version1=v23
+        version2=v23.11
+        node_install
 fi

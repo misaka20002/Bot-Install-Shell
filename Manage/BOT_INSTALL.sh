@@ -6,6 +6,7 @@ elif ping -c 1 github.com > /dev/null 2>&1
 then
   URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Linux/Bot-Install-"
 fi
+# 例如执行安装 ..//Linux/Bot-Install-Ubuntu.sh
 Arch_Script="${URL}ArchLinux.sh"
 Kernel_Script="${URL}CentOS.sh"
 Ubuntu_Script="${URL}Ubuntu.sh"

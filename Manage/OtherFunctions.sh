@@ -379,8 +379,8 @@ InstallNodeVersion(){
     echo -e  ${green} 2. ${cyan}Node.js v19${background}
     echo -e  ${green} 3. ${cyan}Node.js v20 LTS${background}
     echo -e  ${green} 4. ${cyan}Node.js v21${background}
-    echo -e  ${green} 5. ${cyan}Node.js v22（推荐）${background}
-    echo -e  ${green} 6. ${cyan}Node.js v23${background}
+    echo -e  ${green} 5. ${cyan}Node.js v22${background}
+    echo -e  ${green} 6. ${cyan}Node.js v23（推荐）${background}
     echo -e  ${green} 7. ${cyan}Node.js v24${background}
     echo -e  ${green} 8. ${cyan}安装其他版本${background}
     echo -e  ${green} 0. ${cyan}返回上级菜单${background}
@@ -1792,10 +1792,10 @@ function main(){
     echo -e  ${green} 4. ${cyan}修改主人账号${background}
     echo -e  ${green} 5. ${cyan}重装依赖文件${background}
     echo -e  ${green} 6. ${cyan}修复监听错误${background}
-    echo -e  ${green} 7. ${cyan}降级pptr版本${background}
-    echo -e  ${green} 8. ${cyan}更新NodeJS版本${background}
+    echo -e  ${green} 7. ${cyan}降级puppeteer${background}
+    echo -e  ${green} 8. ${cyan}更改Node.js版本${background}
     echo -e  ${green} 9. ${cyan}修改ffmpeg路径${background}
-    echo -e  ${green}10. ${cyan}修改浏览器路径${background}
+    echo -e  ${green}10. ${cyan}修改chromium路径${background}
     echo -e  ${green}11. ${cyan}修改锅巴插件端口${background}
     echo -e  ${green}12. ${cyan}修改锅巴插件地址${background}
     echo -e  ${green}13. ${cyan}修改日志等级${background}

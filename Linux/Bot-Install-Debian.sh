@@ -79,7 +79,7 @@ then
     NodeJS_URL="${WebURL}${version3}"
 elif [ "${GitMirror}" == "github.com" ]
 then
-    WebURL="https://nodejs.org/dist/latest-v18.x/"
+    WebURL="https://nodejs.org/dist/latest-${version1}.x/"
     version3=$(curl ${WebURL} | grep ${version2} | grep -oP 'href=\K[^ ]+' | awk -F'"' '{print $2}' | grep pkg  | sed 's|node-||g' | sed 's|.pkg||g')
     NodeJS_URL="https://nodejs.org/dist/latest-${version1}.x/node-${version3}-linux-${ARCH}.tar.xz"
 fi
@@ -96,10 +96,10 @@ do
 done
 }
 
-if ! [[ "$Nodsjs_Version" == "v16" || "$Nodsjs_Version" == "v18" || "$Nodsjs_Version" == "v19" || "$Nodsjs_Version" == "v20" || "$Nodsjs_Version" == "v21"|| "$Nodsjs_Version" == "v22"|| "$Nodsjs_Version" == "v23"|| "$Nodsjs_Version" == "v24" ]];then
+if ! [[ "$Nodsjs_Version" == "v16" || "$Nodsjs_Version" == "v18" || "$Nodsjs_Version" == "v19" || "$Nodsjs_Version" == "v20" || "$Nodsjs_Version" == "v21"|| "$Nodsjs_Version" == "v22"|| "$Nodsjs_Version" == "v23"|| "$Nodsjs_Version" == "v24" || "$Nodsjs_Version" == "v25" ]];then
     echo -e ${yellow}安装软件 Node.JS${background}
-        version1=v18
-        version2=v18.20
+        version1=v23
+        version2=v23.11
         node_install
 fi
 
