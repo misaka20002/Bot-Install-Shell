@@ -742,8 +742,7 @@ EOF
 }
 
 setup_auto_update(){
-  echo -en ${yellow}是否开启meme生成器自动更新? [Y/n]:${background};read yn
-  echo -e ${cyan}启动meme生成器之后将会在每天凌晨1点到6点随机时间自动同步更新 meme GitHub 仓库并重启${background}
+  echo -en ${yellow}是否开启meme生成器自动更新（启动meme生成器之后将会在每天凌晨1点到6点随机时间自动同步更新 meme GitHub 仓库并重启）? [Y/n]:${background};read yn
   case ${yn} in
   N|n)
     # 如果用户选择不开启自动更新，但已经存在cron任务，则删除它
