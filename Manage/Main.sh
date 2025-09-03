@@ -1,4 +1,4 @@
-old_version="1.1.88"
+old_version="1.1.90"
 
 cd $HOME
 export red="\033[31m"
@@ -139,14 +139,25 @@ function QuickLog(){
         # 在前台运行
         echo -e ${red}${bot_name} 在前台运行，无法打开日志${background}
         return 1
-    elif pnpm pm2 show ${bot_name} 2>&1 | grep -q online
-    then
-        # 在pm2后台运行
-        echo -e ${cyan}正在打开 ${bot_name} PM2日志...${background}
-        pnpm pm2 log ${bot_name}
     else
-        echo -e ${red}${bot_name} 未运行${background}
-        return 1
+        # 检查PM2状态需要在正确的工作目录下进行
+        if BotPathCheck
+        then
+            cd ${BotPath}
+            if pnpm pm2 show ${bot_name} 2>&1 | grep -q online
+            then
+                # 在pm2后台运行
+                echo -e ${cyan}正在打开 ${bot_name} PM2日志...${background}
+                pnpm pm2 log ${bot_name} --lines 1000
+                return 0
+            else
+                echo -e ${red}${bot_name} 未运行${background}
+                return 1
+            fi
+        else
+            echo -e ${red}无法找到 ${bot_name} 的安装路径${background}
+            return 1
+        fi
     fi
 }
 
@@ -416,7 +427,7 @@ then
   elif [ ${res} -eq 2 ];then
       ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName}已在前台运行" 10 60
   elif [ ${res} -eq 3 ];then
-    pnpm pm2 log ${BotName}
+    pnpm pm2 log ${BotName} --lines 1000
   fi
 fi
 }
@@ -613,7 +624,7 @@ case $1 in
     elif [ ${res} -eq 2 ];then
       ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [前台运行]\n无法打开日志" 10 60
     elif [ ${res} -eq 3 ];then
-      pnpm pm2 log ${BotName}
+      pnpm pm2 log ${BotName} --lines 1000
     else
       ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未运行]" 10 60
     fi

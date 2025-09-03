@@ -217,8 +217,32 @@ CheckAndInstallNvm() {
     if ! command -v nvm &> /dev/null; then
         echo -e ${yellow}未检测到 NVM，正在安装...${background}
         
-        # 安装 NVM
-        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+        # 安装 NVM - 带反代重试机制
+        install_urls=(
+            "https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh"
+            "https://ghfast.top/https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh"
+            "https://gh-proxy.com/https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh"
+        )
+        
+        install_success=false
+        for url in "${install_urls[@]}"; do
+            echo -e ${cyan}正在尝试从 ${url} 下载...${background}
+            if curl -o- "$url" | bash; then
+                install_success=true
+                echo -e ${green}NVM 安装脚本下载并执行成功${background}
+                break
+            else
+                echo -e ${yellow}从 ${url} 下载失败，尝试下一个源...${background}
+            fi
+        done
+        
+        if [ "$install_success" = false ]; then
+            echo -e ${red}所有下载源都失败了${background}
+            echo -e ${cyan}可以访问 https://github.com/nvm-sh/nvm 获取安装指南${background}
+            echo -en ${cyan}回车返回${background}
+            read
+            return 1
+        fi
         
         # 重新加载 NVM
         export NVM_DIR="$HOME/.nvm"
