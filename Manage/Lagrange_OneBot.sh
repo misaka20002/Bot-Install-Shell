@@ -671,7 +671,8 @@ change_sign_version_for_account(){
   echo -e ${cyan}请选择签名服务器版本${background}
   echo -e  ${green} 1.  ${cyan}版本: cn 30366 \(lagrangecore.org\)${background}
   echo -e  ${green} 2.  ${cyan}版本: hk 30366 \(0w0.ing\)${background}
-  echo -e  ${green} 3.  ${cyan}版本: hk 25765 \(0w0.ing\)${background}
+  echo -e  ${green} 3.  ${cyan}版本: cn 39038 \(lagrangecore.org\)${background}
+  echo -e  ${green} 4.  ${cyan}版本: hk 39038 \(0w0.ing\)${background}
   echo "========================="
   echo -en ${green}请输入您的选项: ${background};read num
   
@@ -685,8 +686,12 @@ change_sign_version_for_account(){
       new_version="30366"
       ;;
   3)
-      new_url="https://sign.0w0.ing/api/sign/25765"
-      new_version="25765"
+      new_url="https://sign.lagrangecore.org/api/sign/39038"
+      new_version="39038"
+      ;;
+  4)
+      new_url="https://sign.0w0.ing/api/sign/39038"
+      new_version="39038"
       ;;
   *)
       echo -e ${red}输入错误${background}
@@ -1487,7 +1492,7 @@ create_config_for_account(){
             "Microsoft.Hosting.Lifetime": "Information"
         }
     },
-    "SignServerUrl": "https://sign.lagrangecore.org/api/sign/30366",
+    "SignServerUrl": "https://sign.lagrangecore.org/api/sign/39038",
     "SignProxyUrl": "",
     "MusicSignServerUrl": "https://ss.xingzhige.com/music_card/card",
     "Account": {
@@ -1545,6 +1550,9 @@ create_new_qq(){
   create_config_for_account "$qq_name"
   
   echo -e ${green}账号 ${cyan}$qq_name ${green}创建成功${background}
+  echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}管理OneBot连接配置-管理AccessToken${background}
+  echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}管理OneBot连接配置-管理AccessToken${background}
+  echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}管理OneBot连接配置-管理AccessToken${background}
   echo -en ${cyan}是否立即进入该账号管理? [Y/n]: ${background};read start_now
   
   case $start_now in
