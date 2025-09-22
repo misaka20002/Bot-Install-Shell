@@ -572,6 +572,7 @@ if [ ! -f ${config} ]; then
 fi
 
 OldPort=$(grep -E "port" ${config} | awk '{print $3}')
+echo -e ${cyan}请确保您的防火墙已开放端口: ${background}
 echo -e ${cyan}当前端口: ${green}${OldPort}${background}
 echo -e ${cyan}请输入新端口号: ${background};read NewPort
 
@@ -584,6 +585,7 @@ fi
 # 修改配置文件中的端口
 sed -i "s/port = ${OldPort}/port = ${NewPort}/g" ${config}
 echo -e ${green}端口已修改为: ${NewPort}${background}
+echo -e ${yellow}请确保您的防火墙已开放${NewPort}端口${background}
 
 echo -e ${yellow}是否重启meme生成器以应用新端口? [Y/n]${background};read yn
 case ${yn} in
@@ -1308,6 +1310,9 @@ echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}meme生成器状态: ${condition}${background}
 echo -e ${green}meme自动更新服务: ${auto_update_condition}${background}
+if [ "${condition}" = "${green}[运行中]" ]; then
+    echo -e ${green}MEME api: ${cyan}http://localhost:${Port}${background}
+fi
 echo -e ${green}QQ群:${cyan}呆毛版-QQ群:285744328${background}
 echo "========================="
 echo
