@@ -222,6 +222,24 @@ else
   exit
 fi
 
+# 创建 pip 配置文件，添加国内镜像源
+echo -e ${green}配置pip国内镜像源...${background}
+mkdir -p $HOME/.pip
+cat > $HOME/.pip/pip.conf << EOF
+[global]
+index-url = https://pypi.tuna.tsinghua.edu.cn/simple/
+extra-index-url = https://mirrors.aliyun.com/pypi/simple/
+                  https://pypi.mirrors.ustc.edu.cn/simple/
+                  https://mirror.baidu.com/pypi/simple/
+                  https://pypi.douban.com/simple/
+trusted-host = pypi.tuna.tsinghua.edu.cn
+               mirrors.aliyun.com
+               pypi.mirrors.ustc.edu.cn
+               mirror.baidu.com
+               pypi.douban.com
+timeout = 120
+EOF
+
 # 创建安装目录
 mkdir -p ${install_path}
 cd ${install_path}
