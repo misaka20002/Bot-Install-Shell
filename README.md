@@ -110,6 +110,16 @@ bash <(curl -sL https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/
 
 </details>
 
+## 脚本中使用的呆毛版插件链接
+
+- [Trss-Yunzai-lagrange](https://github.com/AIGC-Yunzai/Trss-Yunzai-lagrange)
+- [椰奶v2-misaka-fork](https://github.com/misaka20002/yenai-plugin/tree/v2)
+- [chatgpt-misaka-fork](https://github.com/misaka20002/chatgpt-plugin)
+- [ap-plugin-misaka-fork](https://github.com/misaka20002/ap-plugin)
+- [xiaofei-plugin-misaka-fork](https://github.com/misaka20002/xiaofei-plugin)
+- [paimonnai-plugin](https://github.com/misaka20002/paimonnai-plugin)
+- [sf插件](https://github.com/AIGC-Yunzai/siliconflow-plugin)
+
 ## LICENSE
 
 - [MIT License](./LICENSE)
