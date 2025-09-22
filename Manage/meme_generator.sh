@@ -228,16 +228,11 @@ mkdir -p $HOME/.pip
 cat > $HOME/.pip/pip.conf << EOF
 [global]
 index-url = https://pypi.tuna.tsinghua.edu.cn/simple/
-extra-index-url = https://mirrors.aliyun.com/pypi/simple/
-                  https://pypi.mirrors.ustc.edu.cn/simple/
-                  https://mirror.baidu.com/pypi/simple/
-                  https://pypi.douban.com/simple/
+extra-index-url = https://pypi.mirrors.ustc.edu.cn/simple/
 trusted-host = pypi.tuna.tsinghua.edu.cn
-               mirrors.aliyun.com
                pypi.mirrors.ustc.edu.cn
-               mirror.baidu.com
-               pypi.douban.com
 timeout = 120
+retries = 5
 EOF
 
 # 创建安装目录
@@ -1087,6 +1082,190 @@ change_github_proxy(){
     echo -en ${yellow}回车返回${background};read
 }
 
+# 重新使用 pip 安装依赖
+reinstall_pip_dependencies(){
+    if [ ! -d ${install_path}/meme-generator ]; then
+        echo -e ${red}您还没有安装meme生成器！${background}
+        echo -en ${yellow}回车返回${background};read
+        return
+    fi
+
+    echo -e ${white}"====="${green}重新使用pip安装依赖${white}"====="${background}
+    echo -e ${yellow}此操作将重新安装meme生成器的所有Python依赖包${background}
+    echo -e ${cyan}适用于以下情况：${background}
+    echo -e ${cyan}- 依赖包损坏或缺失${background}
+    echo -e ${cyan}- Python环境出现问题${background}
+    echo -e ${cyan}- 需要更新到最新版本的依赖${background}
+    echo -e ${cyan}- pip安装失败需要重试${background}
+    echo "========================="
+    
+    echo -en ${yellow}是否继续重新安装依赖包？[Y/n]: ${background};read confirm
+    case ${confirm} in
+    N|n)
+        echo -e ${yellow}已取消操作${background}
+        echo -en ${yellow}回车返回${background};read
+        return
+        ;;
+    esac
+
+    # 检查是否需要先停止服务
+    meme_was_running=false
+    if meme_curl; then
+        meme_was_running=true
+        echo -e ${yellow}检测到meme生成器正在运行，需要先停止服务${background}
+        echo -e ${yellow}正在停止meme生成器...${background}
+        tmux_kill_session meme_generator > /dev/null 2>&1
+        pm2 delete meme_generator > /dev/null 2>&1
+        PID=$(ps aux | grep "meme_generator.app" | sed '/grep/d' | awk '{print $2}')
+        if [ ! -z "${PID}" ]; then
+            kill -9 ${PID}
+        fi
+        sleep 2
+        echo -e ${green}meme生成器已停止${background}
+    fi
+
+    # 确保pip配置文件存在
+    echo -e ${yellow}检查pip配置文件...${background}
+    if [ ! -f "$HOME/.pip/pip.conf" ]; then
+        echo -e ${yellow}pip配置文件不存在，正在创建...${background}
+        mkdir -p $HOME/.pip
+        cat > $HOME/.pip/pip.conf << EOF
+[global]
+index-url = https://pypi.tuna.tsinghua.edu.cn/simple/
+extra-index-url = https://pypi.mirrors.ustc.edu.cn/simple/
+trusted-host = pypi.tuna.tsinghua.edu.cn
+               pypi.mirrors.ustc.edu.cn
+timeout = 120
+retries = 5
+EOF
+        echo -e ${green}pip配置文件已创建${background}
+    else
+        echo -e ${green}pip配置文件已存在，正在更新为最新配置...${background}
+        # 更新配置文件为最新的稳定版本
+        cat > $HOME/.pip/pip.conf << EOF
+[global]
+index-url = https://pypi.tuna.tsinghua.edu.cn/simple/
+extra-index-url = https://pypi.mirrors.ustc.edu.cn/simple/
+trusted-host = pypi.tuna.tsinghua.edu.cn
+               pypi.mirrors.ustc.edu.cn
+timeout = 120
+retries = 5
+EOF
+        echo -e ${green}pip配置文件已更新${background}
+    fi
+
+    # 进入meme-generator目录
+    cd ${install_path}/meme-generator
+    
+    # 检查虚拟环境是否存在
+    if [ ! -d "venv" ]; then
+        echo -e ${red}虚拟环境不存在，正在创建新的虚拟环境...${background}
+        python3 -m venv venv
+        if [ $? -ne 0 ]; then
+            echo -e ${red}创建虚拟环境失败！${background}
+            echo -en ${yellow}回车返回${background};read
+            return
+        fi
+        echo -e ${green}虚拟环境创建成功${background}
+    else
+        echo -e ${green}虚拟环境已存在${background}
+    fi
+
+    # 激活虚拟环境
+    echo -e ${yellow}激活虚拟环境...${background}
+    source venv/bin/activate
+    if [ $? -ne 0 ]; then
+        echo -e ${red}激活虚拟环境失败！${background}
+        echo -en ${yellow}回车返回${background};read
+        return
+    fi
+
+    # 升级pip本身
+    echo -e ${yellow}升级pip到最新版本...${background}
+    python -m pip install --upgrade pip
+    if [ $? -eq 0 ]; then
+        echo -e ${green}pip升级成功${background}
+    else
+        echo -e ${red}pip升级失败，但继续安装依赖${background}
+    fi
+
+    # 清除pip缓存
+    echo -e ${yellow}清除pip缓存...${background}
+    python -m pip cache purge 2>/dev/null || echo -e ${yellow}pip缓存清除完成${background}
+
+    # 选择安装方式
+    echo -e ${cyan}请选择安装方式：${background}
+    echo -e ${green}1.${cyan} 快速安装（推荐）- 直接安装当前项目${background}
+    echo -e ${green}2.${cyan} 完全重装 - 先卸载再重新安装${background}
+    echo -e ${green}3.${cyan} 强制重装 - 忽略已安装的包，强制重新安装${background}
+    echo -en ${green}请选择 [1-3]: ${background};read install_method
+
+    case ${install_method} in
+    2)
+        echo -e ${yellow}正在卸载现有依赖包...${background}
+        python -m pip uninstall -y meme-generator 2>/dev/null || echo -e ${yellow}未找到已安装的meme-generator${background}
+        
+        echo -e ${yellow}正在重新安装依赖包...${background}
+        python -m pip install .
+        ;;
+    3)
+        echo -e ${yellow}正在强制重新安装依赖包...${background}
+        python -m pip install --force-reinstall .
+        ;;
+    *)
+        echo -e ${yellow}正在安装依赖包...${background}
+        python -m pip install .
+        ;;
+    esac
+
+    # 检查安装结果
+    if [ $? -eq 0 ]; then
+        echo -e ${green}依赖包安装成功！${background}
+        
+        # 验证安装
+        echo -e ${yellow}正在验证安装...${background}
+        if python -c "import meme_generator; print('meme_generator模块验证成功')" 2>/dev/null; then
+            echo -e ${green}✓ meme_generator模块验证成功${background}
+        else
+            echo -e ${red}✗ meme_generator模块验证失败${background}
+        fi
+        
+        # 显示已安装的包
+        echo -e ${cyan}当前虚拟环境中已安装的主要包：${background}
+        python -m pip list | grep -E "(meme|PIL|numpy|requests)" 2>/dev/null || echo -e ${yellow}未找到相关包信息${background}
+        
+    else
+        echo -e ${red}依赖包安装失败！${background}
+        echo -e ${yellow}可能的解决方案：${background}
+        echo -e ${cyan}- 检查网络连接${background}
+        echo -e ${cyan}- 尝试更换GitHub代理（选项12）${background}
+        echo -e ${cyan}- 检查系统是否有足够的磁盘空间${background}
+        echo -e ${cyan}- 确保Python版本兼容（建议Python 3.8+）${background}
+    fi
+
+    # 询问是否重启服务
+    if [ "$meme_was_running" = true ]; then
+        echo -en ${yellow}检测到之前meme生成器在运行，是否重新启动？[Y/n]: ${background};read restart_choice
+        case ${restart_choice} in
+        N|n)
+            echo -e ${yellow}请记得手动重启meme生成器${background}
+            ;;
+        *)
+            echo -e ${yellow}正在重新启动meme生成器...${background}
+            export Boolean=true
+            tmux_new meme_generator "cd ${install_path}/meme-generator && source venv/bin/activate && while ${Boolean}; do python -m meme_generator.app; echo -e ${red}meme生成器关闭 正在重启${background}; sleep 2s; done"
+            if tmux_gauge meme_generator; then
+                echo -e ${green}meme生成器已成功重启${background}
+            else
+                echo -e ${red}meme生成器重启超时，请手动检查${background}
+            fi
+            ;;
+        esac
+    fi
+    
+    echo -en ${yellow}回车返回${background};read
+}
+
 main(){
 # 如果是首次通过curl执行，确保先保存脚本到系统目录
 if [[ "$0" == *"/dev/fd/"* || "$0" == "bash" ]]; then
@@ -1124,6 +1303,7 @@ echo -e  ${green} 9.  ${cyan}查看自动更新服务${background}
 echo -e  ${green} 10.  ${cyan}修改meme端口号${background}
 echo -e  ${green} 11.  ${cyan}重写配置文件${background}
 echo -e  ${green} 12.  ${cyan}更换Github代理${background}
+echo -e  ${green} 13.  ${cyan}重新安装依赖${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}meme生成器状态: ${condition}${background}
@@ -1179,6 +1359,10 @@ rewrite_config
 12)
 echo
 change_github_proxy
+;;
+13)
+echo
+reinstall_pip_dependencies
 ;;
 0)
 exit
