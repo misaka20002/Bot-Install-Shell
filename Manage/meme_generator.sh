@@ -39,13 +39,13 @@ if [ "${Address}" = "CN" ]
 then
   GitMirror="gitee.com"
   GithubMirror_1="https://ghfast.top/"
-  GithubMirror_2="https://git.ppp.ac.cn/"
-  GithubMirror_3="https://gh-proxy.com/"
+  GithubMirror_2="https://gh-proxy.com/"
+  # GithubMirror_3="https://git.ppp.ac.cn/"
 else
   GitMirror="github.com"
   GithubMirror_1=""
   GithubMirror_2=""
-  GithubMirror_3=""
+  # GithubMirror_3=""
 fi
 
 config=$HOME/.config/meme_generator/config.toml
@@ -477,25 +477,26 @@ then
 fi
 
 echo -e ${yellow}正在更新meme生成器...${background}
-cd ${install_path}/meme-generator
-git fetch --all
-git reset --hard origin/main
-git pull
+if ! git_update "${install_path}/meme-generator" "/dev/null"; then
+  echo -e ${red}更新meme-generator失败${background}
+  echo -e ${yellow}继续更新其他组件...${background}
+fi
 
+cd ${install_path}/meme-generator
 source venv/bin/activate
 python -m pip install .
 
 echo -e ${yellow}正在更新meme-generator-contrib...${background}
-cd ${install_path}/meme-generator-contrib
-git fetch --all
-git reset --hard origin/main
-git pull
+if ! git_update "${install_path}/meme-generator-contrib" "/dev/null"; then
+  echo -e ${red}更新meme-generator-contrib失败${background}
+  echo -e ${yellow}继续更新其他组件...${background}
+fi
 
 echo -e ${yellow}正在更新meme_emoji...${background}
-cd ${install_path}/meme_emoji
-git fetch --all
-git reset --hard origin/main
-git pull
+if ! git_update "${install_path}/meme_emoji" "/dev/null"; then
+  echo -e ${red}更新meme_emoji失败${background}
+  echo -e ${yellow}继续...${background}
+fi
 
 echo -e ${green}更新完成！${background}
 echo -en ${yellow}是否重新启动meme生成器? [Y/n]${background};read yn
@@ -939,8 +940,8 @@ change_github_proxy(){
     echo -e ${cyan}当前可用的GitHub代理:${background}
     echo -e ${green}1.${cyan} 无代理 \(直接访问github.com\)${background}
     echo -e ${green}2.${cyan} ghfast.top \(${GithubMirror_1:-"https://ghfast.top/"}\)${background}
-    echo -e ${green}3.${cyan} git.ppp.ac.cn \(${GithubMirror_2:-"https://git.ppp.ac.cn/"}\)${background}
-    echo -e ${green}4.${cyan} gh-proxy.com \(${GithubMirror_3:-"https://gh-proxy.com/"}\)${background}
+    echo -e ${green}3.${cyan} gh-proxy.com \(${GithubMirror_2:-"https://gh-proxy.com/"}\)${background}
+    # echo -e ${green}4.${cyan} git.ppp.ac.cn \(${GithubMirror_3:-"https://git.ppp.ac.cn/"}\)${background}
     echo -e ${green}5.${cyan} 自定义代理${background}
     echo "========================="
     
@@ -972,13 +973,13 @@ change_github_proxy(){
         proxy_name="ghfast.top"
         ;;
     3)
-        new_proxy="${GithubMirror_2:-"https://git.ppp.ac.cn/"}"
-        proxy_name="git.ppp.ac.cn"
-        ;;
-    4)
-        new_proxy="${GithubMirror_3:-"https://gh-proxy.com/"}"
+        new_proxy="${GithubMirror_2:-"https://gh-proxy.com/"}"
         proxy_name="gh-proxy.com"
         ;;
+    # 4)
+    #     new_proxy="${GithubMirror_3:-"https://git.ppp.ac.cn/"}"
+    #     proxy_name="git.ppp.ac.cn"
+    #     ;;
     5)
         echo -en ${cyan}请输入自定义代理地址 \(如: https://mirror.example.com/\): ${background};read custom_proxy
         if [[ ! ${custom_proxy} =~ ^https?:// ]]; then
