@@ -44,7 +44,7 @@ else
   GithubMirror=""
 fi
 
-LAGRANGE_URL=${GithubMirror}https://github.com/LagrangeDev/Lagrange.Core/releases/download/nightly/Lagrange.OneBot_linux-${ARCH}_net9.0_SelfContained.tar.gz
+LAGRANGE_URL=${GithubMirror}https://github.com/misaka20002/Lagrange.Core/releases/download/nightly/Lagrange.OneBot_linux-${ARCH}_net9.0_SelfContained.tar.gz
 INSTALL_DIR=$HOME/Lagrange.OneBot
 CONFIG_FILE=$INSTALL_DIR/appsettings.json
 
