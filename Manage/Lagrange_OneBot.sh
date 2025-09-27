@@ -195,6 +195,21 @@ update_Lagrange(){
   echo -e ${yellow}正在解压文件,请耐心等候${background}
   pv lagrange.tar.gz | tar -zxf - -C $TMP_DIR
 
+  # 先检测并记录正在运行的账号
+  running_accounts=()
+  echo -e ${yellow}正在检测运行中的账号...${background}
+  for acc_dir in "$INSTALL_DIR/accounts"/*; do
+    if [ -d "$acc_dir" ]; then
+      acc_name=$(basename "$acc_dir")
+      tmux_name="lagrange_$acc_name"
+      
+      if tmux_ls $tmux_name > /dev/null 2>&1; then
+        running_accounts+=("$acc_name")
+        echo -e ${cyan}检测到运行中的账号: ${green}$acc_name${background}
+      fi
+    fi
+  done
+
   # 停止所有账号的服务
   echo -e ${yellow}正在停止所有账号的服务...${background}
   for acc_dir in "$INSTALL_DIR/accounts"/*; do
@@ -233,25 +248,31 @@ update_Lagrange(){
       exit 1
   fi
 
-  echo -en ${yellow}是否重新启动所有账号? [Y/n]:${background};read restart_all
+  # 如果没有之前运行中的账号
+  if [ ${#running_accounts[@]} -eq 0 ]; then
+    echo -e ${yellow}没有检测到之前运行的账号${background}
+    echo -en ${cyan}回车返回${background};read
+    return
+  fi
+  
+  # 显示之前运行的账号并询问是否重启
+  echo -e ${yellow}检测到 ${cyan}${#running_accounts[@]}${yellow} 个之前运行的账号: ${green}${running_accounts[*]}${background}
+  echo -en ${yellow}是否重新启动这些账号? [Y/n]:${background};read restart_all
   
   case $restart_all in
     n|N)
       echo -e ${yellow}请稍后手动启动账号${background}
       ;;
     *)
-      # 启动所有之前运行的账号
-      for acc_dir in "$INSTALL_DIR/accounts"/*; do
-        if [ -d "$acc_dir" ]; then
-          acc_name=$(basename "$acc_dir")
-          tmux_name="lagrange_$acc_name"
-          
-          echo -e ${yellow}启动账号 ${cyan}$acc_name${yellow} ...${background}
-          local QQ_DIR="$INSTALL_DIR/accounts/$acc_name"
-          tmux_new $tmux_name "cd \"$QQ_DIR\" && $INSTALL_DIR/Lagrange.OneBot; echo -e ${red}账号 $acc_name 已关闭，正在重启${background}; sleep 2"
-        fi
+      # 重新启动之前运行的账号
+      for acc_name in "${running_accounts[@]}"; do
+        tmux_name="lagrange_$acc_name"
+        
+        echo -e ${yellow}重新启动账号 ${cyan}$acc_name${yellow} ...${background}
+        local QQ_DIR="$INSTALL_DIR/accounts/$acc_name"
+        tmux_new $tmux_name "cd \"$QQ_DIR\" && $INSTALL_DIR/Lagrange.OneBot; echo -e ${red}账号 $acc_name 已关闭，正在重启${background}; sleep 2"
       done
-      echo -e ${green}所有账号已重启${background}
+      echo -e ${green}已重新启动 ${cyan}${#running_accounts[@]}${green} 个账号${background}
       ;;
   esac
   
@@ -812,7 +833,7 @@ manage_implementations_with_path(){
   cp "$config_path" "$config_path.bak"
 
   while true; do
-    clear
+    # clear
     # 显示标题，如果有账号名则显示
     if [ -n "$account_name" ]; then
       echo -e ${white}"====="${green}账号 ${cyan}$account_name${green} 的OneBot连接管理${white}"====="${background}
@@ -1415,7 +1436,7 @@ manage_single_qq(){
     local status="${red}[未启动]"
   fi
   
-  clear
+  # clear
   echo -e ${white}"====="${green}账号管理: ${cyan}$qq_name ${status}${white}"====="${background}
   echo -e  ${green} 1.  ${cyan}启动Lagrange${background}
   echo -e  ${green} 2.  ${cyan}关闭Lagrange${background}
@@ -1525,7 +1546,7 @@ EOF
 }
 
 create_new_qq(){
-  clear
+  # clear
   echo -e ${white}"====="${green}新增QQ账号${white}"====="${background}
   echo -en ${cyan}请输入QQ昵称或标识\(用于文件夹命名\): ${background};read qq_name
   
@@ -1573,7 +1594,7 @@ manage_multi_qq(){
     return
   fi
 
-  clear
+  # clear
   # 创建账号保存主目录
   ACCOUNTS_DIR="$INSTALL_DIR/accounts"
   mkdir -p $ACCOUNTS_DIR
