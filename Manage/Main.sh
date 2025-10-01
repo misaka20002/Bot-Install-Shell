@@ -1,4 +1,4 @@
-old_version="1.1.90"
+old_version="1.1.91"
 
 cd $HOME
 export red="\033[31m"
@@ -76,28 +76,28 @@ fi
 }
 ##############################
 
-RedisServerStart(){
-PedisCliPing(){
-if [ "$(redis-cli ping 2>&1)" == "PONG" ]
-then
-  return 0
-else
-  return 1
-fi
-}
-if $(PedisCliPing)
-then
-  echo -e ${cyan}Redis-Server${green} 已启动${background}
-else
-  $(nohup redis-server > /dev/null 2>&1 &)
-  echo -e ${cyan}等待Redis-Server启动中${background}
-  until PedisCliPing
-  do
-    sleep 0.5s
-  done
-  echo -e ${cyan}Redis-Server${green} 启动成功${background}
-fi
-}
+# RedisServerStart(){
+# PedisCliPing(){
+# if [ "$(redis-cli ping 2>&1)" == "PONG" ]
+# then
+#   return 0
+# else
+#   return 1
+# fi
+# }
+# if $(PedisCliPing)
+# then
+#   echo -e ${cyan}Redis-Server${green} 已启动${background}
+# else
+#   $(nohup redis-server > /dev/null 2>&1 &)
+#   echo -e ${cyan}等待Redis-Server启动中${background}
+#   until PedisCliPing
+#   do
+#     sleep 0.5s
+#   done
+#   echo -e ${cyan}Redis-Server${green} 启动成功${background}
+# fi
+# }
 function TmuxLs(){
 Tmux_Name="$1"
 TmuxWindows=$(tmux ls 2>&1)
@@ -515,7 +515,7 @@ case $1 in
           fi
           ;;
         2)
-          RedisServerStart
+          # RedisServerStart
           cd ${BotPath}
           pnpm run restart
           if pnpm pm2 show ${BotName} 2>&1 | grep -q online
@@ -542,7 +542,7 @@ case $1 in
       AttachPage "在Pm2后台启动" "日志"
     else
       CleanupOrphanedProcesses
-      RedisServerStart
+      # RedisServerStart
       node app
     fi
     ;;

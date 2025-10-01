@@ -613,7 +613,8 @@ UninstallNodeVersion(){
 FfmpegPath(){
 if [ ${BotName} == "TRSS-Yunzai" ];then
     echo -e ${cyan}TRSS-Yunzai 不需要FFMPEG ${yellow}"需要在适配器中操作" ${background}
-    echo -en ${cyan}回车继续${background};read
+    echo -en ${cyan}回车返回${background};read
+    return
 fi
 file="config/config/bot.yaml"
 if [ ! -e ${file} ];then
