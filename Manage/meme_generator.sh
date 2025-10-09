@@ -132,22 +132,55 @@ git_clone() {
   target_dir="$2"
   log_file="$3"
   
+  # 检查是否需要显示进度（如果log_file是/dev/null则显示进度）
+  show_progress=false
+  if [ "$log_file" = "/dev/null" ]; then
+    show_progress=true
+  fi
+  
   # 先尝试使用主镜像
-  if git clone ${GithubMirror_1}${repo_url} ${target_dir} >> ${log_file} 2>&1; then
-    return 0
+  if [ "$show_progress" = true ]; then
+    echo -e "${cyan}正在从主镜像克隆...${background}"
+    if git clone --progress ${GithubMirror_1}${repo_url} ${target_dir} 2>&1 | tee -a ${log_file}; then
+      return 0
+    fi
   else
-    echo -e "${yellow}主镜像访问失败，尝试使用备用镜像...${background}" >> ${log_file}
-    # 尝试使用备用镜像
+    if git clone ${GithubMirror_1}${repo_url} ${target_dir} >> ${log_file} 2>&1; then
+      return 0
+    fi
+  fi
+  
+  echo -e "${yellow}主镜像访问失败，尝试使用备用镜像...${background}"
+  [ "$show_progress" = false ] && echo -e "${yellow}主镜像访问失败，尝试使用备用镜像...${background}" >> ${log_file}
+  
+  # 尝试使用备用镜像
+  if [ "$show_progress" = true ]; then
+    echo -e "${cyan}正在从备用镜像克隆...${background}"
+    if git clone --progress ${GithubMirror_2}${repo_url} ${target_dir} 2>&1 | tee -a ${log_file}; then
+      return 0
+    fi
+  else
     if git clone ${GithubMirror_2}${repo_url} ${target_dir} >> ${log_file} 2>&1; then
       return 0
+    fi
+  fi
+  
+  # 都失败了，尝试直接访问
+  echo -e "${yellow}备用镜像也失败，尝试直接访问...${background}"
+  [ "$show_progress" = false ] && echo -e "${yellow}备用镜像也失败，尝试直接访问...${background}" >> ${log_file}
+  
+  if [ "$show_progress" = true ]; then
+    echo -e "${cyan}正在从GitHub直接克隆...${background}"
+    if git clone --progress ${repo_url} ${target_dir} 2>&1 | tee -a ${log_file}; then
+      return 0
     else
-      # 都失败了，尝试直接访问
-      echo -e "${yellow}备用镜像也失败，尝试直接访问...${background}" >> ${log_file}
-      if git clone ${repo_url} ${target_dir} >> ${log_file} 2>&1; then
-        return 0
-      else
-        return 1
-      fi
+      return 1
+    fi
+  else
+    if git clone ${repo_url} ${target_dir} >> ${log_file} 2>&1; then
+      return 0
+    else
+      return 1
     fi
   fi
 }
@@ -260,7 +293,7 @@ mkdir -p $HOME/.config/meme_generator
 cat > ${config} << EOF
 [meme]
 load_builtin_memes = true  # 是否加载内置表情包
-meme_dirs = ["${install_path}/meme-generator-contrib/memes", "${install_path}/meme_emoji/emoji"]  # 加载其他位置的表情包，填写文件夹路径
+meme_dirs = ["${install_path}/meme-generator-contrib/memes", "${install_path}/meme_emoji/emoji", "${install_path}/meme-generator-jj/memes", "${install_path}/meme_emoji_nsfw/emoji"]  # 加载其他位置的表情包，填写文件夹路径
 meme_disabled_list = []  # 禁用的表情包列表，填写表情的 \`key\`
 
 [resource]
@@ -308,6 +341,20 @@ fi
 echo -e ${green}下载额外图片meme_emoji...${background}
 if ! git_clone "https://github.com/anyliew/meme_emoji.git" "${install_path}/meme_emoji" "/dev/null"; then
   echo -e ${red}克隆meme_emoji仓库失败${background}
+  echo -e ${yellow}继续安装其他组件...${background}
+fi
+
+# 下载额外图片 - 3
+echo -e ${green}下载额外图片meme-generator-jj...${background}
+if ! git_clone "https://github.com/jinjiao007/meme-generator-jj.git" "${install_path}/meme-generator-jj" "/dev/null"; then
+  echo -e ${red}克隆meme-generator-jj仓库失败${background}
+  echo -e ${yellow}继续安装其他组件...${background}
+fi
+
+# 下载额外图片 - 4
+echo -e ${green}下载额外图片meme_emoji_nsfw...${background}
+if ! git_clone "https://github.com/anyliew/meme_emoji_nsfw.git" "${install_path}/meme_emoji_nsfw" "/dev/null"; then
+  echo -e ${red}克隆meme_emoji_nsfw仓库失败${background}
   echo -e ${yellow}继续安装其他组件...${background}
 fi
 
@@ -483,7 +530,7 @@ then
     tmux_kill_session meme_generator > /dev/null 2>&1
     pm2 delete meme_generator > /dev/null 2>&1
     PID=$(ps aux | grep "meme_generator.app" | sed '/grep/d' | awk '{print $2}')
-    if [ ! -z "${PID}" ];then
+    if [ -n "${PID}" ];then
         kill -9 ${PID}
     fi
     echo
@@ -508,6 +555,18 @@ fi
 echo -e ${yellow}正在更新meme_emoji...${background}
 if ! git_update "${install_path}/meme_emoji" "/dev/null"; then
   echo -e ${red}更新meme_emoji失败${background}
+  echo -e ${yellow}继续更新其他组件...${background}
+fi
+
+echo -e ${yellow}正在更新meme-generator-jj...${background}
+if ! git_update "${install_path}/meme-generator-jj" "/dev/null"; then
+  echo -e ${red}更新meme-generator-jj失败${background}
+  echo -e ${yellow}继续更新其他组件...${background}
+fi
+
+echo -e ${yellow}正在更新meme_emoji_nsfw...${background}
+if ! git_update "${install_path}/meme_emoji_nsfw" "/dev/null"; then
+  echo -e ${red}更新meme_emoji_nsfw失败${background}
   echo -e ${yellow}继续...${background}
 fi
 
@@ -530,7 +589,7 @@ echo -e ${yellow}正在停止meme生成器...${background}
 tmux_kill_session meme_generator > /dev/null 2>&1
 pm2 delete meme_generator > /dev/null 2>&1
 PID=$(ps aux | grep "meme_generator.app" | sed '/grep/d' | awk '{print $2}')
-if [ ! -z "${PID}" ];then
+if [ -n "${PID}" ];then
     kill -9 ${PID}
 fi
 
@@ -678,7 +737,7 @@ auto_update_meme_generator(){
       pm2 delete meme_generator > /dev/null 2>&1
     fi
     PID=$(ps aux | grep "meme_generator.app" | sed '/grep/d' | awk '{print $2}')
-    if [ ! -z "${PID}" ]; then
+    if [ -n "${PID}" ]; then
       kill -9 ${PID}
     fi
   fi
@@ -707,6 +766,18 @@ auto_update_meme_generator(){
   echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在更新meme_emoji...${background}" >> ${log_file}
   if ! git_update "${install_path}/meme_emoji" "${log_file}"; then
     echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] meme_emoji更新失败${background}" >> ${log_file}
+  fi
+
+  # 更新meme-generator-jj
+  echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在更新meme-generator-jj...${background}" >> ${log_file}
+  if ! git_update "${install_path}/meme-generator-jj" "${log_file}"; then
+    echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] meme-generator-jj更新失败${background}" >> ${log_file}
+  fi
+
+  # 更新meme_emoji_nsfw
+  echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在更新meme_emoji_nsfw...${background}" >> ${log_file}
+  if ! git_update "${install_path}/meme_emoji_nsfw" "${log_file}"; then
+    echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] meme_emoji_nsfw更新失败${background}" >> ${log_file}
   fi
 
   echo -e "${green}[$(date "+%Y-%m-%d %H:%M:%S")] 更新完成！${background}" >> ${log_file}
@@ -852,7 +923,7 @@ rewrite_config(){
         tmux_kill_session meme_generator > /dev/null 2>&1
         pm2 delete meme_generator > /dev/null 2>&1
         PID=$(ps aux | grep "meme_generator.app" | sed '/grep/d' | awk '{print $2}')
-        if [ ! -z "${PID}" ]; then
+        if [ -n "${PID}" ]; then
             kill -9 ${PID}
         fi
     fi
@@ -871,7 +942,7 @@ rewrite_config(){
     cat > ${config} << EOF
 [meme]
 load_builtin_memes = true  # 是否加载内置表情包
-meme_dirs = ["${install_path}/meme-generator-contrib/memes", "${install_path}/meme_emoji/emoji"]  # 加载其他位置的表情包，填写文件夹路径
+meme_dirs = ["${install_path}/meme-generator-contrib/memes", "${install_path}/meme_emoji/emoji", "${install_path}/meme-generator-jj/memes", "${install_path}/meme_emoji_nsfw/emoji"]  # 加载其他位置的表情包，填写文件夹路径
 meme_disabled_list = []  # 禁用的表情包列表，填写表情的 \`key\`
 
 [resource]
@@ -1119,7 +1190,7 @@ reinstall_pip_dependencies(){
         tmux_kill_session meme_generator > /dev/null 2>&1
         pm2 delete meme_generator > /dev/null 2>&1
         PID=$(ps aux | grep "meme_generator.app" | sed '/grep/d' | awk '{print $2}')
-        if [ ! -z "${PID}" ]; then
+        if [ -n "${PID}" ]; then
             kill -9 ${PID}
         fi
         sleep 2
@@ -1268,6 +1339,442 @@ EOF
     echo -en ${yellow}回车返回${background};read
 }
 
+# 开启/关闭额外meme仓库功能
+toggle_extra_memes(){
+    if [ ! -d ${install_path}/meme-generator ]; then
+        echo -e ${red}meme生成器未安装，请先安装meme生成器!${background}
+        echo -en ${yellow}回车返回${background};read
+        return
+    fi
+
+    echo -e ${white}"====="${green}额外meme仓库管理${white}"====="${background}
+    echo -e ${cyan}此功能可以开启或关闭额外的meme仓库${background}
+    echo "========================="
+    
+    # 检查四个额外仓库的状态
+    repo1_status="${red}[未安装]"
+    repo2_status="${red}[未安装]"
+    repo3_status="${red}[未安装]"
+    repo4_status="${red}[未安装]"
+    
+    if [ -d ${install_path}/meme-generator-contrib ]; then
+        repo1_status="${green}[已安装]"
+    fi
+    
+    if [ -d ${install_path}/meme_emoji ]; then
+        repo2_status="${green}[已安装]"
+    fi
+    
+    if [ -d ${install_path}/meme-generator-jj ]; then
+        repo3_status="${green}[已安装]"
+    fi
+    
+    if [ -d ${install_path}/meme_emoji_nsfw ]; then
+        repo4_status="${green}[已安装]"
+    fi
+    
+    # 检查配置文件中的启用状态
+    if [ -f ${config} ]; then
+        current_config=$(grep -E "meme_dirs" ${config})
+        
+        if echo "${current_config}" | grep -q "meme-generator-contrib/memes"; then
+            repo1_enabled="${green}[已启用]"
+        else
+            repo1_enabled="${yellow}[已禁用]"
+        fi
+        
+        if echo "${current_config}" | grep -q "meme_emoji/emoji"; then
+            repo2_enabled="${green}[已启用]"
+        else
+            repo2_enabled="${yellow}[已禁用]"
+        fi
+        
+        if echo "${current_config}" | grep -q "meme-generator-jj/memes"; then
+            repo3_enabled="${green}[已启用]"
+        else
+            repo3_enabled="${yellow}[已禁用]"
+        fi
+        
+        if echo "${current_config}" | grep -q "meme_emoji_nsfw/emoji"; then
+            repo4_enabled="${green}[已启用]"
+        else
+            repo4_enabled="${yellow}[已禁用]"
+        fi
+    fi
+    
+    echo -e ${green}1. meme-generator-contrib ${repo1_status} ${repo1_enabled}${background}
+    echo -e ${green}2. meme_emoji ${repo2_status} ${repo2_enabled}${background}
+    echo -e ${green}3. meme-generator-jj ${repo3_status} ${repo3_enabled}${background}
+    echo -e ${green}4. meme_emoji_nsfw ${repo4_status} ${repo4_enabled}${background}
+    echo -e ${green}5. 全部启用${background}
+    echo -e ${green}6. 全部禁用${background}
+    echo -e ${green}0. 返回${background}
+    echo "========================="
+    echo -en ${green}请选择要操作的仓库: ${background};read choice
+    
+    case ${choice} in
+    1)
+        toggle_single_repo "meme-generator-contrib" "memes" "https://github.com/MemeCrafters/meme-generator-contrib.git"
+        ;;
+    2)
+        toggle_single_repo "meme_emoji" "emoji" "https://github.com/anyliew/meme_emoji.git"
+        ;;
+    3)
+        toggle_single_repo "meme-generator-jj" "memes" "https://github.com/jinjiao007/meme-generator-jj.git"
+        ;;
+    4)
+        toggle_single_repo "meme_emoji_nsfw" "emoji" "https://github.com/anyliew/meme_emoji_nsfw.git"
+        ;;
+    5)
+        enable_all_repos
+        ;;
+    6)
+        disable_all_repos
+        ;;
+    0)
+        return
+        ;;
+    *)
+        echo -e ${red}输入错误${background}
+        echo -en ${yellow}回车返回${background};read
+        ;;
+    esac
+}
+
+# 切换单个仓库的启用状态
+toggle_single_repo(){
+    repo_name="$1"
+    repo_subdir="$2"
+    repo_url="$3"
+    repo_path="${install_path}/${repo_name}"
+    
+    # 如果仓库未安装，先安装
+    if [ ! -d ${repo_path} ]; then
+        echo -e ${yellow}检测到 ${repo_name} 未安装，正在安装...${background}
+        if git_clone "${repo_url}" "${repo_path}" "/dev/null"; then
+            echo -e ${green}${repo_name} 安装成功！${background}
+        else
+            echo -e ${red}${repo_name} 安装失败！${background}
+            echo -en ${yellow}回车返回${background};read
+            return
+        fi
+    fi
+    
+    # 读取当前配置
+    current_dirs=$(grep -E "meme_dirs" ${config} | sed 's/meme_dirs = \[//g' | sed 's/\].*//g')
+    repo_dir_path="${install_path}/${repo_name}/${repo_subdir}"
+    
+    # 检查是否已启用
+    if echo "${current_dirs}" | grep -q "${repo_dir_path}"; then
+        # 已启用，执行禁用操作
+        echo -e ${yellow}正在禁用 ${repo_name}...${background}
+        new_dirs=$(echo "${current_dirs}" | sed "s|, \"${repo_dir_path}\"|; s|\"${repo_dir_path}\", ||g; s|\"${repo_dir_path}\"||g")
+        sed -i "s|meme_dirs = \[.*\]|meme_dirs = [${new_dirs}]|g" ${config}
+        echo -e ${green}${repo_name} 已禁用${background}
+    else
+        # 未启用，执行启用操作
+        echo -e ${yellow}正在启用 ${repo_name}...${background}
+        if [ -z "${current_dirs}" ] || [ "${current_dirs}" = " " ]; then
+            new_dirs="\"${repo_dir_path}\""
+        else
+            new_dirs="${current_dirs}, \"${repo_dir_path}\""
+        fi
+        sed -i "s|meme_dirs = \[.*\]|meme_dirs = [${new_dirs}]|g" ${config}
+        echo -e ${green}${repo_name} 已启用${background}
+    fi
+    
+    # 询问是否重启服务
+    meme_was_running=false
+    if meme_curl; then
+        meme_was_running=true
+    fi
+    
+    if [ "$meme_was_running" = true ]; then
+        echo -en ${yellow}是否重启meme生成器以应用更改？[Y/n]: ${background};read restart_choice
+        case ${restart_choice} in
+        N|n)
+            echo -e ${yellow}请记得手动重启meme生成器以应用更改${background}
+            ;;
+        *)
+            restart_meme_generator
+            ;;
+        esac
+    else
+        echo -e ${yellow}配置已更新，下次启动时将生效${background}
+    fi
+    
+    echo -en ${yellow}回车返回${background};read
+}
+
+# 启用所有仓库
+enable_all_repos(){
+    echo -e ${yellow}正在启用所有额外meme仓库...${background}
+    
+    # 确保所有仓库都已安装
+    repos_to_install=(
+        "meme-generator-contrib:memes:https://github.com/MemeCrafters/meme-generator-contrib.git"
+        "meme_emoji:emoji:https://github.com/anyliew/meme_emoji.git"
+        "meme-generator-jj:memes:https://github.com/jinjiao007/meme-generator-jj.git"
+        "meme_emoji_nsfw:emoji:https://github.com/anyliew/meme_emoji_nsfw.git"
+    )
+    
+    for repo_info in "${repos_to_install[@]}"; do
+        IFS=':' read -r repo_name repo_subdir repo_url <<< "$repo_info"
+        repo_path="${install_path}/${repo_name}"
+        
+        if [ ! -d ${repo_path} ]; then
+            echo -e ${yellow}正在安装 ${repo_name}...${background}
+            if git_clone "${repo_url}" "${repo_path}" "/dev/null"; then
+                echo -e ${green}${repo_name} 安装成功！${background}
+            else
+                echo -e ${red}${repo_name} 安装失败！${background}
+            fi
+        fi
+    done
+    
+    # 更新配置文件，启用所有仓库
+    new_dirs="\"${install_path}/meme-generator-contrib/memes\", \"${install_path}/meme_emoji/emoji\", \"${install_path}/meme-generator-jj/memes\", \"${install_path}/meme_emoji_nsfw/emoji\""
+    sed -i "s|meme_dirs = \[.*\]|meme_dirs = [${new_dirs}]|g" ${config}
+    
+    echo -e ${green}所有额外meme仓库已启用！${background}
+    
+    # 询问是否重启服务
+    if meme_curl; then
+        echo -en ${yellow}是否重启meme生成器以应用更改？[Y/n]: ${background};read restart_choice
+        case ${restart_choice} in
+        N|n)
+            echo -e ${yellow}请记得手动重启meme生成器以应用更改${background}
+            ;;
+        *)
+            restart_meme_generator
+            ;;
+        esac
+    else
+        echo -e ${yellow}配置已更新，下次启动时将生效${background}
+    fi
+    
+    echo -en ${yellow}回车返回${background};read
+}
+
+# 禁用所有仓库
+disable_all_repos(){
+    echo -e ${yellow}正在禁用所有额外meme仓库...${background}
+    
+    # 清空meme_dirs配置
+    sed -i "s|meme_dirs = \[.*\]|meme_dirs = []|g" ${config}
+    
+    echo -e ${green}所有额外meme仓库已禁用！${background}
+    echo -e ${cyan}注意：仓库文件仍保留在系统中，仅禁用了加载${background}
+    
+    # 询问是否重启服务
+    if meme_curl; then
+        echo -en ${yellow}是否重启meme生成器以应用更改？[Y/n]: ${background};read restart_choice
+        case ${restart_choice} in
+        N|n)
+            echo -e ${yellow}请记得手动重启meme生成器以应用更改${background}
+            ;;
+        *)
+            restart_meme_generator
+            ;;
+        esac
+    else
+        echo -e ${yellow}配置已更新，下次启动时将生效${background}
+    fi
+    
+    echo -en ${yellow}回车返回${background};read
+}
+
+# 配置百度翻译API
+configure_baidu_translate(){
+    if [ ! -d ${install_path}/meme-generator ]; then
+        echo -e ${red}meme生成器未安装，请先安装meme生成器!${background}
+        echo -en ${yellow}回车返回${background};read
+        return
+    fi
+
+    if [ ! -f ${config} ]; then
+        echo -e ${red}配置文件不存在!${background}
+        echo -en ${yellow}回车返回${background};read
+        return
+    fi
+
+    echo -e ${white}"====="${green}配置百度翻译API${white}"====="${background}
+    echo -e ${cyan}百度翻译API用于某些表情包的文字翻译功能${background}
+    echo -e ${cyan}例如: dianzhongdian 表情包需要使用百度翻译${background}
+    echo "========================="
+    
+    # 读取当前配置
+    current_appid=$(grep -E "baidu_trans_appid" ${config} | sed 's/.*"\(.*\)".*/\1/')
+    current_apikey=$(grep -E "baidu_trans_apikey" ${config} | sed 's/.*"\(.*\)".*/\1/')
+    
+    if [ -n "$current_appid" ] && [ "$current_appid" != "" ]; then
+        echo -e ${yellow}当前已配置的APP ID: ${green}${current_appid}${background}
+    else
+        echo -e ${yellow}当前APP ID: ${red}未配置${background}
+    fi
+    
+    if [ -n "$current_apikey" ] && [ "$current_apikey" != "" ]; then
+        echo -e ${yellow}当前已配置的API Key: ${green}${current_apikey:0:8}...${background}
+    else
+        echo -e ${yellow}当前API Key: ${red}未配置${background}
+    fi
+    
+    echo "========================="
+    echo -e ${cyan}获取百度翻译API:${background}
+    echo -e ${cyan}1. 访问: ${white}http://api.fanyi.baidu.com${background}
+    echo -e ${cyan}2. 注册/登录百度账号${background}
+    echo -e ${cyan}3. 进入"管理控制台"${background}
+    echo -e ${cyan}4. 选择"通用文本翻译"${background}
+    echo -e ${cyan}5. 创建应用，获取APP ID和密钥${background}
+    echo "========================="
+    
+    echo -e ${green}1.${cyan} 配置百度翻译API${background}
+    echo -e ${green}2.${cyan} 清除当前配置${background}
+    echo -e ${green}3.${cyan} 测试API连接${background}
+    echo -e ${green}0.${cyan} 返回${background}
+    echo "========================="
+    echo -en ${green}请选择操作: ${background};read choice
+    
+    case ${choice} in
+    1)
+        # 配置API
+        echo -e ${yellow}请输入百度翻译APP ID:${background}
+        read -p "APP ID: " new_appid
+        
+        if [ -z "$new_appid" ]; then
+            echo -e ${red}APP ID不能为空！${background}
+            echo -en ${yellow}回车返回${background};read
+            return
+        fi
+        
+        echo -e ${yellow}请输入百度翻译API Key \(密钥\):${background}
+        read -p "API Key: " new_apikey
+        
+        if [ -z "$new_apikey" ]; then
+            echo -e ${red}API Key不能为空！${background}
+            echo -en ${yellow}回车返回${background};read
+            return
+        fi
+        
+        # 更新配置文件
+        echo -e ${yellow}正在更新配置文件...${background}
+        sed -i "s/baidu_trans_appid = \".*\"/baidu_trans_appid = \"${new_appid}\"/" ${config}
+        sed -i "s/baidu_trans_apikey = \".*\"/baidu_trans_apikey = \"${new_apikey}\"/" ${config}
+        
+        echo -e ${green}✓ 百度翻译API配置成功！${background}
+        echo -e ${cyan}APP ID: ${new_appid}${background}
+        echo -e ${cyan}API Key: ${new_apikey:0:8}...${background}
+        
+        # 询问是否重启服务
+        if meme_curl; then
+            echo -en ${yellow}检测到meme生成器正在运行，是否重启以应用配置？[Y/n]: ${background};read restart_choice
+            case ${restart_choice} in
+            N|n)
+                echo -e ${yellow}请记得手动重启meme生成器以应用新配置${background}
+                ;;
+            *)
+                restart_meme_generator
+                ;;
+            esac
+        else
+            echo -e ${yellow}配置已保存，下次启动时将生效${background}
+        fi
+        ;;
+    2)
+        # 清除配置
+        echo -en ${yellow}确定要清除百度翻译API配置吗？[y/N]: ${background};read confirm
+        case ${confirm} in
+        Y|y)
+            sed -i 's/baidu_trans_appid = ".*"/baidu_trans_appid = ""/' ${config}
+            sed -i 's/baidu_trans_apikey = ".*"/baidu_trans_apikey = ""/' ${config}
+            echo -e ${green}✓ 百度翻译API配置已清除${background}
+            
+            # 询问是否重启服务
+            if meme_curl; then
+                echo -en ${yellow}是否重启meme生成器以应用更改？[Y/n]: ${background};read restart_choice
+                case ${restart_choice} in
+                N|n)
+                    echo -e ${yellow}请记得手动重启meme生成器${background}
+                    ;;
+                *)
+                    restart_meme_generator
+                    ;;
+                esac
+            fi
+            ;;
+        *)
+            echo -e ${yellow}已取消操作${background}
+            ;;
+        esac
+        ;;
+    3)
+        # 测试API
+        if [ -z "$current_appid" ] || [ -z "$current_apikey" ]; then
+            echo -e ${red}尚未配置百度翻译API，无法测试！${background}
+            echo -en ${yellow}回车返回${background};read
+            return
+        fi
+        
+        echo -e ${yellow}正在测试百度翻译API连接...${background}
+        
+        # 测试翻译
+        test_text="hello"
+        timestamp=$(date +%s)
+        salt=$RANDOM
+        sign=$(echo -n "${current_appid}${test_text}${salt}${current_apikey}" | md5sum | cut -d' ' -f1)
+        
+        response=$(curl -s "http://api.fanyi.baidu.com/api/trans/vip/translate?q=${test_text}&from=en&to=zh&appid=${current_appid}&salt=${salt}&sign=${sign}")
+        
+        if echo "$response" | grep -q "trans_result"; then
+            echo -e ${green}✓ API连接测试成功！${background}
+            echo -e ${cyan}测试翻译: hello → $(echo "$response" | grep -o '"dst":"[^"]*"' | sed 's/"dst":"\(.*\)"/\1/')${background}
+        else
+            echo -e ${red}✗ API连接测试失败${background}
+            if echo "$response" | grep -q "error_code"; then
+                error_code=$(echo "$response" | grep -o '"error_code":"[^"]*"' | sed 's/"error_code":"\(.*\)"/\1/')
+                echo -e ${red}错误代码: ${error_code}${background}
+                case ${error_code} in
+                52001)
+                    echo -e ${yellow}原因: 请求超时，请检查网络连接${background}
+                    ;;
+                52002)
+                    echo -e ${yellow}原因: 系统错误，请稍后重试${background}
+                    ;;
+                52003)
+                    echo -e ${yellow}原因: APP ID或API Key错误${background}
+                    ;;
+                54000)
+                    echo -e ${yellow}原因: 必填参数为空${background}
+                    ;;
+                54001)
+                    echo -e ${yellow}原因: 签名错误，请检查APP ID和API Key${background}
+                    ;;
+                54003)
+                    echo -e ${yellow}原因: 访问频率受限${background}
+                    ;;
+                54004)
+                    echo -e ${yellow}原因: 账户余额不足${background}
+                    ;;
+                *)
+                    echo -e ${yellow}详细信息: ${response}${background}
+                    ;;
+                esac
+            else
+                echo -e ${yellow}响应: ${response}${background}
+            fi
+        fi
+        ;;
+    0)
+        return
+        ;;
+    *)
+        echo -e ${red}输入错误${background}
+        ;;
+    esac
+    
+    echo -en ${yellow}回车返回${background};read
+}
+
 main(){
 # 如果是首次通过curl执行，确保先保存脚本到系统目录
 if [[ "$0" == *"/dev/fd/"* || "$0" == "bash" ]]; then
@@ -1299,13 +1806,15 @@ echo -e  ${green} 3.  ${cyan}关闭meme生成器${background}
 echo -e  ${green} 4.  ${cyan}重启meme生成器${background}
 echo -e  ${green} 5.  ${cyan}更新meme生成器${background}
 echo -e  ${green} 6.  ${cyan}卸载meme生成器${background}
-echo -e  ${green} 7.  ${cyan}meme生成器日志${background}
-echo -e  ${green} 8.  ${cyan}切换自动更新设置${background}
-echo -e  ${green} 9.  ${cyan}查看自动更新服务${background}
-echo -e  ${green} 10.  ${cyan}修改meme端口号${background}
-echo -e  ${green} 11.  ${cyan}重写配置文件${background}
-echo -e  ${green} 12.  ${cyan}更换Github代理${background}
-echo -e  ${green} 13.  ${cyan}重新安装依赖${background}
+echo -e  ${green} 7.  ${cyan}启用额外meme表情包${background}
+echo -e  ${green} 8.  ${cyan}查看日志${background}
+echo -e  ${green} 9.  ${cyan}切换自动更新设置${background}
+echo -e  ${green} 10.  ${cyan}查看自动更新日志${background}
+echo -e  ${green} 11.  ${cyan}修改meme端口号${background}
+echo -e  ${green} 12.  ${cyan}重写配置文件${background}
+echo -e  ${green} 13.  ${cyan}更换Github代理${background}
+echo -e  ${green} 14.  ${cyan}重新安装依赖${background}
+echo -e  ${green} 15.  ${cyan}配置百度翻译API${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}meme生成器状态: ${condition}${background}
@@ -1343,31 +1852,39 @@ echo
 uninstall_meme_generator
 ;;
 7)
-log_meme_generator
+echo
+toggle_extra_memes
 ;;
 8)
-echo
-toggle_auto_update
+log_meme_generator
 ;;
 9)
 echo
-view_auto_update_log
+toggle_auto_update
 ;;
 10)
 echo
-change_port
+view_auto_update_log
 ;;
 11)
 echo
-rewrite_config
+change_port
 ;;
 12)
 echo
-change_github_proxy
+rewrite_config
 ;;
 13)
 echo
+change_github_proxy
+;;
+14)
+echo
 reinstall_pip_dependencies
+;;
+15)
+echo
+configure_baidu_translate
 ;;
 0)
 exit
