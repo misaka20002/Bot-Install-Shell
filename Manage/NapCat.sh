@@ -75,7 +75,7 @@ install_NapCat() {
             Y|y|"")
                 if check_running; then
                     echo -e ${yellow}更新前需要停止${APP_NAME}${background}
-                    stop_NapCat > /dev/null 2>&1
+                    stop_NapCat silent
                 fi
                 ;;
             *)
@@ -381,16 +381,66 @@ start_NapCat() {
     esac
 }
 
+# 停止所有运行中的实例（内部函数）
+stop_all_instances() {
+    local has_stopped=false
+    
+    # 停止主实例（如果存在）
+    if check_running; then
+        echo -e ${yellow}正在停止主实例...${background}
+        tmux send-keys -t ${TMUX_NAME} "Boolean=false" C-m
+        sleep 1
+        tmux kill-session -t ${TMUX_NAME}
+        has_stopped=true
+    fi
+    
+    # 停止所有QQ号实例
+    for session in $(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}_" | cut -d: -f1); do
+        qq_number=${session#${TMUX_NAME}_}
+        echo -e ${yellow}正在停止QQ号 ${cyan}${qq_number}${yellow}...${background}
+        tmux send-keys -t ${session} "Boolean=false" C-m
+        sleep 1
+        tmux kill-session -t ${session}
+        has_stopped=true
+    done
+    
+    if $has_stopped; then
+        echo -e ${green}已停止所有QQ实例${background}
+        return 0
+    else
+        echo -e ${yellow}没有运行中的实例${background}
+        return 1
+    fi
+}
+
 # 停止 NapCat
 stop_NapCat() {
-    # 如果提供了QQ号作为参数，只停止该QQ号
+    # 第一个参数：QQ号（可选）
+    # 第二个参数：静默模式（可选，值为"silent"时不等待用户输入）
+    local silent_mode=""
+    local specific_qq=""
+    
+    # 解析参数
     if [ -n "$1" ]; then
-        specific_qq="$1"
+        if [ "$1" = "silent" ]; then
+            silent_mode="silent"
+        else
+            specific_qq="$1"
+            if [ "$2" = "silent" ]; then
+                silent_mode="silent"
+            fi
+        fi
+    fi
+    
+    # 如果提供了QQ号作为参数，只停止该QQ号
+    if [ -n "$specific_qq" ]; then
         session_name="${TMUX_NAME}_${specific_qq}"
         
         if ! tmux list-sessions 2>/dev/null | grep -q ${session_name}; then
             echo -e ${yellow}QQ号 ${cyan}${specific_qq}${yellow} 未在运行${background}
-            echo -en ${cyan}回车返回${background};read
+            if [ "$silent_mode" != "silent" ]; then
+                echo -en ${cyan}回车返回${background};read
+            fi
             return 0
         fi
         
@@ -415,7 +465,9 @@ stop_NapCat() {
             fi
         fi
         
-        echo -en ${cyan}回车返回${background};read
+        if [ "$silent_mode" != "silent" ]; then
+            echo -en ${cyan}回车返回${background};read
+        fi
         return 0
     fi
     
@@ -424,30 +476,33 @@ stop_NapCat() {
         # 检查是否有任何QQ实例在运行
         if ! list_running_instances >/dev/null; then
             echo -e ${yellow}${APP_NAME}未运行${background}
-            echo -en ${cyan}回车返回${background};read
+            if [ "$silent_mode" != "silent" ]; then
+                echo -en ${cyan}回车返回${background};read
+            fi
             return 0
         else
             # 如果有QQ实例在运行，显示停止所有实例的选项
             echo -e ${yellow}发现以下QQ实例正在运行:${background}
             list_running_instances
+            
+            # 静默模式下直接停止所有实例
+            if [ "$silent_mode" = "silent" ]; then
+                stop_all_instances
+                return 0
+            fi
+            
             echo -en ${yellow}是否停止所有QQ实例? [y/N]${background};read stop_all
             case ${stop_all} in
                 Y|y)
-                    # 停止所有QQ实例
-                    for session in $(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}_" | cut -d: -f1); do
-                        qq_number=${session#${TMUX_NAME}_}
-                        echo -e ${yellow}正在停止QQ号 ${cyan}${qq_number}${yellow}...${background}
-                        tmux send-keys -t ${session} "Boolean=false" C-m
-                        sleep 1
-                        tmux kill-session -t ${session}
-                    done
-                    echo -e ${green}已停止所有QQ实例${background}
+                    stop_all_instances
                     ;;
                 *)
                     echo -e ${yellow}操作已取消${background}
                     ;;
             esac
-            echo -en ${cyan}回车返回${background};read
+            if [ "$silent_mode" != "silent" ]; then
+                echo -en ${cyan}回车返回${background};read
+            fi
             return 0
         fi
     fi
@@ -473,7 +528,9 @@ stop_NapCat() {
         fi
     fi
     
-    echo -en ${cyan}回车返回${background};read
+    if [ "$silent_mode" != "silent" ]; then
+        echo -en ${cyan}回车返回${background};read
+    fi
 }
 
 # 检查特定QQ号是否在运行
@@ -527,22 +584,7 @@ uninstall_NapCat() {
         Y|y)
             # 停止所有运行中的实例
             echo -e ${yellow}正在停止所有运行中的${APP_NAME}实例...${background}
-            
-            # 停止主实例（如果存在）
-            if check_running; then
-                tmux send-keys -t ${TMUX_NAME} "Boolean=false" C-m
-                sleep 1
-                tmux kill-session -t ${TMUX_NAME}
-            fi
-            
-            # 停止所有QQ号实例
-            for session in $(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}_" | cut -d: -f1); do
-                qq_number=${session#${TMUX_NAME}_}
-                echo -e ${yellow}正在停止QQ号 ${cyan}${qq_number}${yellow}...${background}
-                tmux send-keys -t ${session} "Boolean=false" C-m
-                sleep 1
-                tmux kill-session -t ${session}
-            done
+            stop_all_instances
             
             echo -e ${yellow}正在卸载${APP_NAME}...${background}
             
@@ -2434,25 +2476,7 @@ manage_multi_instances() {
                 echo -e ${yellow}是否确认停止所有QQ实例? [y/N]${background};read confirm
                 
                 if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                    echo -e ${yellow}正在停止所有QQ实例...${background}
-                    
-                    # 停止主实例（如果存在）
-                    if check_running; then
-                        tmux send-keys -t ${TMUX_NAME} "Boolean=false" C-m
-                        sleep 1
-                        tmux kill-session -t ${TMUX_NAME}
-                    fi
-                    
-                    # 停止所有QQ号实例
-                    for session in $(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}_" | cut -d: -f1); do
-                        qq_number=${session#${TMUX_NAME}_}
-                        echo -e ${yellow}正在停止QQ号 ${cyan}${qq_number}${yellow}...${background}
-                        tmux send-keys -t ${session} "Boolean=false" C-m
-                        sleep 1
-                        tmux kill-session -t ${session}
-                    done
-                    
-                    echo -e ${green}已停止所有QQ实例${background}
+                    stop_all_instances
                 else
                     echo -e ${yellow}操作已取消${background}
                 fi
