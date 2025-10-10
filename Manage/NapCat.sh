@@ -179,8 +179,8 @@ start_NapCat() {
     
     echo -e ${yellow}正在准备启动${APP_NAME}...${background}
     
-    # 如果指定了QQ号且为自动后台启动（重启场景），直接使用该QQ号
-    if [ -n "$specific_qq" ] && [ "$auto_background" = "true" ]; then
+    # 如果指定了QQ号（启动指定QQ号或重启场景），直接使用该QQ号
+    if [ -n "$specific_qq" ]; then
         # 检查配置目录是否存在
         CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
         if [ ! -d "$CONFIG_DIR" ]; then
@@ -201,7 +201,7 @@ start_NapCat() {
             return 1
         fi
     else
-        # 选择登录方式
+        # 没有指定QQ号时，选择登录方式
         echo -e ${cyan}请选择登录方式${background}
         echo -e ${green}1.  ${cyan}全新登录（直接启动）${background}
         echo -e ${green}2.  ${cyan}使用已登录的QQ账号${background}
@@ -313,10 +313,14 @@ start_NapCat() {
     fi
     
     # 选择启动方式
-    if [ "$auto_background" = "true" ]; then
-        # 自动选择后台启动（用于重启功能）
+    if [ "$auto_background" = "true" ] || [ -n "$specific_qq" ]; then
+        # 自动选择后台启动（用于重启功能或启动指定QQ号）
         start_option=2
-        echo -e ${yellow}自动选择后台启动模式${background}
+        if [ "$auto_background" = "true" ]; then
+            echo -e ${yellow}自动选择后台启动模式（重启）${background}
+        else
+            echo -e ${yellow}自动选择后台启动模式${background}
+        fi
     else
         echo -e ${cyan}请选择启动方式${background}
         echo -e ${green}1.  ${cyan}前台启动（首次登录）${background}
@@ -359,7 +363,7 @@ start_NapCat() {
                         tmux attach-session -t ${session_name}
                         ;;
                     *)
-                        echo -e ${green}您可以稍后通过 '查看日志' 选项进入${APP_NAME}界面${background}
+                        echo -e ${green}您可以稍后通过 查看指定QQ实例日志 选项进入${APP_NAME}界面${background}
                         ;;
                 esac
             else
