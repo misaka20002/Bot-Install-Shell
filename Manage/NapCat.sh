@@ -68,6 +68,24 @@ check_tmux() {
 
 # 安装 NapCat
 install_NapCat() {
+    if check_installed; then
+        echo -e ${yellow}已安装 ${APP_NAME} 将重新运行安装脚本以获取最新版本${background}
+        echo -en ${cyan}是否继续? [Y/n]${background};read yn
+        case ${yn} in
+            Y|y|"")
+                if check_running; then
+                    echo -e ${yellow}更新前需要停止${APP_NAME}${background}
+                    stop_NapCat > /dev/null 2>&1
+                fi
+                ;;
+            *)
+                echo -e ${yellow}已取消更新${background}
+                echo -en ${cyan}回车返回${background}
+                return;read
+                ;;
+        esac
+    fi
+
     echo -e ${yellow}正在安装${APP_NAME}...${background}
     
     # 检查必要的工具
@@ -2245,38 +2263,6 @@ configure_music_sign() {
     done
 }
 
-# 检查更新（如果有 NapCat 更新机制的话）
-check_update() {
-    echo -e ${yellow}正在检查${APP_NAME}更新...${background}
-    
-    # 因为不知道 NapCat 的具体更新方式，这里只是简单地重新运行安装脚本
-    echo -e ${yellow}将重新运行安装脚本以获取最新版本${background}
-    echo -en ${cyan}是否继续? [Y/n]${background};read yn
-    case ${yn} in
-        Y|y|"")
-            if check_running; then
-                echo -e ${yellow}更新前需要停止${APP_NAME}${background}
-                stop_NapCat > /dev/null 2>&1
-            fi
-            
-            curl -o ${INSTALL_SCRIPT} ${INSTALL_URL} && bash ${INSTALL_SCRIPT}
-            rm -f ${INSTALL_SCRIPT}
-            
-            echo -e ${green}${APP_NAME}更新完成${background}
-            echo -en ${yellow}是否重新启动${APP_NAME}? [Y/n]${background};read restart_yn
-            case ${restart_yn} in
-                Y|y|"")
-                    start_NapCat
-                    ;;
-            esac
-            ;;
-        *)
-            echo -e ${yellow}已取消更新${background}
-            echo -en ${cyan}回车返回${background};read
-            ;;
-    esac
-}
-
 # 管理多开实例
 manage_multi_instances() {
     while true; do
@@ -2634,13 +2620,12 @@ main() {
     fi
 
     echo -e ${white}"====="${green}呆毛版-${APP_NAME}管理${white}"====="${background}
-    echo -e ${green}1. ${cyan}安装${APP_NAME}${background}
-    echo -e ${green}2. ${cyan}更新${APP_NAME}${background}
-    echo -e ${green}3. ${cyan}卸载${APP_NAME}${background}
-    echo -e ${green}4. ${cyan}WebUI 配置${background}
-    echo -e ${green}5. ${cyan}配置WebSocket接口${background}
-    echo -e ${green}6. ${cyan}音乐签名配置${background}
-    echo -e ${green}7. ${cyan}启动/多开QQ管理${background}
+    echo -e ${green}1. ${cyan}安装/更新${APP_NAME}${background}
+    echo -e ${green}2. ${cyan}卸载${APP_NAME}${background}
+    echo -e ${green}3. ${cyan}WebUI 配置${background}
+    echo -e ${green}4. ${cyan}配置WebSocket接口${background}
+    echo -e ${green}5. ${cyan}音乐签名配置${background}
+    echo -e ${green}6. ${cyan}启动/多开QQ管理${background}
     echo -e ${green}0. ${cyan}退出${background}
     echo "========================="
     echo -e ${green}${APP_NAME}状态: ${condition}${background}
@@ -2664,25 +2649,21 @@ main() {
             ;;
         2)
             echo
-            check_update
+            uninstall_NapCat
             ;;
         3)
             echo
-            uninstall_NapCat
+            manage_webui_config
             ;;
         4)
             echo
-            manage_webui_config
+            configure_ws
             ;;
         5)
             echo
-            configure_ws
-            ;;
-        6)
-            echo
             configure_music_sign
             ;;
-        7)
+        6)
             echo
             manage_multi_instances
             ;;
