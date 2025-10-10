@@ -160,21 +160,6 @@ start_NapCat() {
         return 0
     fi
     
-    if [ -n "$1" ]; then
-        # 如果提供了QQ号作为参数，检查该QQ号是否已在运行
-        specific_qq="$1"
-        if is_qq_running "$specific_qq"; then
-            echo -e ${yellow}QQ号 ${cyan}${specific_qq}${yellow} 已经在运行中${background}
-            echo -en ${cyan}回车返回${background};read
-            return 0
-        fi
-        echo -e ${yellow}正在准备启动QQ号: ${cyan}${specific_qq}${background}
-    elif check_running; then
-        echo -e ${yellow}${APP_NAME}已经在运行中${background}
-        echo -en ${cyan}回车返回${background};read
-        return 0
-    fi
-    
     check_tmux
     
     echo -e ${yellow}正在准备启动${APP_NAME}...${background}
