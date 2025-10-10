@@ -40,7 +40,8 @@ esac
 INSTALL_SCRIPT="napcat.sh"
 INSTALL_URL="https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh"
 TMUX_NAME="napcat"
-NAPCAT_CMD="xvfb-run -a qq --no-sandbox"
+NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox"
+NAPCAT_PATH="/root/Napcat/opt/QQ/qq"
 APP_NAME="NapCat"
 
 # 检查 tmux 是否安装
@@ -103,6 +104,9 @@ install_NapCat() {
     rm -f ${INSTALL_SCRIPT}
     
     echo -e ${green}${APP_NAME}安装完成${background}
+    echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}配置WebSocket接口-管理WebSocket Token${background}
+    echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}配置WebSocket接口-管理WebSocket Token${background}
+    echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}配置WebSocket接口-管理WebSocket Token${background}
     echo -en ${yellow}是否启动${APP_NAME}? [Y/n]${background};read yn
     case ${yn} in
     Y|y)
@@ -113,7 +117,7 @@ install_NapCat() {
 
 # 检查 NapCat 是否已安装
 check_installed() {
-    if ! command -v qq &> /dev/null; then
+    if [ ! -f "$NAPCAT_PATH" ]; then
         return 1
     fi
     return 0
@@ -137,6 +141,8 @@ start_NapCat() {
     
     # 第二个参数为force_start，如果为true则强制启动新实例
     force_start=${2:-false}
+    # 第三个参数为auto_background，如果为true则自动选择后台启动
+    auto_background=${3:-false}
     
     if [ -n "$1" ]; then
         # 如果提供了QQ号作为参数，检查该QQ号是否已在运行
@@ -184,7 +190,7 @@ start_NapCat() {
         2)
             # 使用已登录的QQ账号
             # 检查配置目录是否存在
-            CONFIG_DIR="/opt/QQ/resources/app/app_launcher/napcat/config"
+            CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
             if [ ! -d "$CONFIG_DIR" ]; then
                 echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
                 echo -e ${yellow}请先使用全新登录方式登录QQ账号${background}
@@ -234,10 +240,10 @@ start_NapCat() {
                     return 1
                 fi
                 
-                # 如果只有一个匹配项且提供了特定QQ号，自动选择该QQ号
+                # 如果只有一个匹配项且提供了特定QQ号,自动选择该QQ号
                 if [ ${#qq_numbers[@]} -eq 1 ] && [ -n "$specific_qq" ]; then
                     selected_qq=${qq_numbers[0]}
-                    NAPCAT_CMD="xvfb-run -a qq --no-sandbox -q ${selected_qq}"
+                    NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox -q ${selected_qq}"
                     echo -e ${yellow}已自动选择QQ账号: ${cyan}${selected_qq}${background}
                     sleep 1
                 else
@@ -255,7 +261,7 @@ start_NapCat() {
                         return 1
                     else
                         selected_qq=${qq_numbers[$((choice-1))]}
-                        NAPCAT_CMD="xvfb-run -a qq --no-sandbox -q ${selected_qq}"
+                        NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox -q ${selected_qq}"
                         echo -e ${yellow}已选择QQ账号: ${cyan}${selected_qq}${background}
                         sleep 1
                     fi
@@ -270,7 +276,7 @@ start_NapCat() {
     
     # 如果选择了全新登录或从其他选项回退到全新登录
     if [ "$login_option" = "1" ]; then
-        NAPCAT_CMD="xvfb-run -a qq --no-sandbox"
+        NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox"
     fi
     
     # 如果已经选择或指定了QQ账号，为该QQ号设置唯一的tmux会话名
@@ -281,11 +287,17 @@ start_NapCat() {
     fi
     
     # 选择启动方式
-    echo -e ${cyan}请选择启动方式${background}
-    echo -e ${green}1.  ${cyan}前台启动（首次登录）${background}
-    echo -e ${green}2.  ${cyan}后台启动（推荐）${background}
-    echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read start_option
+    if [ "$auto_background" = "true" ]; then
+        # 自动选择后台启动（用于重启功能）
+        start_option=2
+        echo -e ${yellow}自动选择后台启动模式${background}
+    else
+        echo -e ${cyan}请选择启动方式${background}
+        echo -e ${green}1.  ${cyan}前台启动（首次登录）${background}
+        echo -e ${green}2.  ${cyan}后台启动（推荐）${background}
+        echo "========================="
+        echo -en ${green}请输入您的选项: ${background};read start_option
+    fi
     
     case ${start_option} in
         1)
@@ -431,18 +443,6 @@ stop_NapCat() {
     echo -en ${cyan}回车返回${background};read
 }
 
-# 重启 NapCat
-restart_NapCat() {
-    if check_running; then
-        echo -e ${yellow}正在重启${APP_NAME}...${background}
-        stop_NapCat
-        start_NapCat
-    else
-        echo -e ${yellow}${APP_NAME}未运行，正在启动...${background}
-        start_NapCat
-    fi
-}
-
 # 检查特定QQ号是否在运行
 is_qq_running() {
     local qq_number="$1"
@@ -485,93 +485,6 @@ list_running_instances() {
     else
         return 1
     fi
-}
-
-# 查看 NapCat 日志/界面
-view_log() {
-    if ! check_running && ! list_running_instances >/dev/null; then
-        echo -e ${yellow}${APP_NAME}未运行，无法查看日志${background}
-        echo -en ${cyan}回车返回${background};read
-        return 1
-    fi
-    
-    # 如果有多个实例，让用户选择
-    if list_running_instances >/dev/null; then
-        # 显示QQ实例列表
-        echo -e ${yellow}当前运行的QQ实例:${background}
-        list_running_instances
-        
-        # 创建会话名数组
-        declare -a sessions
-        declare -a display_names
-        
-        # 填充数组
-        i=0
-        while read -r line; do
-            if [[ "$line" =~ QQ号:\ ([0-9]+).*会话:\ (${TMUX_NAME}_[0-9]+) ]]; then
-                qq_number="${BASH_REMATCH[1]}"
-                session="${BASH_REMATCH[2]}"
-                sessions+=("$session")
-                display_names+=("QQ号: $qq_number")
-                i=$((i+1))
-            elif [[ "$line" =~ 主实例.*会话:\ (${TMUX_NAME}) ]]; then
-                session="${BASH_REMATCH[1]}"
-                sessions+=("$session")
-                display_names+=("主实例")
-                i=$((i+1))
-            fi
-        done < <(list_running_instances)
-        
-        # 如果只有一个实例，直接连接
-        if [ ${#sessions[@]} -eq 1 ]; then
-            echo -e ${yellow}正在连接到唯一的实例: ${cyan}${display_names[0]}${background}
-            echo -e ${cyan}提示: 退出请按 Ctrl+B 然后按 D${background}
-            echo -en ${cyan}按回车键继续${background};read
-            sleep 1
-            
-            tmux attach-session -t ${sessions[0]}
-            return 0
-        fi
-        
-        # 打印选项
-        echo -e ${yellow}请选择要查看的实例:${background}
-        for ((j=0; j<${#sessions[@]}; j++)); do
-            echo -e ${green}$((j+1)). ${cyan}${display_names[$j]}${background}
-        done
-        
-        echo -e ${green}0. ${cyan}返回${background}
-        echo
-        
-        # 让用户选择要查看的实例
-        echo -en ${yellow}请选择要查看的实例编号: ${background};read choice
-        
-        if [ "$choice" = "0" ]; then
-            return 0
-        fi
-        
-        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#sessions[@]} ]; then
-            echo -e ${red}无效的选择${background}
-            echo -en ${cyan}回车返回${background};read
-            return 1
-        fi
-        
-        selected_session=${sessions[$((choice-1))]}
-        
-        echo -e ${yellow}正在连接到 ${cyan}${display_names[$((choice-1))]}${yellow} 的界面...${background}
-        echo -e ${cyan}提示: 退出请按 Ctrl+B 然后按 D${background}
-        echo -en ${cyan}按回车键继续${background};read
-        sleep 1
-        
-        tmux attach-session -t $selected_session
-        return 0
-    fi
-    
-    # 默认连接到主实例
-    echo -e ${yellow}正在连接到${APP_NAME}界面...${background}
-    echo -e ${cyan}提示: 退出请按 Ctrl+B 然后按 D${background}
-    sleep 1
-    
-    tmux attach-session -t ${TMUX_NAME}
 }
 
 # 卸载 NapCat
@@ -623,7 +536,8 @@ uninstall_NapCat() {
             # 彻底删除所有相关目录和文件
             echo -e ${yellow}正在删除所有QQ相关文件和数据...${background}
             
-            # 删除NapCat和QQ主目录
+            # 删除NapCat和QQ主目录（新版和旧版）
+            rm -rf /root/Napcat
             rm -rf /opt/QQ
             rm -rf /QQ
             
@@ -679,7 +593,7 @@ manage_webui_config() {
     fi
     
     # 检查配置文件是否存在
-    WEB_UI_CONFIG="/opt/QQ/resources/app/app_launcher/napcat/config/webui.json"
+    WEB_UI_CONFIG="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config/webui.json"
     if [ ! -f "$WEB_UI_CONFIG" ]; then
         echo -e ${red}WebUI 配置文件不存在: ${WEB_UI_CONFIG}${background}
         echo -en ${cyan}回车返回${background};read
@@ -711,7 +625,7 @@ manage_webui_config() {
     cp "$WEB_UI_CONFIG" "${WEB_UI_CONFIG}.bak"
     
     while true; do
-        clear
+        # clear
         echo -e ${white}"====="${green}WebUI 配置管理${white}"====="${background}
         
         # 读取当前配置
@@ -728,12 +642,13 @@ manage_webui_config() {
         echo -e ${green}3. ${cyan}登录密钥 \(token\): ${yellow}${TOKEN}${background}
         echo -e ${green}4. ${cyan}每分钟登录次数限制 \(loginRate\): ${yellow}${LOGIN_RATE}${background}
         echo -e ${green}5. ${cyan}自动登录账号 \(autoLoginAccount\): ${yellow}${AUTO_LOGIN}${background}
-        echo -e ${green}6. ${cyan}保存并重启服务${background}
         echo -e ${green}0. ${cyan}返回主菜单${background}
         echo "========================="
-        echo -en ${green}WebUI 访问地址: ${cyan}http://${HOST}:${PORT}${background}
-        echo -en ${green}登录密钥: ${cyan}${TOKEN}${background}
-        echo "========================="
+        echo -e ${green}WebUI 访问地址: ${cyan}http://${HOST}:${PORT}${background}
+        echo -e ${green}登录密钥: ${cyan}${TOKEN}${background}
+        echo -e ${green}说明1: ${cyan}当多开QQ或端口被占用时，会自动对端口 +1，直到找到可用端口（最多尝试 100 次，失败则会禁用 WebUI），端口号会在启动日志中显示。（当端口被设置为 0 时将禁用 WebUI）${background}
+        echo -e ${green}说明2: ${cyan}修改后重启 ${APP_NAME} 生效${background}
+        echo -e  "========================="
         
         echo -en ${green}请输入选项: ${background};read option
         
@@ -748,7 +663,7 @@ manage_webui_config() {
                 ;;
             2)
                 echo -en ${cyan}请输入新的端口 \(当前: ${PORT}\): ${background};read new_port
-                if [[ "$new_port" =~ ^[0-9]+$ ]] && [ "$new_port" -ge 1 ] && [ "$new_port" -le 65535 ]; then
+                if [[ "$new_port" =~ ^[0-9]+$ ]] && [ "$new_port" -ge 0 ] && [ "$new_port" -le 65535 ]; then
                     jq --argjson port "$new_port" '.port = $port' "$WEB_UI_CONFIG" > "${WEB_UI_CONFIG}.tmp" && mv "${WEB_UI_CONFIG}.tmp" "$WEB_UI_CONFIG"
                     echo -e ${green}端口已修改为: ${cyan}${new_port}${background}
                     sleep 1
@@ -782,31 +697,6 @@ manage_webui_config() {
                 echo -e ${green}自动登录账号已修改为: ${cyan}${new_auto_login}${background}
                 sleep 1
                 ;;
-            6)
-                echo -e ${yellow}配置已保存，是否重启 ${APP_NAME} 服务? [Y/n]${background};read restart_yn
-                case ${restart_yn} in
-                    Y|y|"")
-                        if check_running; then
-                            echo -e ${yellow}正在重启 ${APP_NAME}...${background}
-                            stop_NapCat > /dev/null 2>&1
-                            sleep 2
-                            start_NapCat
-                        else
-                            echo -e ${yellow}${APP_NAME} 未运行，是否启动? [Y/n]${background};read start_yn
-                            case ${start_yn} in
-                                Y|y|"")
-                                    start_NapCat
-                                    ;;
-                            esac
-                        fi
-                        return 0
-                        ;;
-                    *)
-                        echo -e ${yellow}配置已保存，但服务未重启${background}
-                        sleep 1
-                        ;;
-                esac
-                ;;
             0)
                 return 0
                 ;;
@@ -816,123 +706,6 @@ manage_webui_config() {
                 ;;
         esac
     done
-}
-
-# 管理已登录QQ账号
-manage_qq_accounts() {
-    # 检查 NapCat 是否已安装
-    if ! check_installed; then
-        echo -e ${red}${APP_NAME}未安装，无法管理QQ账号${background}
-        echo -en ${cyan}回车返回${background};read
-        return 1
-    fi
-    
-    # 检查配置目录是否存在
-    CONFIG_DIR="/opt/QQ/resources/app/app_launcher/napcat/config"
-    if [ ! -d "$CONFIG_DIR" ]; then
-        echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
-        echo -en ${cyan}回车返回${background};read
-        return 1
-    fi
-    
-    # 查找已登录的QQ账号
-    echo -e ${yellow}正在查找已登录的QQ账号...${background}
-    account_files=$(find "$CONFIG_DIR" -name "napcat_*.json" 2>/dev/null)
-    
-    if [ -z "$account_files" ];then
-        echo -e ${red}未找到已登录的QQ账号${background}
-        echo -e ${yellow}请先使用前台启动方式登录QQ账号${background}
-        echo -en ${cyan}回车返回${background};read
-        return 1
-    fi
-    
-    # 提取并显示QQ号码列表
-    echo -e ${green}已找到以下QQ账号:${background}
-    i=1
-    declare -a qq_numbers
-    
-    while IFS= read -r file; do
-        qq_number=$(basename "$file" | sed -n 's/napcat_\([0-9]*\)\.json/\1/p')
-        if [ -n "$qq_number" ];then
-            qq_numbers+=("$qq_number")
-            echo -e ${green}$i. ${cyan}$qq_number${background}
-            i=$((i+1))
-        fi
-    done <<< "$account_files"
-    
-    echo -e ${green}0. ${cyan}返回主菜单${background}
-    echo
-    
-    # 让用户选择要登录的QQ账号
-    echo -en ${yellow}请选择要登录的QQ账号编号: ${background};read choice
-    
-    if [ "$choice" = "0" ];then
-        return 0
-    fi
-    
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#qq_numbers[@]} ]; then
-        echo -e ${red}无效的选择${background}
-        echo -en ${cyan}回车返回${background};read
-        return 1
-    fi
-    
-    selected_qq=${qq_numbers[$((choice-1))]}
-    
-    # 检查是否当前已有运行的NapCat实例
-    if check_running; then
-        echo -e ${yellow}已有${APP_NAME}实例在运行，是否停止并切换到选定的QQ账号? [Y/n]${background};read yn
-        case ${yn} in
-            Y|y|"")
-                echo -e ${yellow}正在停止当前${APP_NAME}实例...${background}
-                stop_NapCat > /dev/null 2>&1
-                ;;
-            *)
-                echo -e ${yellow}操作已取消${background}
-                echo -en ${cyan}回车返回${background};read
-                return 0
-                ;;
-        esac
-    fi
-    
-    # 启动选定的QQ账号
-    echo -e ${yellow}正在启动QQ账号: ${cyan}${selected_qq}${background}
-    check_tmux
-    
-    # 选择启动方式
-    echo -e ${cyan}请选择启动方式${background}
-    echo -e ${green}1. ${cyan}前台启动${background}
-    echo -e ${green}2. ${cyan}后台启动（推荐）${background}
-    echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read start_option
-    
-    case ${start_option} in
-        1)
-            # 前台启动特定QQ账号
-            echo -e ${yellow}正在前台启动QQ账号: ${cyan}${selected_qq}${background}
-            echo -e ${cyan}提示: 退出请按 Ctrl+C${background}
-            xvfb-run -a qq --no-sandbox -q ${selected_qq}
-            echo -en ${cyan}回车返回${background};read
-            ;;
-        2)
-            # 后台启动特定QQ账号
-            echo -e ${yellow}正在后台启动QQ账号: ${cyan}${selected_qq}${background}
-            tmux new-session -d -s ${TMUX_NAME} "xvfb-run -a qq --no-sandbox -q ${selected_qq}"
-            
-            # 检查是否成功启动
-            sleep 2
-            if check_running; then
-                echo -e ${green}QQ账号 ${selected_qq} 已成功在后台启动${background}
-                echo -e ${cyan}提示: 使用 '查看日志' 功能可以访问${APP_NAME}界面${background}
-            else
-                echo -e ${red}QQ账号启动失败，请检查错误信息${background}
-            fi
-            echo -en ${cyan}回车返回${background};read
-            ;;
-        *)
-            echo -e ${red}输入错误${background}
-            echo -en ${cyan}回车返回${background};read
-            ;;
-    esac
 }
 
 # 配置WebSocket连接
@@ -945,7 +718,7 @@ configure_ws() {
     fi
     
     # 检查配置目录是否存在
-    CONFIG_DIR="/opt/QQ/resources/app/app_launcher/napcat/config"
+    CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
     if [ ! -d "$CONFIG_DIR" ]; then
         echo -e ${red}配置目录不存在${background}
         echo -en ${cyan}回车返回${background};read
@@ -1081,7 +854,7 @@ configure_ws() {
 
     # 管理WebSocket连接的主菜单
     while true; do
-        clear
+        # clear
         echo -e ${white}"====="${green}WebSocket配置管理 - QQ: ${selected_qq}${white}"====="${background}
         
         # 检查当前配置
@@ -1163,7 +936,7 @@ configure_ws() {
         case $option in
             1)
                 # 使用预设模板子菜单
-                clear
+                # clear
                 echo -e ${white}"====="${green}WebSocket预设模板${white}"====="${background}
                 echo -e ${green}1. ${cyan}使用 lain 反向WebSocket配置${background}
                 echo -e ${green}2. ${cyan}使用 trss 反向WebSocket配置${background}
@@ -1870,6 +1643,7 @@ EOF
                         echo
                         echo -e ${green}1. ${cyan}修改Token${background}
                         echo -e ${green}2. ${cyan}清除Token${background}
+                        echo -e ${green}3. ${cyan}从TRSS配置中导入Token${background}
                         echo -e ${green}0. ${cyan}返回${background}
                         
                         echo -en ${green}请选择操作: ${background};read token_op
@@ -1910,6 +1684,74 @@ EOF
                                     echo -e ${yellow}操作已取消${background}
                                 fi
                                 sleep 1
+                                ;;
+                            3)
+                                # 从TRSS配置导入Token
+                                local trss_config="$HOME/TRSS-Yunzai/config/config/server.yaml"
+                                
+                                # 检查TRSS-Yunzai配置文件是否存在
+                                if [ ! -f "$trss_config" ]; then
+                                    echo -e ${red}未找到TRSS-Yunzai配置文件: ${yellow}$trss_config${background}
+                                    echo -e ${yellow}请检查TRSS-Yunzai是否已安装或配置路径是否正确${background}
+                                    sleep 2
+                                    continue
+                                fi
+                                
+                                echo -e ${yellow}正在从TRSS-Yunzai配置中读取Token...${background}
+                                
+                                # 检查配置中是否有auth部分和authorization
+                                if grep -q "auth:" "$trss_config" && grep -q "authorization:" "$trss_config"; then
+                                    # 提取authorization值，格式通常是"Bearer token"
+                                    trss_auth=$(grep "authorization:" "$trss_config" | sed 's/.*authorization: *"\(.*\)".*/\1/')
+                                    
+                                    # 如果以Bearer开头，去掉Bearer和空格
+                                    if [[ "$trss_auth" == Bearer* ]]; then
+                                        import_token=$(echo "$trss_auth" | sed 's/Bearer *//')
+                                        
+                                        # 确认是否导入
+                                        echo -e ${cyan}从TRSS配置中找到Token: ${yellow}$import_token${background}
+                                        echo -en ${cyan}是否导入此Token? [Y/n]: ${background};read confirm_import
+                                        
+                                        case $confirm_import in
+                                            n|N)
+                                                echo -e ${yellow}已取消导入${background}
+                                                ;;
+                                            *)
+                                                # 更新Token
+                                                jq --argjson idx "$token_index" --arg token "$import_token" \
+                                                    '.network.websocketClients[$idx].token = $token' \
+                                                    "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                                                
+                                                echo -e ${green}Token已从TRSS配置成功导入${background}
+                                                
+                                                # 询问是否同步到TRSS-Yunzai配置（这里实际是已经从TRSS导入，可以跳过）
+                                                echo -e ${yellow}Token已从TRSS配置导入，无需再次同步${background}
+                                                ;;
+                                        esac
+                                    else
+                                        echo -e ${yellow}在TRSS配置中找到authorization，但格式不是"Bearer token"${background}
+                                        echo -e ${yellow}找到的值: ${cyan}$trss_auth${background}
+                                        echo -en ${cyan}是否还要导入此值? [y/N]: ${background};read force_import
+                                        
+                                        case $force_import in
+                                            y|Y)
+                                                # 更新Token
+                                                jq --argjson idx "$token_index" --arg token "$trss_auth" \
+                                                    '.network.websocketClients[$idx].token = $token' \
+                                                    "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                                                
+                                                echo -e ${green}Token已从TRSS配置成功导入${background}
+                                                ;;
+                                            *)
+                                                echo -e ${yellow}已取消导入${background}
+                                                ;;
+                                        esac
+                                    fi
+                                else
+                                    echo -e ${red}未在TRSS配置中找到Token${background}
+                                    echo -e ${yellow}请确保TRSS-Yunzai配置中包含auth.authorization配置项${background}
+                                fi
+                                sleep 2
                                 ;;
                             0)
                                 continue
@@ -1969,6 +1811,7 @@ EOF
                         echo
                         echo -e ${green}1. ${cyan}修改Token${background}
                         echo -e ${green}2. ${cyan}清除Token${background}
+                        echo -e ${green}3. ${cyan}从TRSS配置中导入Token${background}
                         echo -e ${green}0. ${cyan}返回${background}
                         
                         echo -en ${green}请选择操作: ${background};read token_op
@@ -2003,6 +1846,74 @@ EOF
                                     echo -e ${yellow}操作已取消${background}
                                 fi
                                 sleep 1
+                                ;;
+                            3)
+                                # 从TRSS配置导入Token
+                                local trss_config="$HOME/TRSS-Yunzai/config/config/server.yaml"
+                                
+                                # 检查TRSS-Yunzai配置文件是否存在
+                                if [ ! -f "$trss_config" ]; then
+                                    echo -e ${red}未找到TRSS-Yunzai配置文件: ${yellow}$trss_config${background}
+                                    echo -e ${yellow}请检查TRSS-Yunzai是否已安装或配置路径是否正确${background}
+                                    sleep 2
+                                    continue
+                                fi
+                                
+                                echo -e ${yellow}正在从TRSS-Yunzai配置中读取Token...${background}
+                                
+                                # 检查配置中是否有auth部分和authorization
+                                if grep -q "auth:" "$trss_config" && grep -q "authorization:" "$trss_config"; then
+                                    # 提取authorization值，格式通常是"Bearer token"
+                                    trss_auth=$(grep "authorization:" "$trss_config" | sed 's/.*authorization: *"\(.*\)".*/\1/')
+                                    
+                                    # 如果以Bearer开头，去掉Bearer和空格
+                                    if [[ "$trss_auth" == Bearer* ]]; then
+                                        import_token=$(echo "$trss_auth" | sed 's/Bearer *//')
+                                        
+                                        # 确认是否导入
+                                        echo -e ${cyan}从TRSS配置中找到Token: ${yellow}$import_token${background}
+                                        echo -en ${cyan}是否导入此Token? [Y/n]: ${background};read confirm_import
+                                        
+                                        case $confirm_import in
+                                            n|N)
+                                                echo -e ${yellow}已取消导入${background}
+                                                ;;
+                                            *)
+                                                # 更新Token
+                                                jq --argjson idx "$token_index" --arg token "$import_token" \
+                                                    '.network.websocketServers[$idx].token = $token' \
+                                                    "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                                                
+                                                echo -e ${green}Token已从TRSS配置成功导入${background}
+                                                
+                                                # 询问是否同步到TRSS-Yunzai配置（这里实际是已经从TRSS导入，可以跳过）
+                                                echo -e ${yellow}Token已从TRSS配置导入，无需再次同步${background}
+                                                ;;
+                                        esac
+                                    else
+                                        echo -e ${yellow}在TRSS配置中找到authorization，但格式不是"Bearer token"${background}
+                                        echo -e ${yellow}找到的值: ${cyan}$trss_auth${background}
+                                        echo -en ${cyan}是否还要导入此值? [y/N]: ${background};read force_import
+                                        
+                                        case $force_import in
+                                            y|Y)
+                                                # 更新Token
+                                                jq --argjson idx "$token_index" --arg token "$trss_auth" \
+                                                    '.network.websocketServers[$idx].token = $token' \
+                                                    "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                                                
+                                                echo -e ${green}Token已从TRSS配置成功导入${background}
+                                                ;;
+                                            *)
+                                                echo -e ${yellow}已取消导入${background}
+                                                ;;
+                                        esac
+                                    fi
+                                else
+                                    echo -e ${red}未在TRSS配置中找到Token${background}
+                                    echo -e ${yellow}请确保TRSS-Yunzai配置中包含auth.authorization配置项${background}
+                                fi
+                                sleep 2
                                 ;;
                             0)
                                 continue
@@ -2154,7 +2065,7 @@ configure_music_sign() {
     fi
     
     # 检查配置目录是否存在
-    CONFIG_DIR="/opt/QQ/resources/app/app_launcher/napcat/config"
+    CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
     if [ ! -d "$CONFIG_DIR" ]; then
         echo -e ${red}配置目录不存在${background}
         echo -en ${cyan}回车返回${background};read
@@ -2187,7 +2098,7 @@ configure_music_sign() {
     
     # 显示配置选项
     while true; do
-        clear
+        # clear
         echo -e ${white}"====="${green}音乐签名URL配置${white}"====="${background}
         
         echo -e ${green}1. ${cyan}为所有QQ账号设置音乐签名URL${background}
@@ -2354,7 +2265,7 @@ check_update() {
 # 管理多开实例
 manage_multi_instances() {
     while true; do
-        clear
+        # clear
         echo -e ${white}"====="${green}QQ多开实例管理${white}"====="${background}
         
         # 显示当前运行的QQ实例
@@ -2368,7 +2279,8 @@ manage_multi_instances() {
         echo -e ${green}2. ${cyan}启动指定QQ号${background}
         echo -e ${green}3. ${cyan}停止指定QQ实例${background}
         echo -e ${green}4. ${cyan}停止所有QQ实例${background}
-        echo -e ${green}5. ${cyan}查看指定QQ实例日志${background}
+        echo -e ${green}5. ${cyan}重启指定QQ实例${background}
+        echo -e ${green}6. ${cyan}查看指定QQ实例日志${background}
         echo -e ${green}0. ${cyan}返回主菜单${background}
         echo -e ${yellow}"==========================="${background}
         
@@ -2382,7 +2294,7 @@ manage_multi_instances() {
             2)
                 # 启动指定QQ号
                 # 查找已登录的QQ账号列表
-                CONFIG_DIR="/opt/QQ/resources/app/app_launcher/napcat/config"
+                CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
                 if [ ! -d "$CONFIG_DIR" ]; then
                     echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
                     echo -e ${yellow}请先使用前台启动方式登录QQ账号${background}
@@ -2547,6 +2459,77 @@ manage_multi_instances() {
                 echo -en ${cyan}回车返回${background};read
                 ;;
             5)
+                # 重启指定QQ实例
+                # 显示当前运行的QQ实例
+                echo -e ${yellow}当前运行的QQ实例:${background}
+                if ! list_running_instances; then
+                    echo -e ${red}没有运行中的QQ实例${background}
+                    echo -en ${cyan}回车返回${background};read
+                    continue
+                fi
+                
+                # 创建QQ号数组
+                declare -a running_qq
+                declare -a running_sessions
+                
+                # 填充数组并重新显示带编号的列表
+                echo -e ${yellow}请选择要重启的QQ实例:${background}
+                i=1
+                while read -r line; do
+                    if [[ "$line" =~ QQ号:\ ([0-9]+).*会话:\ (${TMUX_NAME}_[0-9]+) ]]; then
+                        qq_number="${BASH_REMATCH[1]}"
+                        session="${BASH_REMATCH[2]}"
+                        running_qq+=("$qq_number")
+                        running_sessions+=("$session")
+                        echo -e ${green}$i. ${cyan}QQ号: $qq_number${background}
+                        i=$((i+1))
+                    elif [[ "$line" =~ 主实例.*会话:\ (${TMUX_NAME}) ]]; then
+                        session="${BASH_REMATCH[1]}"
+                        running_qq+=("main")
+                        running_sessions+=("$session")
+                        echo -e ${green}$i. ${cyan}主实例${background}
+                        i=$((i+1))
+                    fi
+                done < <(list_running_instances)
+                
+                echo -e ${green}0. ${cyan}返回${background}
+                echo
+                
+                # 让用户选择要重启的QQ实例
+                echo -en ${yellow}请选择要重启的QQ实例编号: ${background};read choice
+                
+                if [ "$choice" = "0" ]; then
+                    continue
+                fi
+                
+                if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#running_qq[@]} ]; then
+                    echo -e ${red}无效的选择${background}
+                    echo -en ${cyan}回车返回${background};read
+                    continue
+                fi
+                
+                selected_instance=${running_qq[$((choice-1))]}
+                selected_session=${running_sessions[$((choice-1))]}
+                
+                if [ "$selected_instance" = "main" ]; then
+                    # 重启主实例
+                    echo -e ${yellow}正在重启主实例...${background}
+                    tmux send-keys -t ${selected_session} "Boolean=false" C-m
+                    sleep 1
+                    tmux kill-session -t ${selected_session}
+                    sleep 1
+                    echo -e ${green}主实例已停止，正在重新启动...${background}
+                    start_NapCat "" false true
+                else
+                    # 重启特定QQ号
+                    echo -e ${yellow}正在重启QQ号 ${cyan}${selected_instance}${yellow}...${background}
+                    stop_NapCat "$selected_instance"
+                    sleep 2
+                    echo -e ${green}正在重新启动...${background}
+                    start_NapCat "$selected_instance" false true
+                fi
+                ;;
+            6)
                 # 查看指定QQ实例日志
                 # 显示当前运行的QQ实例
                 echo -e ${yellow}当前运行的QQ实例:${background}
@@ -2636,19 +2619,14 @@ main() {
     fi
 
     echo -e ${white}"====="${green}呆毛版-${APP_NAME}管理${white}"====="${background}
-    echo -e ${green}1.  ${cyan}安装${APP_NAME}${background}
-    echo -e ${green}2.  ${cyan}启动${APP_NAME}${background}
-    echo -e ${green}3.  ${cyan}关闭${APP_NAME}${background}
-    echo -e ${green}4.  ${cyan}重启${APP_NAME}${background}
-    echo -e ${green}5.  ${cyan}更新${APP_NAME}${background}
-    echo -e ${green}6.  ${cyan}卸载${APP_NAME}${background}
-    echo -e ${green}7.  ${cyan}查看日志${background}
-    echo -e ${green}8.  ${cyan}WebUI 配置${background}
-    echo -e ${green}9.  ${cyan}切换QQ账号${background}
-    echo -e ${green}10. ${cyan}多开QQ管理${background}
-    echo -e ${green}11. ${cyan}配置WebSocket接口${background}
-    echo -e ${green}12. ${cyan}音乐签名配置${background}
-    echo -e ${green}0.  ${cyan}退出${background}
+    echo -e ${green}1. ${cyan}安装${APP_NAME}${background}
+    echo -e ${green}2. ${cyan}更新${APP_NAME}${background}
+    echo -e ${green}3. ${cyan}卸载${APP_NAME}${background}
+    echo -e ${green}4. ${cyan}WebUI 配置${background}
+    echo -e ${green}5. ${cyan}配置WebSocket接口${background}
+    echo -e ${green}6. ${cyan}音乐签名配置${background}
+    echo -e ${green}7. ${cyan}启动/多开QQ管理${background}
+    echo -e ${green}0. ${cyan}退出${background}
     echo "========================="
     echo -e ${green}${APP_NAME}状态: ${condition}${background}
     
@@ -2659,8 +2637,8 @@ main() {
         echo "========================="
     fi
     
-    echo -e ${green}说明: ${cyan}安装后“配置反向WebSocket”（推荐trss或喵崽+napcat插件），启动-扫码登录-转后台运行，启动云崽即可。${background}
-    echo -e ${green}呆毛版-QQ群: ${cyan}285744328${background}
+    echo -e ${green}说明: ${cyan}前台登录-ctrl+c退出-配置WebSocket接口-推荐使用 trss 反向WebSocket配置-管理WebSocket Token（重要）-后台启动即可。${background}
+    echo -e ${green}NapCat TUI-CLI 启动指令:  ${cyan}napcat${background}
     echo "========================="
     echo
     echo -en ${green}请输入您的选项: ${background};read number
@@ -2671,46 +2649,27 @@ main() {
             ;;
         2)
             echo
-            start_NapCat
+            check_update
             ;;
         3)
             echo
-            stop_NapCat
+            uninstall_NapCat
             ;;
         4)
             echo
-            restart_NapCat
+            manage_webui_config
             ;;
         5)
             echo
-            check_update
+            configure_ws
             ;;
         6)
             echo
-            uninstall_NapCat
+            configure_music_sign
             ;;
         7)
-            view_log
-            ;;
-        8)
-            echo
-            manage_webui_config
-            ;;
-        9)
-            echo
-            manage_qq_accounts
-            ;;
-        10)
             echo
             manage_multi_instances
-            ;;
-        11)
-            echo
-            configure_ws
-            ;;
-        12)
-            echo
-            configure_music_sign
             ;;
         0)
             exit
