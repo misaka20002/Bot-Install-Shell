@@ -179,91 +179,117 @@ start_NapCat() {
     
     echo -e ${yellow}正在准备启动${APP_NAME}...${background}
     
-    # 选择登录方式
-    echo -e ${cyan}请选择登录方式${background}
-    echo -e ${green}1.  ${cyan}全新登录（直接启动）${background}
-    echo -e ${green}2.  ${cyan}使用已登录的QQ账号${background}
-    echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read login_option
+    # 如果指定了QQ号且为自动后台启动（重启场景），直接使用该QQ号
+    if [ -n "$specific_qq" ] && [ "$auto_background" = "true" ]; then
+        # 检查配置目录是否存在
+        CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
+        if [ ! -d "$CONFIG_DIR" ]; then
+            echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
+            echo -en ${cyan}回车返回${background};read
+            return 1
+        fi
+        
+        # 检查该QQ号的配置文件是否存在
+        if [ -f "$CONFIG_DIR/napcat_${specific_qq}.json" ]; then
+            selected_qq="$specific_qq"
+            NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox -q ${selected_qq}"
+            echo -e ${yellow}使用已登录的QQ账号: ${cyan}${selected_qq}${background}
+            login_option=2
+        else
+            echo -e ${red}未找到QQ号 ${cyan}${specific_qq}${red} 的配置文件${background}
+            echo -en ${cyan}回车返回${background};read
+            return 1
+        fi
+    else
+        # 选择登录方式
+        echo -e ${cyan}请选择登录方式${background}
+        echo -e ${green}1.  ${cyan}全新登录（直接启动）${background}
+        echo -e ${green}2.  ${cyan}使用已登录的QQ账号${background}
+        echo "========================="
+        echo -en ${green}请输入您的选项: ${background};read login_option
+    fi
     
     case ${login_option} in
         2)
-            # 使用已登录的QQ账号
-            # 检查配置目录是否存在
-            CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
-            if [ ! -d "$CONFIG_DIR" ]; then
-                echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
-                echo -e ${yellow}请先使用全新登录方式登录QQ账号${background}
-                echo -en ${cyan}回车返回${background};read
-                return 1
-            fi
-            
-            # 查找已登录的QQ账号
-            echo -e ${yellow}正在查找已登录的QQ账号...${background}
-            account_files=$(find "$CONFIG_DIR" -name "napcat_*.json" 2>/dev/null)
-            
-            if [ -z "$account_files" ]; then
-                echo -e ${red}未找到已登录的QQ账号${background}
-                echo -e ${yellow}请先使用全新登录方式登录QQ账号${background}
-                echo -en ${cyan}是否切换到全新登录? [Y/n]${background};read switch_yn
-                case ${switch_yn} in
-                    Y|y|"")
-                        login_option=1
-                        ;;
-                    *)
-                        echo -en ${cyan}回车返回${background};read
-                        return 1
-                        ;;
-                esac
-            else
-                # 提取并显示QQ号码列表
-                echo -e ${green}已找到以下QQ账号:${background}
-                i=1
-                declare -a qq_numbers
-                
-                while IFS= read -r file; do
-                    qq_number=$(basename "$file" | sed -n 's/napcat_\([0-9]*\)\.json/\1/p')
-                    if [ -n "$qq_number" ]; then
-                        # 如果指定了特定QQ号，只选择该QQ号
-                        if [ -n "$specific_qq" ] && [ "$qq_number" != "$specific_qq" ]; then
-                            continue
-                        fi
-                        qq_numbers+=("$qq_number")
-                        echo -e ${green}$i. ${cyan}$qq_number${background}
-                        i=$((i+1))
-                    fi
-                done <<< "$account_files"
-                
-                if [ ${#qq_numbers[@]} -eq 0 ]; then
-                    echo -e ${red}未找到${specific_qq:+指定的QQ号: $specific_qq}${background}
+            # 如果已经设置了selected_qq（重启场景），跳过选择流程
+            if [ -z "$selected_qq" ]; then
+                # 使用已登录的QQ账号
+                # 检查配置目录是否存在
+                CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
+                if [ ! -d "$CONFIG_DIR" ]; then
+                    echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
+                    echo -e ${yellow}请先使用全新登录方式登录QQ账号${background}
                     echo -en ${cyan}回车返回${background};read
                     return 1
                 fi
                 
-                # 如果只有一个匹配项且提供了特定QQ号,自动选择该QQ号
-                if [ ${#qq_numbers[@]} -eq 1 ] && [ -n "$specific_qq" ]; then
-                    selected_qq=${qq_numbers[0]}
-                    NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox -q ${selected_qq}"
-                    echo -e ${yellow}已自动选择QQ账号: ${cyan}${selected_qq}${background}
-                    sleep 1
+                # 查找已登录的QQ账号
+                echo -e ${yellow}正在查找已登录的QQ账号...${background}
+                account_files=$(find "$CONFIG_DIR" -name "napcat_*.json" 2>/dev/null)
+                
+                if [ -z "$account_files" ]; then
+                    echo -e ${red}未找到已登录的QQ账号${background}
+                    echo -e ${yellow}请先使用全新登录方式登录QQ账号${background}
+                    echo -en ${cyan}是否切换到全新登录? [Y/n]${background};read switch_yn
+                    case ${switch_yn} in
+                        Y|y|"")
+                            login_option=1
+                            ;;
+                        *)
+                            echo -en ${cyan}回车返回${background};read
+                            return 1
+                            ;;
+                    esac
                 else
-                    echo -e ${green}0. ${cyan}返回并选择全新登录${background}
-                    echo
+                    # 提取并显示QQ号码列表
+                    echo -e ${green}已找到以下QQ账号:${background}
+                    i=1
+                    declare -a qq_numbers
                     
-                    # 让用户选择要登录的QQ账号
-                    echo -en ${yellow}请选择要登录的QQ账号编号: ${background};read choice
+                    while IFS= read -r file; do
+                        qq_number=$(basename "$file" | sed -n 's/napcat_\([0-9]*\)\.json/\1/p')
+                        if [ -n "$qq_number" ]; then
+                            # 如果指定了特定QQ号，只选择该QQ号
+                            if [ -n "$specific_qq" ] && [ "$qq_number" != "$specific_qq" ]; then
+                                continue
+                            fi
+                            qq_numbers+=("$qq_number")
+                            echo -e ${green}$i. ${cyan}$qq_number${background}
+                            i=$((i+1))
+                        fi
+                    done <<< "$account_files"
                     
-                    if [ "$choice" = "0" ]; then
-                        login_option=1
-                    elif ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#qq_numbers[@]} ]; then
-                        echo -e ${red}无效的选择${background}
+                    if [ ${#qq_numbers[@]} -eq 0 ]; then
+                        echo -e ${red}未找到${specific_qq:+指定的QQ号: $specific_qq}${background}
                         echo -en ${cyan}回车返回${background};read
                         return 1
-                    else
-                        selected_qq=${qq_numbers[$((choice-1))]}
+                    fi
+                    
+                    # 如果只有一个匹配项且提供了特定QQ号,自动选择该QQ号
+                    if [ ${#qq_numbers[@]} -eq 1 ] && [ -n "$specific_qq" ]; then
+                        selected_qq=${qq_numbers[0]}
                         NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox -q ${selected_qq}"
-                        echo -e ${yellow}已选择QQ账号: ${cyan}${selected_qq}${background}
+                        echo -e ${yellow}已自动选择QQ账号: ${cyan}${selected_qq}${background}
                         sleep 1
+                    else
+                        echo -e ${green}0. ${cyan}返回并选择全新登录${background}
+                        echo
+                        
+                        # 让用户选择要登录的QQ账号
+                        echo -en ${yellow}请选择要登录的QQ账号编号: ${background};read choice
+                        
+                        if [ "$choice" = "0" ]; then
+                            login_option=1
+                        elif ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#qq_numbers[@]} ]; then
+                            echo -e ${red}无效的选择${background}
+                            echo -en ${cyan}回车返回${background};read
+                            return 1
+                        else
+                            selected_qq=${qq_numbers[$((choice-1))]}
+                            NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox -q ${selected_qq}"
+                            echo -e ${yellow}已选择QQ账号: ${cyan}${selected_qq}${background}
+                            sleep 1
+                        fi
                     fi
                 fi
             fi
