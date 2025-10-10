@@ -157,14 +157,17 @@ start_NapCat() {
         return 1
     fi
     
-    # 第二个参数为force_start，如果为true则强制启动新实例
-    force_start=${2:-false}
-    # 第三个参数为auto_background，如果为true则自动选择后台启动
-    auto_background=${3:-false}
+    # 参数说明：
+    # $1: QQ号（可选，为空或空字符串表示不指定QQ号）
+    # $2: force_start（可选，true表示强制启动新实例，即使已有实例运行）
+    # $3: auto_background（可选，true表示自动选择后台启动）
+    local specific_qq="$1"
+    local force_start="${2:-false}"
+    local auto_background="${3:-false}"
     
-    if [ -n "$1" ]; then
+    # 检查是否指定了QQ号（排除空字符串的情况）
+    if [ -n "$specific_qq" ] && [ "$specific_qq" != "" ]; then
         # 如果提供了QQ号作为参数，检查该QQ号是否已在运行
-        specific_qq="$1"
         if is_qq_running "$specific_qq"; then
             echo -e ${yellow}QQ号 ${cyan}${specific_qq}${yellow} 已经在运行中${background}
             echo -en ${cyan}回车返回${background};read
@@ -2332,7 +2335,7 @@ manage_multi_instances() {
         case $option in
             1)
                 # 启动新的QQ实例，使用force_start=true强制启动新实例
-                start_NapCat true
+                start_NapCat "" true
                 ;;
             2)
                 # 启动指定QQ号
