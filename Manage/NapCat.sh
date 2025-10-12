@@ -68,6 +68,24 @@ check_tmux() {
 
 # 安装 NapCat
 install_NapCat() {
+    if check_installed; then
+        echo -e ${yellow}已安装 ${APP_NAME} 将重新运行安装脚本以获取最新版本${background}
+        echo -en ${cyan}是否继续? [Y/n]${background};read yn
+        case ${yn} in
+            Y|y|"")
+                if check_running; then
+                    echo -e ${yellow}更新前需要停止${APP_NAME}${background}
+                    stop_NapCat silent
+                fi
+                ;;
+            *)
+                echo -e ${yellow}已取消更新${background}
+                echo -en ${cyan}回车返回${background}
+                return;read
+                ;;
+        esac
+    fi
+
     echo -e ${yellow}正在安装${APP_NAME}...${background}
     
     # 检查必要的工具
@@ -139,14 +157,17 @@ start_NapCat() {
         return 1
     fi
     
-    # 第二个参数为force_start，如果为true则强制启动新实例
-    force_start=${2:-false}
-    # 第三个参数为auto_background，如果为true则自动选择后台启动
-    auto_background=${3:-false}
+    # 参数说明：
+    # $1: QQ号（可选，为空或空字符串表示不指定QQ号）
+    # $2: force_start（可选，true表示强制启动新实例，即使已有实例运行）
+    # $3: auto_background（可选，true表示自动选择后台启动）
+    local specific_qq="$1"
+    local force_start="${2:-false}"
+    local auto_background="${3:-false}"
     
-    if [ -n "$1" ]; then
+    # 检查是否指定了QQ号（排除空字符串的情况）
+    if [ -n "$specific_qq" ] && [ "$specific_qq" != "" ]; then
         # 如果提供了QQ号作为参数，检查该QQ号是否已在运行
-        specific_qq="$1"
         if is_qq_running "$specific_qq"; then
             echo -e ${yellow}QQ号 ${cyan}${specific_qq}${yellow} 已经在运行中${background}
             echo -en ${cyan}回车返回${background};read
@@ -160,110 +181,121 @@ start_NapCat() {
         return 0
     fi
     
-    if [ -n "$1" ]; then
-        # 如果提供了QQ号作为参数，检查该QQ号是否已在运行
-        specific_qq="$1"
-        if is_qq_running "$specific_qq"; then
-            echo -e ${yellow}QQ号 ${cyan}${specific_qq}${yellow} 已经在运行中${background}
-            echo -en ${cyan}回车返回${background};read
-            return 0
-        fi
-        echo -e ${yellow}正在准备启动QQ号: ${cyan}${specific_qq}${background}
-    elif check_running; then
-        echo -e ${yellow}${APP_NAME}已经在运行中${background}
-        echo -en ${cyan}回车返回${background};read
-        return 0
-    fi
-    
     check_tmux
     
     echo -e ${yellow}正在准备启动${APP_NAME}...${background}
     
-    # 选择登录方式
-    echo -e ${cyan}请选择登录方式${background}
-    echo -e ${green}1.  ${cyan}全新登录（直接启动）${background}
-    echo -e ${green}2.  ${cyan}使用已登录的QQ账号${background}
-    echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read login_option
+    # 如果指定了QQ号（启动指定QQ号或重启场景），直接使用该QQ号
+    if [ -n "$specific_qq" ]; then
+        # 检查配置目录是否存在
+        CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
+        if [ ! -d "$CONFIG_DIR" ]; then
+            echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
+            echo -en ${cyan}回车返回${background};read
+            return 1
+        fi
+        
+        # 检查该QQ号的配置文件是否存在
+        if [ -f "$CONFIG_DIR/napcat_${specific_qq}.json" ]; then
+            selected_qq="$specific_qq"
+            NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox -q ${selected_qq}"
+            echo -e ${yellow}使用已登录的QQ账号: ${cyan}${selected_qq}${background}
+            login_option=2
+        else
+            echo -e ${red}未找到QQ号 ${cyan}${specific_qq}${red} 的配置文件${background}
+            echo -en ${cyan}回车返回${background};read
+            return 1
+        fi
+    else
+        # 没有指定QQ号时，选择登录方式
+        echo -e ${cyan}请选择登录方式${background}
+        echo -e ${green}1.  ${cyan}全新登录（直接启动）${background}
+        echo -e ${green}2.  ${cyan}使用已登录的QQ账号${background}
+        echo "========================="
+        echo -en ${green}请输入您的选项: ${background};read login_option
+    fi
     
     case ${login_option} in
         2)
-            # 使用已登录的QQ账号
-            # 检查配置目录是否存在
-            CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
-            if [ ! -d "$CONFIG_DIR" ]; then
-                echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
-                echo -e ${yellow}请先使用全新登录方式登录QQ账号${background}
-                echo -en ${cyan}回车返回${background};read
-                return 1
-            fi
-            
-            # 查找已登录的QQ账号
-            echo -e ${yellow}正在查找已登录的QQ账号...${background}
-            account_files=$(find "$CONFIG_DIR" -name "napcat_*.json" 2>/dev/null)
-            
-            if [ -z "$account_files" ]; then
-                echo -e ${red}未找到已登录的QQ账号${background}
-                echo -e ${yellow}请先使用全新登录方式登录QQ账号${background}
-                echo -en ${cyan}是否切换到全新登录? [Y/n]${background};read switch_yn
-                case ${switch_yn} in
-                    Y|y|"")
-                        login_option=1
-                        ;;
-                    *)
-                        echo -en ${cyan}回车返回${background};read
-                        return 1
-                        ;;
-                esac
-            else
-                # 提取并显示QQ号码列表
-                echo -e ${green}已找到以下QQ账号:${background}
-                i=1
-                declare -a qq_numbers
-                
-                while IFS= read -r file; do
-                    qq_number=$(basename "$file" | sed -n 's/napcat_\([0-9]*\)\.json/\1/p')
-                    if [ -n "$qq_number" ]; then
-                        # 如果指定了特定QQ号，只选择该QQ号
-                        if [ -n "$specific_qq" ] && [ "$qq_number" != "$specific_qq" ]; then
-                            continue
-                        fi
-                        qq_numbers+=("$qq_number")
-                        echo -e ${green}$i. ${cyan}$qq_number${background}
-                        i=$((i+1))
-                    fi
-                done <<< "$account_files"
-                
-                if [ ${#qq_numbers[@]} -eq 0 ]; then
-                    echo -e ${red}未找到${specific_qq:+指定的QQ号: $specific_qq}${background}
+            # 如果已经设置了selected_qq（重启场景），跳过选择流程
+            if [ -z "$selected_qq" ]; then
+                # 使用已登录的QQ账号
+                # 检查配置目录是否存在
+                CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
+                if [ ! -d "$CONFIG_DIR" ]; then
+                    echo -e ${red}配置目录不存在: ${CONFIG_DIR}${background}
+                    echo -e ${yellow}请先使用全新登录方式登录QQ账号${background}
                     echo -en ${cyan}回车返回${background};read
                     return 1
                 fi
                 
-                # 如果只有一个匹配项且提供了特定QQ号,自动选择该QQ号
-                if [ ${#qq_numbers[@]} -eq 1 ] && [ -n "$specific_qq" ]; then
-                    selected_qq=${qq_numbers[0]}
-                    NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox -q ${selected_qq}"
-                    echo -e ${yellow}已自动选择QQ账号: ${cyan}${selected_qq}${background}
-                    sleep 1
+                # 查找已登录的QQ账号
+                echo -e ${yellow}正在查找已登录的QQ账号...${background}
+                account_files=$(find "$CONFIG_DIR" -name "napcat_*.json" 2>/dev/null)
+                
+                if [ -z "$account_files" ]; then
+                    echo -e ${red}未找到已登录的QQ账号${background}
+                    echo -e ${yellow}请先使用全新登录方式登录QQ账号${background}
+                    echo -en ${cyan}是否切换到全新登录? [Y/n]${background};read switch_yn
+                    case ${switch_yn} in
+                        Y|y|"")
+                            login_option=1
+                            ;;
+                        *)
+                            echo -en ${cyan}回车返回${background};read
+                            return 1
+                            ;;
+                    esac
                 else
-                    echo -e ${green}0. ${cyan}返回并选择全新登录${background}
-                    echo
+                    # 提取并显示QQ号码列表
+                    echo -e ${green}已找到以下QQ账号:${background}
+                    i=1
+                    declare -a qq_numbers
                     
-                    # 让用户选择要登录的QQ账号
-                    echo -en ${yellow}请选择要登录的QQ账号编号: ${background};read choice
+                    while IFS= read -r file; do
+                        qq_number=$(basename "$file" | sed -n 's/napcat_\([0-9]*\)\.json/\1/p')
+                        if [ -n "$qq_number" ]; then
+                            # 如果指定了特定QQ号，只选择该QQ号
+                            if [ -n "$specific_qq" ] && [ "$qq_number" != "$specific_qq" ]; then
+                                continue
+                            fi
+                            qq_numbers+=("$qq_number")
+                            echo -e ${green}$i. ${cyan}$qq_number${background}
+                            i=$((i+1))
+                        fi
+                    done <<< "$account_files"
                     
-                    if [ "$choice" = "0" ]; then
-                        login_option=1
-                    elif ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#qq_numbers[@]} ]; then
-                        echo -e ${red}无效的选择${background}
+                    if [ ${#qq_numbers[@]} -eq 0 ]; then
+                        echo -e ${red}未找到${specific_qq:+指定的QQ号: $specific_qq}${background}
                         echo -en ${cyan}回车返回${background};read
                         return 1
-                    else
-                        selected_qq=${qq_numbers[$((choice-1))]}
+                    fi
+                    
+                    # 如果只有一个匹配项且提供了特定QQ号,自动选择该QQ号
+                    if [ ${#qq_numbers[@]} -eq 1 ] && [ -n "$specific_qq" ]; then
+                        selected_qq=${qq_numbers[0]}
                         NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox -q ${selected_qq}"
-                        echo -e ${yellow}已选择QQ账号: ${cyan}${selected_qq}${background}
+                        echo -e ${yellow}已自动选择QQ账号: ${cyan}${selected_qq}${background}
                         sleep 1
+                    else
+                        echo -e ${green}0. ${cyan}返回并选择全新登录${background}
+                        echo
+                        
+                        # 让用户选择要登录的QQ账号
+                        echo -en ${yellow}请选择要登录的QQ账号编号: ${background};read choice
+                        
+                        if [ "$choice" = "0" ]; then
+                            login_option=1
+                        elif ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#qq_numbers[@]} ]; then
+                            echo -e ${red}无效的选择${background}
+                            echo -en ${cyan}回车返回${background};read
+                            return 1
+                        else
+                            selected_qq=${qq_numbers[$((choice-1))]}
+                            NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox -q ${selected_qq}"
+                            echo -e ${yellow}已选择QQ账号: ${cyan}${selected_qq}${background}
+                            sleep 1
+                        fi
                     fi
                 fi
             fi
@@ -287,10 +319,14 @@ start_NapCat() {
     fi
     
     # 选择启动方式
-    if [ "$auto_background" = "true" ]; then
-        # 自动选择后台启动（用于重启功能）
+    if [ "$auto_background" = "true" ] || [ -n "$specific_qq" ]; then
+        # 自动选择后台启动（用于重启功能或启动指定QQ号）
         start_option=2
-        echo -e ${yellow}自动选择后台启动模式${background}
+        if [ "$auto_background" = "true" ]; then
+            echo -e ${yellow}自动选择后台启动模式（重启）${background}
+        else
+            echo -e ${yellow}自动选择后台启动模式${background}
+        fi
     else
         echo -e ${cyan}请选择启动方式${background}
         echo -e ${green}1.  ${cyan}前台启动（首次登录）${background}
@@ -333,7 +369,7 @@ start_NapCat() {
                         tmux attach-session -t ${session_name}
                         ;;
                     *)
-                        echo -e ${green}您可以稍后通过 '查看日志' 选项进入${APP_NAME}界面${background}
+                        echo -e ${green}您可以稍后通过 查看指定QQ实例日志 选项进入${APP_NAME}界面${background}
                         ;;
                 esac
             else
@@ -348,16 +384,66 @@ start_NapCat() {
     esac
 }
 
+# 停止所有运行中的实例（内部函数）
+stop_all_instances() {
+    local has_stopped=false
+    
+    # 停止主实例（如果存在）
+    if check_running; then
+        echo -e ${yellow}正在停止主实例...${background}
+        tmux send-keys -t ${TMUX_NAME} "Boolean=false" C-m
+        sleep 1
+        tmux kill-session -t ${TMUX_NAME}
+        has_stopped=true
+    fi
+    
+    # 停止所有QQ号实例
+    for session in $(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}_" | cut -d: -f1); do
+        qq_number=${session#${TMUX_NAME}_}
+        echo -e ${yellow}正在停止QQ号 ${cyan}${qq_number}${yellow}...${background}
+        tmux send-keys -t ${session} "Boolean=false" C-m
+        sleep 1
+        tmux kill-session -t ${session}
+        has_stopped=true
+    done
+    
+    if $has_stopped; then
+        echo -e ${green}已停止所有QQ实例${background}
+        return 0
+    else
+        echo -e ${yellow}没有运行中的实例${background}
+        return 1
+    fi
+}
+
 # 停止 NapCat
 stop_NapCat() {
-    # 如果提供了QQ号作为参数，只停止该QQ号
+    # 第一个参数：QQ号（可选）
+    # 第二个参数：静默模式（可选，值为"silent"时不等待用户输入）
+    local silent_mode=""
+    local specific_qq=""
+    
+    # 解析参数
     if [ -n "$1" ]; then
-        specific_qq="$1"
+        if [ "$1" = "silent" ]; then
+            silent_mode="silent"
+        else
+            specific_qq="$1"
+            if [ "$2" = "silent" ]; then
+                silent_mode="silent"
+            fi
+        fi
+    fi
+    
+    # 如果提供了QQ号作为参数，只停止该QQ号
+    if [ -n "$specific_qq" ]; then
         session_name="${TMUX_NAME}_${specific_qq}"
         
         if ! tmux list-sessions 2>/dev/null | grep -q ${session_name}; then
             echo -e ${yellow}QQ号 ${cyan}${specific_qq}${yellow} 未在运行${background}
-            echo -en ${cyan}回车返回${background};read
+            if [ "$silent_mode" != "silent" ]; then
+                echo -en ${cyan}回车返回${background};read
+            fi
             return 0
         fi
         
@@ -382,7 +468,9 @@ stop_NapCat() {
             fi
         fi
         
-        echo -en ${cyan}回车返回${background};read
+        if [ "$silent_mode" != "silent" ]; then
+            echo -en ${cyan}回车返回${background};read
+        fi
         return 0
     fi
     
@@ -391,30 +479,33 @@ stop_NapCat() {
         # 检查是否有任何QQ实例在运行
         if ! list_running_instances >/dev/null; then
             echo -e ${yellow}${APP_NAME}未运行${background}
-            echo -en ${cyan}回车返回${background};read
+            if [ "$silent_mode" != "silent" ]; then
+                echo -en ${cyan}回车返回${background};read
+            fi
             return 0
         else
             # 如果有QQ实例在运行，显示停止所有实例的选项
             echo -e ${yellow}发现以下QQ实例正在运行:${background}
             list_running_instances
+            
+            # 静默模式下直接停止所有实例
+            if [ "$silent_mode" = "silent" ]; then
+                stop_all_instances
+                return 0
+            fi
+            
             echo -en ${yellow}是否停止所有QQ实例? [y/N]${background};read stop_all
             case ${stop_all} in
                 Y|y)
-                    # 停止所有QQ实例
-                    for session in $(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}_" | cut -d: -f1); do
-                        qq_number=${session#${TMUX_NAME}_}
-                        echo -e ${yellow}正在停止QQ号 ${cyan}${qq_number}${yellow}...${background}
-                        tmux send-keys -t ${session} "Boolean=false" C-m
-                        sleep 1
-                        tmux kill-session -t ${session}
-                    done
-                    echo -e ${green}已停止所有QQ实例${background}
+                    stop_all_instances
                     ;;
                 *)
                     echo -e ${yellow}操作已取消${background}
                     ;;
             esac
-            echo -en ${cyan}回车返回${background};read
+            if [ "$silent_mode" != "silent" ]; then
+                echo -en ${cyan}回车返回${background};read
+            fi
             return 0
         fi
     fi
@@ -440,7 +531,9 @@ stop_NapCat() {
         fi
     fi
     
-    echo -en ${cyan}回车返回${background};read
+    if [ "$silent_mode" != "silent" ]; then
+        echo -en ${cyan}回车返回${background};read
+    fi
 }
 
 # 检查特定QQ号是否在运行
@@ -494,22 +587,7 @@ uninstall_NapCat() {
         Y|y)
             # 停止所有运行中的实例
             echo -e ${yellow}正在停止所有运行中的${APP_NAME}实例...${background}
-            
-            # 停止主实例（如果存在）
-            if check_running; then
-                tmux send-keys -t ${TMUX_NAME} "Boolean=false" C-m
-                sleep 1
-                tmux kill-session -t ${TMUX_NAME}
-            fi
-            
-            # 停止所有QQ号实例
-            for session in $(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}_" | cut -d: -f1); do
-                qq_number=${session#${TMUX_NAME}_}
-                echo -e ${yellow}正在停止QQ号 ${cyan}${qq_number}${yellow}...${background}
-                tmux send-keys -t ${session} "Boolean=false" C-m
-                sleep 1
-                tmux kill-session -t ${session}
-            done
+            stop_all_instances
             
             echo -e ${yellow}正在卸载${APP_NAME}...${background}
             
@@ -815,8 +893,8 @@ configure_ws() {
         "messagePostFormat": "array",
         "token": "",
         "debug": false,
-        "heartInterval": 30000,
-        "reconnectInterval": 30000
+        "heartInterval": 5000,
+        "reconnectInterval": 5000
       }
     ],
     "plugins": []
@@ -841,8 +919,8 @@ configure_ws() {
         "messagePostFormat": "array",
         "token": "",
         "debug": false,
-        "heartInterval": 30000,
-        "reconnectInterval": 30000
+        "heartInterval": 5000,
+        "reconnectInterval": 5000
       }
     ],
     "plugins": []
@@ -1017,8 +1095,8 @@ configure_ws() {
   "messagePostFormat": "array",
   "token": "${ws_token}",
   "debug": false,
-  "heartInterval": 30000,
-  "reconnectInterval": 30000
+  "heartInterval": 5000,
+  "reconnectInterval": 5000
 }
 EOF
                 )
@@ -1096,7 +1174,7 @@ EOF
   "token": "${ws_token}",
   "enableForcePushEvent": true,
   "debug": false,
-  "heartInterval": 30000
+  "heartInterval": 5000
 }
 EOF
                 )
@@ -2230,38 +2308,6 @@ configure_music_sign() {
     done
 }
 
-# 检查更新（如果有 NapCat 更新机制的话）
-check_update() {
-    echo -e ${yellow}正在检查${APP_NAME}更新...${background}
-    
-    # 因为不知道 NapCat 的具体更新方式，这里只是简单地重新运行安装脚本
-    echo -e ${yellow}将重新运行安装脚本以获取最新版本${background}
-    echo -en ${cyan}是否继续? [Y/n]${background};read yn
-    case ${yn} in
-        Y|y|"")
-            if check_running; then
-                echo -e ${yellow}更新前需要停止${APP_NAME}${background}
-                stop_NapCat > /dev/null 2>&1
-            fi
-            
-            curl -o ${INSTALL_SCRIPT} ${INSTALL_URL} && bash ${INSTALL_SCRIPT}
-            rm -f ${INSTALL_SCRIPT}
-            
-            echo -e ${green}${APP_NAME}更新完成${background}
-            echo -en ${yellow}是否重新启动${APP_NAME}? [Y/n]${background};read restart_yn
-            case ${restart_yn} in
-                Y|y|"")
-                    start_NapCat
-                    ;;
-            esac
-            ;;
-        *)
-            echo -e ${yellow}已取消更新${background}
-            echo -en ${cyan}回车返回${background};read
-            ;;
-    esac
-}
-
 # 管理多开实例
 manage_multi_instances() {
     while true; do
@@ -2289,7 +2335,7 @@ manage_multi_instances() {
         case $option in
             1)
                 # 启动新的QQ实例，使用force_start=true强制启动新实例
-                start_NapCat true
+                start_NapCat "" true
                 ;;
             2)
                 # 启动指定QQ号
@@ -2433,25 +2479,7 @@ manage_multi_instances() {
                 echo -e ${yellow}是否确认停止所有QQ实例? [y/N]${background};read confirm
                 
                 if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                    echo -e ${yellow}正在停止所有QQ实例...${background}
-                    
-                    # 停止主实例（如果存在）
-                    if check_running; then
-                        tmux send-keys -t ${TMUX_NAME} "Boolean=false" C-m
-                        sleep 1
-                        tmux kill-session -t ${TMUX_NAME}
-                    fi
-                    
-                    # 停止所有QQ号实例
-                    for session in $(tmux list-sessions 2>/dev/null | grep "^${TMUX_NAME}_" | cut -d: -f1); do
-                        qq_number=${session#${TMUX_NAME}_}
-                        echo -e ${yellow}正在停止QQ号 ${cyan}${qq_number}${yellow}...${background}
-                        tmux send-keys -t ${session} "Boolean=false" C-m
-                        sleep 1
-                        tmux kill-session -t ${session}
-                    done
-                    
-                    echo -e ${green}已停止所有QQ实例${background}
+                    stop_all_instances
                 else
                     echo -e ${yellow}操作已取消${background}
                 fi
@@ -2619,13 +2647,12 @@ main() {
     fi
 
     echo -e ${white}"====="${green}呆毛版-${APP_NAME}管理${white}"====="${background}
-    echo -e ${green}1. ${cyan}安装${APP_NAME}${background}
-    echo -e ${green}2. ${cyan}更新${APP_NAME}${background}
-    echo -e ${green}3. ${cyan}卸载${APP_NAME}${background}
-    echo -e ${green}4. ${cyan}WebUI 配置${background}
-    echo -e ${green}5. ${cyan}配置WebSocket接口${background}
-    echo -e ${green}6. ${cyan}音乐签名配置${background}
-    echo -e ${green}7. ${cyan}启动/多开QQ管理${background}
+    echo -e ${green}1. ${cyan}安装/更新${APP_NAME}${background}
+    echo -e ${green}2. ${cyan}卸载${APP_NAME}${background}
+    echo -e ${green}3. ${cyan}WebUI 配置${background}
+    echo -e ${green}4. ${cyan}配置WebSocket接口${background}
+    echo -e ${green}5. ${cyan}音乐签名配置${background}
+    echo -e ${green}6. ${cyan}启动/多开QQ管理${background}
     echo -e ${green}0. ${cyan}退出${background}
     echo "========================="
     echo -e ${green}${APP_NAME}状态: ${condition}${background}
@@ -2649,25 +2676,21 @@ main() {
             ;;
         2)
             echo
-            check_update
+            uninstall_NapCat
             ;;
         3)
             echo
-            uninstall_NapCat
+            manage_webui_config
             ;;
         4)
             echo
-            manage_webui_config
+            configure_ws
             ;;
         5)
             echo
-            configure_ws
-            ;;
-        6)
-            echo
             configure_music_sign
             ;;
-        7)
+        6)
             echo
             manage_multi_instances
             ;;
