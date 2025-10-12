@@ -2171,8 +2171,10 @@ configure_music_sign() {
         fi
     fi
     
-    # 默认音乐签名URL
-    DEFAULT_MUSIC_SIGN_URL="https://oiapi.net/API/QQMusic/SONArk"
+    # 预设音乐签名URL
+    MUSIC_SIGN_URL_1="https://oiapi.net/API/QQMusic/SONArk"
+    MUSIC_SIGN_URL_2="https://ss.xingzhige.com/music_card/card"
+    DEFAULT_MUSIC_SIGN_URL="$MUSIC_SIGN_URL_1"
     
     # 显示配置选项
     while true; do
@@ -2183,7 +2185,9 @@ configure_music_sign() {
         echo -e ${green}2. ${cyan}为指定QQ账号设置音乐签名URL${background}
         echo -e ${green}0. ${cyan}返回主菜单${background}
         echo -e ${yellow}"========================="${background}
-        echo -e ${green}默认URL: ${cyan}${DEFAULT_MUSIC_SIGN_URL}${background}
+        echo -e ${green}预设URL选项:${background}
+        echo -e ${cyan}1. ${MUSIC_SIGN_URL_1}${background}
+        echo -e ${cyan}2. ${MUSIC_SIGN_URL_2}${background}
         echo -e ${yellow}"========================="${background}
         
         echo -en ${green}请选择操作: ${background};read option
@@ -2192,8 +2196,32 @@ configure_music_sign() {
             1)
                 # 为所有QQ账号设置
                 echo -e ${yellow}即将为所有QQ账号设置音乐签名URL${background}
-                echo -en ${cyan}输入URL \(默认: ${DEFAULT_MUSIC_SIGN_URL}\): ${background};read music_url
-                music_url=${music_url:-$DEFAULT_MUSIC_SIGN_URL}
+                echo -e ${green}请选择音乐签名URL:${background}
+                echo -e ${cyan}1. ${MUSIC_SIGN_URL_1}${background}
+                echo -e ${cyan}2. ${MUSIC_SIGN_URL_2}${background}
+                echo -e ${cyan}3. 自定义URL${background}
+                echo -en ${green}请选择 [1-3]: ${background};read url_choice
+                
+                case $url_choice in
+                    1)
+                        music_url="$MUSIC_SIGN_URL_1"
+                        ;;
+                    2)
+                        music_url="$MUSIC_SIGN_URL_2"
+                        ;;
+                    3)
+                        echo -en ${cyan}请输入自定义URL: ${background};read music_url
+                        if [ -z "$music_url" ]; then
+                            echo -e ${red}URL不能为空${background}
+                            echo -en ${cyan}回车返回${background};read
+                            continue
+                        fi
+                        ;;
+                    *)
+                        echo -e ${red}无效的选择，使用默认URL${background}
+                        music_url="$DEFAULT_MUSIC_SIGN_URL"
+                        ;;
+                esac
                 
                 # 查找所有配置文件
                 config_files=$(find "$CONFIG_DIR" -name "onebot11_*.json" 2>/dev/null)
@@ -2284,8 +2312,38 @@ configure_music_sign() {
                 
                 echo -e ${yellow}QQ: ${cyan}${selected_qq}${background}
                 echo -e ${yellow}当前音乐签名URL: ${cyan}${current_url}${background}
-                echo -en ${cyan}输入新的URL \(默认: ${DEFAULT_MUSIC_SIGN_URL}\): ${background};read music_url
-                music_url=${music_url:-$DEFAULT_MUSIC_SIGN_URL}
+                echo -e ${green}请选择音乐签名URL:${background}
+                echo -e ${cyan}1. ${MUSIC_SIGN_URL_1}${background}
+                echo -e ${cyan}2. ${MUSIC_SIGN_URL_2}${background}
+                echo -e ${cyan}3. 自定义URL${background}
+                echo -e ${cyan}4. 保持当前URL${background}
+                echo -en ${green}请选择 [1-4]: ${background};read url_choice
+                
+                case $url_choice in
+                    1)
+                        music_url="$MUSIC_SIGN_URL_1"
+                        ;;
+                    2)
+                        music_url="$MUSIC_SIGN_URL_2"
+                        ;;
+                    3)
+                        echo -en ${cyan}请输入自定义URL: ${background};read music_url
+                        if [ -z "$music_url" ]; then
+                            echo -e ${red}URL不能为空，保持当前设置${background}
+                            echo -en ${cyan}回车返回${background};read
+                            continue
+                        fi
+                        ;;
+                    4)
+                        echo -e ${yellow}保持当前URL不变${background}
+                        echo -en ${cyan}回车返回${background};read
+                        continue
+                        ;;
+                    *)
+                        echo -e ${red}无效的选择，使用默认URL${background}
+                        music_url="$DEFAULT_MUSIC_SIGN_URL"
+                        ;;
+                esac
                 
                 # 备份原配置文件
                 cp "$selected_config" "${selected_config}.bak"}
