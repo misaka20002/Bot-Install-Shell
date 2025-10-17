@@ -203,8 +203,38 @@ pnpm install sqlite3@5.1.6 -w
 }
 
 LowerPptr(){
-pnpm uninstall puppeteer
-pnpm install puppeteer@13.7.0 -w
+echo -e ${white}"====="${green}Puppeteer 版本管理${white}"====="${background}
+echo -e ${green}请选择您的操作${background}
+echo -e  ${green} 1. ${cyan}降级到 puppeteer@13.7.0 ${yellow}\(兼容性较好\)${background}
+echo -e  ${green} 2. ${cyan}更新到最新版 puppeteer${background}
+echo -e  ${green} 0. ${cyan}返回${background}
+echo "========================="
+echo -en ${green}请输入您的选项: ${background};read num
+case ${num} in
+  1)
+    echo -e ${cyan}正在卸载当前 puppeteer...${background}
+    pnpm uninstall puppeteer
+    echo -e ${cyan}正在安装 puppeteer@13.7.0...${background}
+    pnpm install puppeteer@13.7.0 -w
+    echo -e ${green}puppeteer@13.7.0 安装完成${background}
+    echo -en ${cyan}回车返回${background};read
+    ;;
+  2)
+    echo -e ${cyan}正在卸载当前 puppeteer...${background}
+    pnpm uninstall puppeteer
+    echo -e ${cyan}正在安装最新版 puppeteer...${background}
+    pnpm install puppeteer -w
+    echo -e ${green}最新版 puppeteer 安装完成${background}
+    echo -en ${cyan}回车返回${background};read
+    ;;
+  0)
+    return
+    ;;
+  *)
+    echo -e ${red}输入错误${background}
+    echo -en ${cyan}回车返回${background};read
+    ;;
+esac
 }
 
 CheckAndInstallNvm() {
