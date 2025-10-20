@@ -1,4 +1,4 @@
-old_version="1.1.91"
+old_version="1.1.92"
 
 cd $HOME
 export red="\033[31m"
@@ -507,8 +507,8 @@ case $1 in
           if tmux new-session -s ${TmuxName} -d bash
           then
             echo -e ${cyan}已创建tmux会话: ${TmuxName}${background}
-            # 直接启动node应用
-            tmux send-keys -t ${TmuxName} "node app" Enter
+            # 创建自动重启循环脚本
+            tmux send-keys -t ${TmuxName} "while true; do node app; echo -e '\033[33m${BotName} 已退出，2秒后自动重启...\033[0m'; sleep 2; done" Enter
             ProgressBar "启动"
           else
             ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} 启动失败" 10 60
