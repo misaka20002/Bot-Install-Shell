@@ -22,14 +22,15 @@ case $(uname -m) in
 ;;
 esac
 
+# 控制 Bot 初始化安装的时候 Node.js 的版本号 # 更换 Node.js 的版本号为 23.11
 if ping -c 1 google.com > /dev/null 2>&1
 then
     NpmMirror="https://registry.npmjs.org"
-    NodeJS_URL="https://nodejs.org/dist/latest-v18.x/node-v18.19.0-linux-${ARCH}.tar.xz"
+    NodeJS_URL="https://nodejs.org/dist/latest-v23.x/node-v23.11.1-linux-${ARCH}.tar.xz"
 elif ping -c 1 baidu.com > /dev/null 2>&1
 then
     NpmMirror="https://registry.npmjs.org"
-    NodeJS_URL="https://registry.npmmirror.com/-/binary/node/latest-v18.x/node-v18.19.0-linux-${ARCH}.tar.xz"
+    NodeJS_URL="https://registry.npmmirror.com/-/binary/node/latest-v23.x/node-v23.11.1-linux-${ARCH}.tar.xz"
     NodeJS_URL=$(curl ${NodeJS_URL})
     NodeJS_URL=$(echo ${NodeJS_URL#*\"})
     NodeJS_URL=$(echo ${NodeJS_URL%\"*})
