@@ -16,7 +16,7 @@ export PATH=$PATH:/usr/local/node/bin
 export PATH=$PATH:/root/.local/share/pnpm
 export PNPM_HOME=/root/.local/share/pnpm
 i=0
-until echo "Y" | pnpm install -P
+until pnpm install -P --force --no-frozen-lockfile
 do
     echo -e ${red}依赖安装失败 ${green}正在重试${background}
     if [ ! -d $HOME/.local/share/pnpm ];then
@@ -35,7 +35,7 @@ do
     pnpm uninstall sqlite3
     pnpm install sqlite3@5.1.6
 done
-echo Y | pnpm install
+pnpm install --force --no-frozen-lockfile
 pnpm install puppeteer@19.4.0 -w
 pnpm install icqq@latest -w
 echo -en ${yellow}正在初始化${background}

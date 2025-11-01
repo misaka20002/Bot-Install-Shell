@@ -531,7 +531,7 @@ else
     then
       echo -e ${cyan}正在为 ${Name} 安装依赖${background}
       cd plugins/${PluginFolder}
-      if ! echo "Y" | pnpm install
+      if ! pnpm install --force --no-frozen-lockfile
       then
         echo ${yellow}${Name} 依赖安装失败 跳过${background}
         rm -rf plugins/${PluginFolder} > /dev/null 2>&1

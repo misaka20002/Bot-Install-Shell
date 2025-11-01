@@ -170,7 +170,7 @@ do
 done
 echo -e ${cyan}正在安装BOT依赖${background}
 sed -i "s/\^5.1.6/5.1.6/g" package.json
-until echo "Y" | pnpm install -P && echo "Y" | pnpm install
+until pnpm install -P --force --no-frozen-lockfile && pnpm install --force --no-frozen-lockfile
 do
     echo -e ${red}依赖安装失败 ${green}正在重试${background}
     if [ "${i}" == "3" ];then
