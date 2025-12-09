@@ -1822,7 +1822,7 @@ echo -e ${green}meme自动更新服务: ${auto_update_condition}${background}
 if [ "${condition}" = "${green}[运行中]" ]; then
     echo -e ${green}MEME api: ${cyan}http://localhost:${Port}${background}
 fi
-echo -e ${green}QQ群:${cyan}呆毛版-QQ群:285744328${background}
+echo -e ${green}QQ群:${cyan}呆毛版-QQ群:1022982073${background}
 echo "========================="
 echo
 echo -en ${green}请输入您的选项: ${background};read number

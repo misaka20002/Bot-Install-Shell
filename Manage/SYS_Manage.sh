@@ -421,7 +421,7 @@ main() {
     echo "========================="
     echo -e ${green}系统信息: $(uname -s) $(uname -r) $(uname -m)${background}
     echo -e ${green}内存状态: $(free -h | grep Mem | awk '{print $3"/"$2" 使用"}')${background}
-    echo -e ${green}QQ群: ${cyan}呆毛版-QQ群:285744328${background}
+    echo -e ${green}QQ群: ${cyan}呆毛版-QQ群:1022982073${background}
     echo "========================="
     echo
     echo -en ${green}请输入您的选项: ${background};read number

@@ -132,3 +132,13 @@ bash <(curl -sL https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/
 | 白狐脚本 | [☞Gitee](https://gitee.com/baihu433/Yunzai-Bot-Shell) | 云崽自动化部署及管理脚本 |
 | Lagrange | [☞GitHub](https://github.com/LagrangeDev/Lagrange.Core) | An Implementation of NTQQ Protocol, with Pure C#, Derived from Konata.Core |
 | NapCat | [☞GitHub](https://napneko.github.io/) | 现代化的基于 NTQQ 的 Bot 协议端实现 |
+
+---
+
+<div align="center">
+
+### 🎨 让创意永不枯竭！✨
+
+**[📚 查看插件主页](/) | [💬 加入交流群1](https://qm.qq.com/q/unjAw930RO) [💬 加入交流群2](https://qm.qq.com/q/tEqFnH0kTe) | [⭐ 给个Star](/)**
+
+</div>

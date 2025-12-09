@@ -1,4 +1,4 @@
-old_version="1.1.92"
+old_version="1.1.93"
 
 cd $HOME
 export red="\033[31m"
@@ -185,7 +185,7 @@ echo -e ${cyan} xdm tz ${blue}TRSS-Yunzai根目录${background}
 echo -e ${cyan} xdm mzlog ${blue}打开 Miao 运行日志${background}
 echo -e ${cyan} xdm tzlog ${blue}打开 TRSS 运行日志${background}
 echo -e ${green}===============================${background}
-echo -e ${yellow} Bot-Shell ${cyan}呆毛版-QQ群: 285744328${background}
+echo -e ${yellow} Bot-Shell ${cyan}呆毛版-QQ群: 1022982073${background}
 echo -e ${green}=============================${background}
 }
 ##############################
@@ -765,7 +765,7 @@ function OperatingEnvironmentInstall(){
 }
 
 Number=$(${DialogWhiptail} \
---title "呆毛版 QQ群:285744328" \
+--title "呆毛版 QQ群:1022982073" \
 --menu "${BotName}管理" \
 23 35 15 \
 "1" "启动运行" \
@@ -875,7 +875,7 @@ function gotoBotPath(){
 }
 function master(){
 Number=$(${DialogWhiptail} \
---title "呆毛版 QQ群:285744328" \
+--title "呆毛版 QQ群:1022982073" \
 --menu "💡 提示: 发送 xdm help 获取更多快捷键" \
 20 38 10 \
 "1" "Miao-Yunzai" \

@@ -135,7 +135,7 @@ DWPluginPage(){
             tips="[空格选择 回车确定 空选取消]"
         fi
         if ! number=$(${dialog_whiptail} \
-        --title "呆毛版-QQ群:285744328" \
+        --title "呆毛版-QQ群:1022982073" \
         --${checklist_menu} "选择您喜欢的插件吧! ${tips}" \
         26 60 20 \
         "1" "miao-plugin                    喵喵插件" ${OFF} \
@@ -1302,7 +1302,7 @@ function main(){
 function dialog_whiptail_page(){
 number=$(${dialog_whiptail} \
 --title "呆毛版" \
---menu "呆毛版的QQ群:285744328" \
+--menu "呆毛版的QQ群:1022982073" \
 20 40 10 \
 "1" "安装GIT插件" \
 "2" "安装JS插件" \
@@ -1327,7 +1327,7 @@ function echo_page(){
     echo -e ${green}5.  ${cyan}删除JS插件${background}
     echo -e ${green}0.  ${cyan}返回\/退出${background}
     echo "#########################"
-    echo -e ${green}QQ群:${cyan}呆毛版-QQ群:285744328${background}
+    echo -e ${green}QQ群:${cyan}呆毛版-QQ群:1022982073${background}
     echo "#########################"
     echo
     echo -en ${green}请输入您的选项: ${background};read number
@@ -1356,7 +1356,7 @@ fi
 function choose_path(){
 function dialog_whiptail_page(){ 
 number=$(${dialog_whiptail} \
---title "呆毛版 QQ群:285744328" \
+--title "呆毛版 QQ群:1022982073" \
 --menu "请选择您要为哪一个bot管理插件" \
 20 40 10 \
 "1" "Yunzai-Bot" \
@@ -1383,7 +1383,7 @@ function echo_page(){
     echo -e ${green}5.  ${cyan}Yxy-Bot${background}
     echo -e ${green}0.  ${cyan}退出${background}
     echo "#########################"
-    echo -e ${green}QQ群:${cyan}呆毛版-QQ群:285744328${background}
+    echo -e ${green}QQ群:${cyan}呆毛版-QQ群:1022982073${background}
     echo "#########################"
     echo
     echo -en ${green}请输入您的选项: ${background};read number

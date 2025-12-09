@@ -10,7 +10,7 @@ export white="\033[37m"
 export background="\033[0m"
 
 if [ "$(uname -o)" = "Android" ]; then
-	echo "看来你是大聪明 加Q群获取帮助吧 285744328"
+	echo "看来你是大聪明 加Q群获取帮助吧 1022982073"
 	exit 1
 fi
 

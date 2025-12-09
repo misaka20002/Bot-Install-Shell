@@ -1716,7 +1716,7 @@ echo -e  ${green} 4.  ${cyan}登陆/多开QQ管理${background}
 echo -e  ${green} 0.  ${cyan}退出${background}
 echo "========================="
 echo -e ${green}说明: ${cyan}安装后（已默认配置trss连接），启动-扫码登录-转后台运行，启动TRSS即可。${background}
-echo -e ${green}呆毛版-QQ群: ${cyan}285744328${background}
+echo -e ${green}呆毛版-QQ群: ${cyan}1022982073${background}
 echo "========================="
 echo
 echo -en ${green}请输入您的选项: ${background};read number
