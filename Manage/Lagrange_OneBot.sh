@@ -728,90 +728,6 @@ change_sign_version_for_account(){
   echo -en ${cyan}回车返回${background};read
 }
 
-install_Lagrange(){
-if [ -d $INSTALL_DIR ];then
-  echo -e ${yellow}您已安装拉格朗日签名服务器${background}
-  echo -en ${cyan}是否重新安装? [Y/n]${background};read yn
-  case ${yn} in
-  Y|y)
-    rm -rf $INSTALL_DIR
-    ;;
-  *)
-    return
-    ;;
-  esac
-fi
-
-if [ -e /etc/resolv.conf ]; then
-  if ! grep -q "8.8.8.8" /etc/resolv.conf ;then
-    cp -f /etc/resolv.conf /etc/resolv.conf.backup
-    echo -e ${yellow}DNS已备份至 /etc/resolv.conf.backup${background}
-    echo "nameserver 8.8.8.8" > /etc/resolv.conf
-    echo -e ${yellow}DNS已修改为 8.8.8.8${background}
-  fi
-fi
-
-if [ $(command -v apt) ];then
-  apt update -y
-  apt install -y tar gzip wget curl unzip git tmux pv jq
-elif [ $(command -v yum) ];then
-  yum makecache -y
-  yum install -y tar gzip wget curl unzip git tmux pv jq
-elif [ $(command -v dnf) ];then
-  dnf makecache -y
-  dnf install -y tar gzip wget curl unzip git tmux pv jq
-elif [ $(command -v pacman) ];then
-  pacman -Syy --noconfirm --needed tar gzip wget curl unzip git tmux pv jq
-else
-  echo -e ${red}不受支持的Linux发行版${background}
-  exit
-fi
-
-mkdir -p $INSTALL_DIR
-mkdir -p $INSTALL_DIR/accounts
-
-echo -e ${yellow}正在下载拉格朗日签名服务器...${background}
-until wget -O lagrange.tar.gz -c ${LAGRANGE_URL}
-do
-  echo -e ${red}下载失败 ${green}正在重试${background}
-done
-
-echo -e ${yellow}正在解压文件,请耐心等候${background}
-# 创建临时目录进行解压
-TMP_DIR=$HOME/temp_lagrange
-rm -rf $TMP_DIR
-mkdir -p $TMP_DIR
-pv lagrange.tar.gz | tar -zxf - -C $TMP_DIR
-
-# 移动正确的文件到安装目录
-echo -e ${yellow}正在移动可执行文件...${background}
-if [ -f $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/Lagrange.OneBot ]; then
-    # 复制可执行文件到安装目录
-    cp $TMP_DIR/Lagrange.OneBot/bin/Release/net9.0/linux-${ARCH}/publish/Lagrange.OneBot $INSTALL_DIR/
-    chmod +x $INSTALL_DIR/Lagrange.OneBot
-    
-    # 清理临时文件
-    echo -e ${yellow}正在清理临时文件...${background}
-    rm -f lagrange.tar.gz
-    rm -rf $TMP_DIR
-else
-    echo -e ${red}未找到可执行文件，解压路径可能有变化${background}
-    echo -e ${yellow}请检查解压后的文件结构${background}
-    exit 1
-fi
-
-echo -e ${green}安装完成${background}
-echo -en ${cyan}现在要创建一个QQ账号吗？[Y/n]${background};read yn
-case ${yn} in
-Y|y|"")
-  manage_multi_qq
-  ;;
-*)
-  echo -en ${cyan}回车返回主菜单${background};read
-  ;;
-esac
-}
-
 manage_implementations_with_path(){
   local custom_config_file="$1"
   local account_name="$2"
@@ -1571,9 +1487,9 @@ create_new_qq(){
   create_config_for_account "$qq_name"
   
   echo -e ${green}账号 ${cyan}$qq_name ${green}创建成功${background}
-  echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}管理OneBot连接配置-管理AccessToken${background}
-  echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}管理OneBot连接配置-管理AccessToken${background}
-  echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}管理OneBot连接配置-管理AccessToken${background}
+    for _ in {1..3}; do
+        echo -e "${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}管理OneBot连接配置-管理AccessToken${background}"
+    done
   echo -en ${cyan}是否立即进入该账号管理? [Y/n]: ${background};read start_now
   
   case $start_now in

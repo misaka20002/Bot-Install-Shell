@@ -44,6 +44,11 @@ NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox"
 NAPCAT_PATH="/root/Napcat/opt/QQ/qq"
 APP_NAME="NapCat"
 
+# 版本信息缓存（内存）
+VERSION_INFO_CACHED=false
+VERSION_CACHE_TIME=0
+VERSION_CACHE_TIMEOUT=3600  # 60分钟缓存
+
 # 检查 tmux 是否安装
 check_tmux() {
     if ! command -v tmux &> /dev/null; then
@@ -69,7 +74,8 @@ check_tmux() {
 # 安装 NapCat
 install_NapCat() {
     if check_installed; then
-        echo -e ${yellow}已安装 ${APP_NAME} 将重新运行安装脚本以获取最新版本${background}
+        echo -e ${yellow}已安装 ${APP_NAME} 将重新运行安装脚本以获取最新版本；${background}
+        echo -e ${yellow}注意: NapCat版本号不更新是那些猫娘偷懒，只要使用更新之后就会自动安装最新的Nightly版本，大可放宽心${background}
         echo -en ${cyan}是否继续? [Y/n]${background};read yn
         case ${yn} in
             Y|y|"")
@@ -121,10 +127,14 @@ install_NapCat() {
     # 安装后清理
     rm -f ${INSTALL_SCRIPT}
     
-    echo -e ${green}${APP_NAME}安装完成${background}
-    echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}配置WebSocket接口-管理WebSocket Token${background}
-    echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}配置WebSocket接口-管理WebSocket Token${background}
-    echo -e ${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}配置WebSocket接口-管理WebSocket Token${background}
+    echo -e "${green}${APP_NAME}安装完成${background}"
+    for _ in {1..3}; do
+        echo -e "${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}Ws 接口配置-管理WebSocket Token${background}"
+    done
+    
+    # 清除版本缓存
+    clear_version_cache
+    
     echo -en ${yellow}是否启动${APP_NAME}? [Y/n]${background};read yn
     case ${yn} in
     Y|y)
@@ -704,6 +714,7 @@ manage_webui_config() {
     
     while true; do
         # clear
+        echo
         echo -e ${white}"====="${green}WebUI 配置管理${white}"====="${background}
         
         # 读取当前配置
@@ -933,6 +944,7 @@ configure_ws() {
     # 管理WebSocket连接的主菜单
     while true; do
         # clear
+        echo
         echo -e ${white}"====="${green}WebSocket配置管理 - QQ: ${selected_qq}${white}"====="${background}
         
         # 检查当前配置
@@ -1005,7 +1017,7 @@ configure_ws() {
         echo -e ${green}4. ${cyan}编辑WebSocket接口${background}
         echo -e ${green}5. ${cyan}删除WebSocket接口${background}
         echo -e ${green}6. ${cyan}启用/禁用WebSocket接口${background}
-        echo -e ${green}7. ${cyan}管理WebSocket Token${background}
+        echo -e ${green}7. ${cyan}管理WebSocket Token（重要）${background}
         echo -e ${green}0. ${cyan}返回上级菜单${background}
         echo -e ${yellow}"==========================="${background}
         
@@ -1015,6 +1027,7 @@ configure_ws() {
             1)
                 # 使用预设模板子菜单
                 # clear
+                echo
                 echo -e ${white}"====="${green}WebSocket预设模板${white}"====="${background}
                 echo -e ${green}1. ${cyan}使用 lain 反向WebSocket配置${background}
                 echo -e ${green}2. ${cyan}使用 trss 反向WebSocket配置${background}
@@ -2179,6 +2192,7 @@ configure_music_sign() {
     # 显示配置选项
     while true; do
         # clear
+        echo
         echo -e ${white}"====="${green}音乐签名URL配置${white}"====="${background}
         
         echo -e ${green}1. ${cyan}为所有QQ账号设置音乐签名URL${background}
@@ -2370,6 +2384,7 @@ configure_music_sign() {
 manage_multi_instances() {
     while true; do
         # clear
+        echo
         echo -e ${white}"====="${green}QQ多开实例管理${white}"====="${background}
         
         # 显示当前运行的QQ实例
@@ -2687,15 +2702,206 @@ manage_multi_instances() {
     done
 }
 
+# 获取当前 QQ 版本
+get_current_qq_version() {
+    local qq_package_json="/root/Napcat/opt/QQ/resources/app/package.json"
+    if [ -f "$qq_package_json" ]; then
+        qq_version=$(jq -r '.version' "$qq_package_json" 2>/dev/null)
+        if [ -z "$qq_version" ] || [ "$qq_version" = "null" ]; then
+            qq_version="未知"
+        fi
+    else
+        qq_version="未安装"
+    fi
+}
+
+# 获取当前 NapCat 版本
+get_current_napcat_version() {
+    local napcat_mjs="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/napcat.mjs"
+    
+    # 检查 napcat.mjs 文件是否存在
+    if [ ! -f "$napcat_mjs" ] || [ ! -r "$napcat_mjs" ]; then
+        napcat_version="未安装"
+        return
+    fi
+    
+    # 从 napcat.mjs 文件中提取版本号
+    # 查找 'const version = "x.x.x"' 格式的版本号
+    napcat_version=$(grep 'const version = "' "$napcat_mjs" | sed -n 's/.*const version = "\([^"]*\)".*/\1/p' | head -1)
+    
+    # 验证版本号是否有效
+    if [ -z "$napcat_version" ] || [ "$napcat_version" = "null" ]; then
+        napcat_version="未知"
+        return
+    fi
+    
+    # 验证版本号格式（应该是 x.y.z 格式）
+    if ! [[ "$napcat_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        napcat_version="未知"
+        return
+    fi
+}
+
+# 检查版本缓存（内存）
+check_version_cache() {
+    if [ "$VERSION_INFO_CACHED" = "true" ]; then
+        local current_time=$(date +%s)
+        local time_diff=$((current_time - VERSION_CACHE_TIME))
+        
+        if [ $time_diff -lt $VERSION_CACHE_TIMEOUT ]; then
+            # 缓存未过期，使用内存中的版本信息
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# 保存版本信息到缓存（内存）
+save_version_cache() {
+    VERSION_INFO_CACHED=true
+    VERSION_CACHE_TIME=$(date +%s)
+}
+
+# 获取 QQ 目标版本（从远程脚本）
+get_qq_target_version() {
+    local target_version=""
+    
+    # 尝试从远程脚本获取目标版本
+    target_version=$(curl -s --connect-timeout 3 --max-time 5 "$INSTALL_URL" 2>/dev/null | \
+        grep -oP 'linuxqq_target_version="\K[0-9]+\.[0-9]+\.[0-9]+-[0-9]+' | head -1)
+    
+    # 如果获取失败，使用默认版本
+    if [ -z "$target_version" ]; then
+        target_version="3.2.20-40990"
+    fi
+    
+    echo "$target_version"
+}
+
+# 检查是否有更新（QQ版本）
+check_qq_update() {
+    local current_version="$1"
+    local target_qq_version=$(get_qq_target_version)
+    
+    if [ "$current_version" = "未安装" ] || [ "$current_version" = "未知" ]; then
+        echo "${yellow}[需要安装]${background}"
+    elif [ "$current_version" = "$target_qq_version" ]; then
+        echo "${green}[最新]${background}"
+    else
+        echo "${yellow}[可更新到 $target_qq_version]${background}"
+    fi
+}
+
+# 检查 NapCat 是否有更新
+check_napcat_update() {
+    local current_version="$1"
+    
+    if [ "$current_version" = "未安装" ] || [ "$current_version" = "未知" ]; then
+        echo "${yellow}[需要安装]${background}"
+        return
+    fi
+    
+    # 多个镜像源URL
+    local urls=(
+        "https://nclatest.znin.net/"
+        "https://jiashu.1win.eu.org/https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
+        "https://napcatversion.109834.xyz/https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
+        "https://spring-night-57a1.3540746063.workers.dev/https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
+        "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
+    )
+    
+    local result_file=$(mktemp)
+    trap 'rm -f "$result_file"' RETURN
+    
+    # 子函数：并发获取版本并写入临时文件
+    fetch_version() {
+        local url="$1"
+        local tmp_file="$2"
+        local tag=$(curl -s --connect-timeout 3 --max-time 5 "$url" 2>/dev/null | jq -r '.tag_name // empty' 2>/dev/null)
+        
+        if [ -n "$tag" ] && [ "$tag" != "null" ]; then
+            # 使用 flock 保证原子写入（仅写入第一个成功的结果）
+            (
+                flock -x 9
+                if [ ! -s "$tmp_file" ]; then
+                    echo "$tag" > "$tmp_file"
+                fi
+            ) 9>"$tmp_file" 2>/dev/null
+        fi
+    }
+    
+    # 并发获取远程版本
+    for url in "${urls[@]}"; do
+        fetch_version "$url" "$result_file" &
+    done
+    
+    # 等待结果（最多3秒）
+    local wait_timeout=3
+    for (( i=0; i < wait_timeout * 10; i++ )); do
+        if [ -s "$result_file" ]; then
+            break
+        fi
+        sleep 0.1
+    done
+    
+    # 获取远程版本
+    local latest_version=""
+    if [ -s "$result_file" ]; then
+        latest_version=$(head -n 1 "$result_file" | sed 's/^v//')
+    fi
+    
+    rm -f "$result_file"
+    
+    if [ -z "$latest_version" ]; then
+        echo "${cyan}[无法检查更新]${background}"
+        return
+    fi
+    
+    # 转换为纯数字进行比较（去除 v 和 .）
+    local current_numeric="${current_version//[v.]/}"
+    local latest_numeric="${latest_version//[v.]/}"
+    
+    # 验证版本号格式
+    if ! [[ "$current_numeric" =~ ^[0-9]+$ ]] || ! [[ "$latest_numeric" =~ ^[0-9]+$ ]]; then
+        echo "${cyan}[无法比较版本]${background}"
+        return
+    fi
+    
+    # 数字比较
+    if [ "$latest_numeric" -gt "$current_numeric" ]; then
+        echo "${yellow}[Nightly: $latest_version]${background}"
+    else
+        echo "${green}[最新]${background}"
+    fi
+}
+
+# 获取版本信息（带缓存）
+get_version_info() {
+    if ! check_version_cache; then
+        # 缓存过期或不存在，重新获取
+        get_current_qq_version
+        get_current_napcat_version
+        qq_update_status=$(check_qq_update "$qq_version")
+        napcat_update_status=$(check_napcat_update "$napcat_version")
+        save_version_cache
+    fi
+}
+
+# 清除版本缓存（在安装/更新后调用）
+clear_version_cache() {
+    VERSION_INFO_CACHED=false
+    VERSION_CACHE_TIME=0
+}
+
 # 主菜单
 main() {
     if check_installed; then
         if check_running; then
-            condition="${green}[已启动]"
+            condition="${yellow}[已启动]"
         else
             # 检查是否有其他实例运行
             if list_running_instances >/dev/null; then
-                condition="${green}[多实例运行中]"
+                condition="${yellow}[多实例运行中]"
             else
                 condition="${red}[未启动]"
             fi
@@ -2705,16 +2911,24 @@ main() {
     fi
 
     echo -e ${white}"====="${green}呆毛版-${APP_NAME}管理${white}"====="${background}
-    echo -e ${green}1. ${cyan}安装/更新${APP_NAME}${background}
-    echo -e ${green}2. ${cyan}卸载${APP_NAME}${background}
+    echo -e ${green}1. ${cyan}安装/更新${background}
+    echo -e ${green}2. ${cyan}卸载${background}
     echo -e ${green}3. ${cyan}WebUI 配置${background}
-    echo -e ${green}4. ${cyan}配置WebSocket接口${background}
+    echo -e ${green}4. ${cyan}Ws 接口配置${background}
     echo -e ${green}5. ${cyan}音乐签名配置${background}
     echo -e ${green}6. ${cyan}启动/多开QQ管理${background}
     echo -e ${green}0. ${cyan}退出${background}
     echo "========================="
-    echo -e ${green}${APP_NAME}状态: ${condition}${background}
     
+    # 显示版本信息（使用缓存）
+    if check_installed; then
+        get_version_info
+        
+        echo -e ${green}QQ版本: ${cyan}${qq_version}${background} ${qq_update_status}
+        echo -e ${green}NapCat版本: ${cyan}${napcat_version}${background} ${napcat_update_status}
+    fi
+    
+    echo -e ${green}${APP_NAME}状态: ${condition}${background}
     # 如果有实例在运行，显示实例信息
     if list_running_instances >/dev/null; then
         echo -e ${green}运行中的实例:${background}
@@ -2722,8 +2936,9 @@ main() {
         echo "========================="
     fi
     
-    echo -e ${green}说明: ${cyan}前台登录-ctrl+c退出-配置WebSocket接口-推荐使用 trss 反向WebSocket配置-管理WebSocket Token（重要）-后台启动即可。${background}
+    echo -e ${green}说明: ${cyan}前台登录-ctrl+c退出-Ws 接口配置-推荐使用 trss 反向WebSocket配置-管理WebSocket Token（重要）-后台启动即可。${background}
     echo -e ${green}NapCat TUI-CLI 启动指令:  ${cyan}napcat${background}
+    echo -e ${green}呆毛版-QQ群: ${cyan}1022982073${background}
     echo "========================="
     echo
     echo -en ${green}请输入您的选项: ${background};read number
