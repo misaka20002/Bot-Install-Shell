@@ -329,14 +329,10 @@ start_NapCat() {
     fi
     
     # 选择启动方式
-    if [ "$auto_background" = "true" ] || [ -n "$specific_qq" ]; then
-        # 自动选择后台启动（用于重启功能或启动指定QQ号）
+    if [ "$auto_background" = "true" ]; then
+        # 自动选择后台启动（用于重启功能）
         start_option=2
-        if [ "$auto_background" = "true" ]; then
-            echo -e ${yellow}自动选择后台启动模式（重启）${background}
-        else
-            echo -e ${yellow}自动选择后台启动模式${background}
-        fi
+        echo -e ${yellow}自动选择后台启动模式（重启）${background}
     else
         echo -e ${cyan}请选择启动方式${background}
         echo -e ${green}1.  ${cyan}前台启动（首次登录）${background}
@@ -352,12 +348,23 @@ start_NapCat() {
             echo -e ${cyan}提示: 退出请按 Ctrl+C${background}
             # 添加自动重启功能
             export Boolean=true
+            
+            # 捕获 Ctrl+C 信号，优雅退出
+            trap 'Boolean=false; echo -e "\n${yellow}正在退出...${background}"' SIGINT
+            
             while ${Boolean}
             do 
                 ${NAPCAT_CMD}
-                echo -e ${red}${APP_NAME}已关闭，正在重启...${background}
-                sleep 2s
+                # 只有在未按 Ctrl+C 时才重启
+                if ${Boolean}; then
+                    echo -e ${red}${APP_NAME}已关闭，正在重启...${background}
+                    sleep 2s
+                fi
             done
+            
+            # 恢复默认的信号处理
+            trap - SIGINT
+            
             echo -en ${cyan}回车返回${background};read
             ;;
         2)
@@ -2897,7 +2904,7 @@ clear_version_cache() {
 main() {
     if check_installed; then
         if check_running; then
-            condition="${yellow}[已启动]"
+            condition="${cyan}[已启动]"
         else
             # 检查是否有其他实例运行
             if list_running_instances >/dev/null; then
