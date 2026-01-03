@@ -75,7 +75,6 @@ check_tmux() {
 install_NapCat() {
     if check_installed; then
         echo -e ${yellow}已安装 ${APP_NAME} 将重新运行安装脚本以获取最新版本；${background}
-        echo -e ${yellow}注意: NapCat版本号不更新是那些猫娘偷懒，只要使用更新之后就会自动安装最新的Nightly版本，大可放宽心${background}
         echo -en ${cyan}是否继续? [Y/n]${background};read yn
         case ${yn} in
             Y|y|"")
@@ -127,13 +126,30 @@ install_NapCat() {
     # 安装后清理
     rm -f ${INSTALL_SCRIPT}
     
+    # 自动运行一次以生成日志文件，便于获取版本信息
+    echo -e ${yellow}正在初始化${APP_NAME}以获取版本信息...${background}
+    check_tmux
+    
+    # 创建临时会话运行 NapCat（只执行一次）
+    local temp_session="napcat_init_temp"
+    tmux new-session -d -s ${temp_session} "${NAPCAT_CMD}"
+    
+    # 等待5秒让其生成日志
+    # echo -e ${cyan}等待日志生成中...${background}
+    sleep 5
+    
+    # 停止临时会话
+    tmux kill-session -t ${temp_session} 2>/dev/null
+    
+    echo -e ${green}初始化完成，版本信息已更新${background}
+    
+    # 清除缓存以便重新获取版本
+    clear_version_cache
+    
     echo -e "${green}${APP_NAME}安装完成${background}"
     for _ in {1..3}; do
         echo -e "${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}Ws 接口配置-管理WebSocket Token${background}"
     done
-    
-    # 清除版本缓存
-    clear_version_cache
     
     echo -en ${yellow}是否启动${APP_NAME}? [Y/n]${background};read yn
     case ${yn} in
@@ -2724,29 +2740,43 @@ get_current_qq_version() {
 
 # 获取当前 NapCat 版本
 get_current_napcat_version() {
-    local napcat_mjs="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/napcat.mjs"
+    local napcat_dir="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat"
+    local napcat_logs_dir="$napcat_dir/logs"
+    local napcat_version_help="首次运行以获取版本号"
     
-    # 检查 napcat.mjs 文件是否存在
-    if [ ! -f "$napcat_mjs" ] || [ ! -r "$napcat_mjs" ]; then
+    # 检查 napcat 目录是否存在
+    if [ ! -d "$napcat_dir" ]; then
         napcat_version="未安装"
         return
     fi
     
-    # 从 napcat.mjs 文件中提取版本号
-    # 查找 'const version = "x.x.x"' 格式的版本号
-    napcat_version=$(grep 'const version = "' "$napcat_mjs" | sed -n 's/.*const version = "\([^"]*\)".*/\1/p' | head -1)
+    # 检查日志目录是否存在或是否有日志文件
+    if [ ! -d "$napcat_logs_dir" ]; then
+        napcat_version="$napcat_version_help"
+        return
+    fi
+    
+    local log_count=$(cd "$napcat_logs_dir" 2>/dev/null && ls *.log 2>/dev/null | wc -l)
+    if [ "$log_count" -eq 0 ]; then
+        napcat_version="$napcat_version_help"
+        return
+    fi
+    
+    # 从最新的日志文件中提取版本号
+    # 使用 ls -t 按时间排序，找到最新的日志文件，然后搜索版本信息
+    napcat_version=$(cd "$napcat_logs_dir" 2>/dev/null && ls -t *.log 2>/dev/null | head -n 1 | xargs grep "NapCat.Core Version" 2>/dev/null | sed -n 's/.*NapCat.Core Version: \([0-9.]*\).*/\1/p' | head -1)
     
     # 验证版本号是否有效
     if [ -z "$napcat_version" ] || [ "$napcat_version" = "null" ]; then
-        napcat_version="未知"
+        napcat_version="$napcat_version_help"
         return
     fi
     
-    # 验证版本号格式（应该是 x.y.z 格式）
-    if ! [[ "$napcat_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        napcat_version="未知"
-        return
-    fi
+    # # 验证版本号格式（应该是 x.y.z 格式）
+    # if ! [[ "$napcat_version" =~ [0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+    #     napcat_version="$napcat_version_help"
+    #     return
+    # fi
 }
 
 # 检查版本缓存（内存）
@@ -2864,21 +2894,10 @@ check_napcat_update() {
         return
     fi
     
-    # 转换为纯数字进行比较（去除 v 和 .）
-    local current_numeric="${current_version//[v.]/}"
-    local latest_numeric="${latest_version//[v.]/}"
-    
-    # 验证版本号格式
-    if ! [[ "$current_numeric" =~ ^[0-9]+$ ]] || ! [[ "$latest_numeric" =~ ^[0-9]+$ ]]; then
-        echo "${cyan}[无法比较版本]${background}"
-        return
-    fi
-    
-    # 数字比较
-    if [ "$latest_numeric" -gt "$current_numeric" ]; then
-        echo "${yellow}[Nightly: $latest_version]${background}"
-    else
+    if [ "$current_version" = "$latest_version" ]; then
         echo "${green}[最新]${background}"
+    else
+        echo "${yellow}[可更新到 $latest_version]${background}"
     fi
 }
 
