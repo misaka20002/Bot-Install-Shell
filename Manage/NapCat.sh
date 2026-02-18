@@ -964,6 +964,32 @@ configure_ws() {
   "parseMultMsg": false
 }'
 
+    AstrBot_CONFIG='{
+  "network": {
+    "httpServers": [],
+    "httpSseServers": [],
+    "httpClients": [],
+    "websocketServers": [],
+    "websocketClients": [
+      {
+        "enable": true,
+        "name": "AstrBot",
+        "url": "ws://localhost:6199/ws",
+        "reportSelfMessage": false,
+        "messagePostFormat": "array",
+        "token": "",
+        "debug": false,
+        "heartInterval": 5000,
+        "reconnectInterval": 5000
+      }
+    ],
+    "plugins": []
+  },
+  "musicSignUrl": "https://oiapi.net/API/QQMusic/SONArk",
+  "enableLocalFile2Url": false,
+  "parseMultMsg": false
+}'
+
     # 管理WebSocket连接的主菜单
     while true; do
         # clear
@@ -1035,8 +1061,8 @@ configure_ws() {
         
         echo -e ${yellow}"==========================="${background}
         echo -e ${green}1. ${cyan}使用预设模板${background}
-        echo -e ${green}2. ${cyan}添加新的反向WebSocket接口${background}
-        echo -e ${green}3. ${cyan}添加新的正向WebSocket接口${background}
+        echo -e ${green}2. ${cyan}添加新的反向WebSocket接口（Clients）${background}
+        echo -e ${green}3. ${cyan}添加新的正向WebSocket接口（Servers）${background}
         echo -e ${green}4. ${cyan}编辑WebSocket接口${background}
         echo -e ${green}5. ${cyan}删除WebSocket接口${background}
         echo -e ${green}6. ${cyan}启用/禁用WebSocket接口${background}
@@ -1054,6 +1080,7 @@ configure_ws() {
                 echo -e ${white}"====="${green}WebSocket预设模板${white}"====="${background}
                 echo -e ${green}1. ${cyan}使用 lain 反向WebSocket配置${background}
                 echo -e ${green}2. ${cyan}使用 trss 反向WebSocket配置${background}
+                echo -e ${green}3. ${cyan}使用 AstrBot 反向WebSocket配置${background}
                 echo -e ${green}0. ${cyan}返回上级菜单${background}
                 echo -e ${yellow}"==========================="${background}
                 
@@ -1083,6 +1110,20 @@ configure_ws() {
                         if [[ "$confirm" =~ ^[Yy]$ ]]; then
                             echo "$TRSS_CONFIG" > "$CONFIG_FILE"
                             echo -e ${green}已应用 trss 配置${background}
+                        else
+                            echo -e ${yellow}已取消操作${background}
+                        fi
+                        sleep 1
+                        ;;
+                    3)
+                        # 使用 AstrBot 配置
+                        echo -e ${yellow}正在应用 AstrBot 配置...${background}
+                        echo -e ${yellow}注意: 这将覆盖当前所有WebSocket配置!${background}
+                        echo -en ${cyan}是否继续? [y/N]: ${background};read confirm
+                        
+                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                            echo "$AstrBot_CONFIG" > "$CONFIG_FILE"
+                            echo -e ${green}已应用 AstrBot 配置${background}
                         else
                             echo -e ${yellow}已取消操作${background}
                         fi
@@ -1121,14 +1162,28 @@ configure_ws() {
                     enable_ws="true"
                 fi
                 
+                echo -en ${cyan}是否上报自身消息? [y/N]: ${background};read report_self
+                if [[ "$report_self" =~ ^[Yy]$ ]]; then
+                    report_self_msg="true"
+                else
+                    report_self_msg="false"
+                fi
+                
+                echo -en ${cyan}消息上报格式\(array/string\) \(默认: array\): ${background};read msg_format
+                if [[ "$msg_format" == "string" ]]; then
+                    msg_post_format="string"
+                else
+                    msg_post_format="array"
+                fi
+                
                 # 创建新的WebSocket配置对象
                 new_ws=$(cat << EOF
 {
   "enable": ${enable_ws},
   "name": "${ws_name}",
   "url": "${ws_url}",
-  "reportSelfMessage": false,
-  "messagePostFormat": "array",
+  "messagePostFormat": "${msg_post_format}",
+  "reportSelfMessage": ${report_self_msg},
   "token": "${ws_token}",
   "debug": false,
   "heartInterval": 5000,
@@ -1288,6 +1343,8 @@ EOF
                         current_url=$(jq -r ".network.websocketClients[$edit_index].url // \"\"" "$CONFIG_FILE")
                         current_token=$(jq -r ".network.websocketClients[$edit_index].token // \"\"" "$CONFIG_FILE")
                         current_enable=$(jq -r ".network.websocketClients[$edit_index].enable // false" "$CONFIG_FILE")
+                        current_report_self=$(jq -r ".network.websocketServers[$edit_index].reportSelfMessage // false" "$CONFIG_FILE")
+                        current_format=$(jq -r ".network.websocketServers[$edit_index].messagePostFormat // \"array\"" "$CONFIG_FILE")
                         
                         # 编辑配置
                         echo -e ${yellow}编辑反向WebSocket接口 ${edit_choice}:${background}
@@ -1308,16 +1365,36 @@ EOF
                             enable_ws="true"
                         fi
                         
+                        echo -en ${cyan}是否上报自身消息? [y/N]: ${background};read report_self
+                        if [[ "$report_self" =~ ^[Yy]$ ]]; then
+                            report_self_msg="true"
+                        else
+                            report_self_msg="false"
+                        fi
+                        
+                        echo -en ${cyan}消息上报格式\(array/string\) \(当前: ${current_format}\): ${background};read msg_format
+                        if [[ "$msg_format" == "string" ]]; then
+                            msg_post_format="string"
+                        elif [[ -n "$msg_format" ]]; then
+                            msg_post_format="array"
+                        else
+                            msg_post_format=${current_format}
+                        fi
+                        
                         # 更新配置
                         jq \
                         --arg name "$ws_name" \
                         --arg url "$ws_url" \
                         --arg token "$ws_token" \
                         --argjson enable "$enable_ws" \
+                        --argjson report "$report_self_msg" \
+                        --arg format "$msg_post_format" \
                         ".network.websocketClients[$edit_index].name = \$name | 
                          .network.websocketClients[$edit_index].url = \$url | 
                          .network.websocketClients[$edit_index].token = \$token | 
-                         .network.websocketClients[$edit_index].enable = \$enable" \
+                         .network.websocketClients[$edit_index].enable = \$enable |
+                         .network.websocketServers[$edit_index].reportSelfMessage = \$report |
+                         .network.websocketServers[$edit_index].messagePostFormat = \$format" \
                         "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
                         mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
                         
