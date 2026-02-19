@@ -148,7 +148,7 @@ install_NapCat() {
     
     echo -e "${green}${APP_NAME}安装完成${background}"
     for _ in {1..3}; do
-        echo -e "${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}Ws 接口配置-管理WebSocket Token${background}"
+        echo -e "${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}WebSocket接口配置-管理WebSocket Token${background}"
     done
     
     echo -en ${yellow}是否启动${APP_NAME}? [Y/n]${background};read yn
@@ -911,78 +911,14 @@ configure_ws() {
     # 备份原配置文件
     cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
     
-    # 定义预置配置
-    LAIN_CONFIG='{
+    # 定义空的配置文件
+    EMPTY_CONFIG='{
   "network": {
     "httpServers": [],
     "httpSseServers": [],
     "httpClients": [],
     "websocketServers": [],
-    "websocketClients": [
-      {
-        "enable": true,
-        "name": "lain",
-        "url": "ws://localhost:2956/onebot/v11/ws",
-        "reportSelfMessage": false,
-        "messagePostFormat": "array",
-        "token": "",
-        "debug": false,
-        "heartInterval": 5000,
-        "reconnectInterval": 5000
-      }
-    ],
-    "plugins": []
-  },
-  "musicSignUrl": "https://oiapi.net/API/QQMusic/SONArk",
-  "enableLocalFile2Url": false,
-  "parseMultMsg": false
-}'
-
-    TRSS_CONFIG='{
-  "network": {
-    "httpServers": [],
-    "httpSseServers": [],
-    "httpClients": [],
-    "websocketServers": [],
-    "websocketClients": [
-      {
-        "enable": true,
-        "name": "trss",
-        "url": "ws://localhost:2536/OneBotv11",
-        "reportSelfMessage": false,
-        "messagePostFormat": "array",
-        "token": "",
-        "debug": false,
-        "heartInterval": 5000,
-        "reconnectInterval": 5000
-      }
-    ],
-    "plugins": []
-  },
-  "musicSignUrl": "https://oiapi.net/API/QQMusic/SONArk",
-  "enableLocalFile2Url": false,
-  "parseMultMsg": false
-}'
-
-    AstrBot_CONFIG='{
-  "network": {
-    "httpServers": [],
-    "httpSseServers": [],
-    "httpClients": [],
-    "websocketServers": [],
-    "websocketClients": [
-      {
-        "enable": true,
-        "name": "AstrBot",
-        "url": "ws://localhost:6199/ws",
-        "reportSelfMessage": false,
-        "messagePostFormat": "array",
-        "token": "",
-        "debug": false,
-        "heartInterval": 5000,
-        "reconnectInterval": 5000
-      }
-    ],
+    "websocketClients": [],
     "plugins": []
   },
   "musicSignUrl": "https://oiapi.net/API/QQMusic/SONArk",
@@ -1078,9 +1014,9 @@ configure_ws() {
                 # clear
                 echo
                 echo -e ${white}"====="${green}WebSocket预设模板${white}"====="${background}
-                echo -e ${green}1. ${cyan}使用 lain 反向WebSocket配置${background}
-                echo -e ${green}2. ${cyan}使用 trss 反向WebSocket配置${background}
-                echo -e ${green}3. ${cyan}使用 AstrBot 反向WebSocket配置${background}
+                echo -e ${green}1. ${cyan}添加 lain 反向WebSocket接口${background}
+                echo -e ${green}2. ${cyan}添加 trss 反向WebSocket接口${background}
+                echo -e ${green}3. ${cyan}添加 AstrBot 反向WebSocket接口${background}
                 echo -e ${green}0. ${cyan}返回上级菜单${background}
                 echo -e ${yellow}"==========================="${background}
                 
@@ -1089,44 +1025,105 @@ configure_ws() {
                 case $template_option in
                     1)
                         # 使用 lain 配置
-                        echo -e ${yellow}正在应用 lain 配置...${background}
-                        echo -e ${yellow}注意: 这将覆盖当前所有WebSocket配置!${background}
-                        echo -en ${cyan}是否继续? [y/N]: ${background};read confirm
+                        echo -e ${yellow}正在添加 lain 反向WebSocket接口${background}
+                        echo -en ${cyan}请输入token \(可留空\): ${background};read ws_token
                         
-                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                            echo "$LAIN_CONFIG" > "$CONFIG_FILE"
-                            echo -e ${green}已应用 lain 配置${background}
-                        else
-                            echo -e ${yellow}已取消操作${background}
+                        new_ws=$(cat << EOF
+{
+  "enable": true,
+  "name": "lain",
+  "url": "ws://localhost:2956/onebot/v11/ws",
+  "reportSelfMessage": false,
+  "messagePostFormat": "array",
+  "token": "${ws_token}",
+  "debug": false,
+  "heartInterval": 5000,
+  "reconnectInterval": 5000
+}
+EOF
+                        )
+                
+                        # 检查配置文件是否存在
+                        if [ ! -f "$CONFIG_FILE" ] || ! jq -e '.' "$CONFIG_FILE" &>/dev/null; then
+                            # 如果配置文件不存在或无效，创建新配置文件
+                            echo "$EMPTY_CONFIG" > "$CONFIG_FILE"
                         fi
+                        
+                        # 添加新的WebSocket配置
+                        jq --argjson ws "$new_ws" '.network.websocketClients += [$ws]' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
+                        mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                        
+                        echo -e ${green}已添加完成
                         sleep 1
                         ;;
                     2)
                         # 使用 trss 配置
-                        echo -e ${yellow}正在应用 trss 配置...${background}
-                        echo -e ${yellow}注意: 这将覆盖当前所有WebSocket配置!${background}
-                        echo -en ${cyan}是否继续? [y/N]: ${background};read confirm
+                        echo -e ${yellow}正在添加 trss 反向WebSocket接口${background}
+                        echo -en ${cyan}请输入token \(可留空\): ${background};read ws_token
                         
-                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                            echo "$TRSS_CONFIG" > "$CONFIG_FILE"
-                            echo -e ${green}已应用 trss 配置${background}
-                        else
-                            echo -e ${yellow}已取消操作${background}
+                        new_ws=$(cat << EOF
+{
+  "enable": true,
+  "name": "trss",
+  "url": "ws://localhost:2536/OneBotv11",
+  "reportSelfMessage": false,
+  "messagePostFormat": "array",
+  "token": "${ws_token}",
+  "debug": false,
+  "heartInterval": 5000,
+  "reconnectInterval": 5000
+}
+EOF
+                        )
+                
+                        # 检查配置文件是否存在
+                        if [ ! -f "$CONFIG_FILE" ] || ! jq -e '.' "$CONFIG_FILE" &>/dev/null; then
+                            # 如果配置文件不存在或无效，创建新配置文件
+                            echo "$EMPTY_CONFIG" > "$CONFIG_FILE"
                         fi
+                        
+                        # 添加新的WebSocket配置
+                        jq --argjson ws "$new_ws" '.network.websocketClients += [$ws]' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
+                        mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                        
+                        echo -e ${green}已添加完成
+
+                        # 询问是否同步到TRSS-Yunzai配置
+                        sync_token_to_trss "$ws_token"
+
                         sleep 1
                         ;;
                     3)
                         # 使用 AstrBot 配置
-                        echo -e ${yellow}正在应用 AstrBot 配置...${background}
-                        echo -e ${yellow}注意: 这将覆盖当前所有WebSocket配置!${background}
-                        echo -en ${cyan}是否继续? [y/N]: ${background};read confirm
+                        echo -e ${yellow}正在添加 AstrBot 反向WebSocket接口${background}
+                        echo -en ${cyan}请输入token \(可留空\): ${background};read ws_token
                         
-                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                            echo "$AstrBot_CONFIG" > "$CONFIG_FILE"
-                            echo -e ${green}已应用 AstrBot 配置${background}
-                        else
-                            echo -e ${yellow}已取消操作${background}
+                        new_ws=$(cat << EOF
+{
+  "enable": true,
+  "name": "AstrBot",
+  "url": "ws://localhost:6199/ws",
+  "reportSelfMessage": false,
+  "messagePostFormat": "array",
+  "token": "${ws_token}",
+  "debug": false,
+  "heartInterval": 5000,
+  "reconnectInterval": 5000
+}
+EOF
+                        )
+                
+                        # 检查配置文件是否存在
+                        if [ ! -f "$CONFIG_FILE" ] || ! jq -e '.' "$CONFIG_FILE" &>/dev/null; then
+                            # 如果配置文件不存在或无效，创建新配置文件
+                            echo "$EMPTY_CONFIG" > "$CONFIG_FILE"
                         fi
+                        
+                        # 添加新的WebSocket配置
+                        jq --argjson ws "$new_ws" '.network.websocketClients += [$ws]' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
+                        mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                        
+                        echo -e ${green}已添加完成
                         sleep 1
                         ;;
                     0)
@@ -1195,19 +1192,7 @@ EOF
                 # 检查配置文件是否存在
                 if [ ! -f "$CONFIG_FILE" ] || ! jq -e '.' "$CONFIG_FILE" &>/dev/null; then
                     # 如果配置文件不存在或无效，创建新配置文件
-                    echo '{
-  "network": {
-    "httpServers": [],
-    "httpSseServers": [],
-    "httpClients": [],
-    "websocketServers": [],
-    "websocketClients": [],
-    "plugins": []
-  },
-  "musicSignUrl": "https://oiapi.net/API/QQMusic/SONArk",
-  "enableLocalFile2Url": false,
-  "parseMultMsg": false
-}' > "$CONFIG_FILE"
+                    echo "$EMPTY_CONFIG" > "$CONFIG_FILE"
                 fi
                 
                 # 添加新的WebSocket配置
@@ -1273,19 +1258,7 @@ EOF
                 # 检查配置文件是否存在
                 if [ ! -f "$CONFIG_FILE" ] || ! jq -e '.' "$CONFIG_FILE" &>/dev/null; then
                     # 如果配置文件不存在或无效，创建新配置文件
-                    echo '{
-  "network": {
-    "httpServers": [],
-    "httpSseServers": [],
-    "httpClients": [],
-    "websocketServers": [],
-    "websocketClients": [],
-    "plugins": []
-  },
-  "musicSignUrl": "https://oiapi.net/API/QQMusic/SONArk",
-  "enableLocalFile2Url": false,
-  "parseMultMsg": false
-}' > "$CONFIG_FILE"
+                    echo "$EMPTY_CONFIG" > "$CONFIG_FILE"
                 fi
                 
                 # 添加新的正向WebSocket配置
@@ -2134,9 +2107,12 @@ sync_token_to_trss() {
     local new_token="$1"
     local trss_config="$HOME/TRSS-Yunzai/config/config/server.yaml"
     
-    echo -en ${cyan}是否同步修改TRSS-Yunzai的配置文件? [Y/n]: ${background};read sync_choice
+    echo -e ${cyan}是否同步修改本地TRSS-Yunzai的Token配置文件？${background}
+    echo -en ${cyan}1、如果TRSS在其他服务器选否；2、如果不知道是什么请忽略 [Y/n]: ${background};read sync_choice
     case $sync_choice in
-        n|N)
+        y|Y)
+            ;;
+        *)
             echo -e ${yellow}跳过修改TRSS-Yunzai配置${background}
             echo -en ${cyan}回车返回${background};read
             return
@@ -3017,7 +2993,7 @@ main() {
     echo -e ${green}1. ${cyan}安装/更新${background}
     echo -e ${green}2. ${cyan}卸载${background}
     echo -e ${green}3. ${cyan}WebUI 配置${background}
-    echo -e ${green}4. ${cyan}Ws 接口配置${background}
+    echo -e ${green}4. ${cyan}WebSocket接口配置${background}
     echo -e ${green}5. ${cyan}音乐签名配置${background}
     echo -e ${green}6. ${cyan}启动/多开QQ管理${background}
     echo -e ${green}0. ${cyan}退出${background}
@@ -3039,7 +3015,7 @@ main() {
         echo "========================="
     fi
     
-    echo -e ${green}说明: ${cyan}前台登录-ctrl+c退出-Ws 接口配置-推荐使用 trss 反向WebSocket配置-管理WebSocket Token（重要）-后台启动即可。${background}
+    echo -e ${green}说明: ${cyan}前台登录，ctrl+c退出，WebSocket接口配置-使用预设模板 添加你的平台接口，在管理WebSocket Token（重要），后台启动即可。${background}
     echo -e ${green}NapCat TUI-CLI 启动指令:  ${cyan}napcat${background}
     echo -e ${green}呆毛版-QQ群: ${cyan}1022982073${background}
     echo "========================="
