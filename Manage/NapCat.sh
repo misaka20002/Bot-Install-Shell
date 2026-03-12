@@ -2954,15 +2954,50 @@ check_napcat_update() {
     fi
 }
 
+# 等待获取Napcat版本时 显示动画特效
+start_spinner() {
+    local msg="$1"
+    # 隐藏光标，使动画更清爽
+    echo -ne "\033[?25l"
+    (
+        # 采用盲文点阵作为加载动画（好看的转圈特效）
+        local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+        while true; do
+            for i in $(seq 0 9); do
+                # \r 回到行首覆盖，\033[36m(青色)和\033[33m(黄色)增加色彩
+                echo -ne "\r\033[36m${spinstr:$i:1}\033[0m \033[33m${msg}\033[0m"
+                sleep 0.1
+            done
+        done
+    ) &
+    # 记录后台动画进程的 PID
+    SPINNER_PID=$!
+}
+stop_spinner() {
+    if [ -n "$SPINNER_PID" ]; then
+        # 杀死动画进程
+        kill "$SPINNER_PID" >/dev/null 2>&1
+        # 恢复光标(\033[?25h)，回到行首(\r)，并清除该行残留内容(\033[K)
+        echo -ne "\033[?25h\r\033[K"
+        SPINNER_PID=""
+    fi
+}
+
 # 获取版本信息（带缓存）
 get_version_info() {
     if ! check_version_cache; then
-        # 缓存过期或不存在，重新获取
+        # 动画特效
+        start_spinner "正在联网检查 NapCat 及 QQ 版本更新，请稍候..."
+        
+        # 获取版本更新
         get_current_qq_version
         get_current_napcat_version
         qq_update_status=$(check_qq_update "$qq_version")
         napcat_update_status=$(check_napcat_update "$napcat_version")
         save_version_cache
+        
+        # 停止动画特效
+        stop_spinner
     fi
 }
 
@@ -3015,7 +3050,7 @@ main() {
         echo "========================="
     fi
     
-    echo -e ${green}说明: ${cyan}前台登录，ctrl+c退出，WebSocket接口配置-使用预设模板 添加你的平台接口，在管理WebSocket Token（重要），后台启动即可。${background}
+    echo -e ${green}说明: ${cyan}前台登录，ctrl+c退出，WebSocket接口配置-使用预设模板 添加你的平台接口，再管理WebSocket Token（重要），后台启动即可。${background}
     echo -e ${green}NapCat TUI-CLI 启动指令:  ${cyan}napcat${background}
     echo -e ${green}呆毛版-QQ群: ${cyan}1022982073${background}
     echo "========================="
