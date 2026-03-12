@@ -112,7 +112,7 @@ bash <(curl -sL https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/
 
 ## 脚本中使用的呆毛版插件链接
 
-- [Trss-Yunzai-lagrange](https://github.com/AIGC-Yunzai/Trss-Yunzai-lagrange)
+- [TRSS-Yunzai-NapC](https://github.com/AIGC-Yunzai/TRSS-Yunzai-NapC)
 - [椰奶v2-misaka-fork](https://github.com/misaka20002/yenai-plugin/tree/v2)
 - [chatgpt-misaka-fork](https://github.com/misaka20002/chatgpt-plugin)
 - [ap-plugin-misaka-fork](https://github.com/misaka20002/ap-plugin)

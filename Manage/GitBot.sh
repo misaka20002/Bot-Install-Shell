@@ -15,7 +15,7 @@ install_Bot(){
     Git=${GitMirror}https://github.com/misaka20002/Miao-Yunzai.git
   elif [ "${BotName}" == "TRSS-Yunzai" ]
   then
-     Git=${GitMirror}https://github.com/AIGC-Yunzai/TRSS-Yunzai-Lagrange.git
+     Git=${GitMirror}https://github.com/AIGC-Yunzai/TRSS-Yunzai-NapC.git
   fi
   echo -e ${cyan}正在克隆${BotName}${background}
   if ! git clone --depth=1 ${Git} $HOME/${BotName};then
