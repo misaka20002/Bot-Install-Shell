@@ -55,9 +55,19 @@ SCRIPT_SYSTEM_PATH="/usr/local/bin/meme_generator.sh"
 function tmux_new(){
 Tmux_Name="$1"
 Shell_Command="$2"
-if ! tmux new -s ${Tmux_Name} -d "${Shell_Command}"
+
+# 尝试清理可能残留在默认 socket 中的旧会话（兼容老版本）
+tmux kill-session -t ${Tmux_Name} >/dev/null 2>&1
+
+# 彻底清理当前独立 socket 的残留进程和损坏文件，避免 socket 损坏导致启动失败
+# 这代替了破坏性的 killall -9 tmux 和 rm -rf /tmp/tmux-*，不会影响用户的其他 tmux 窗口
+tmux -L ${Tmux_Name} kill-server >/dev/null 2>&1
+rm -f /tmp/tmux-$(id -u)/${Tmux_Name} >/dev/null 2>&1
+
+tmux_output=$(tmux -L ${Tmux_Name} new -s ${Tmux_Name} -d "${Shell_Command}" 2>&1)
+if [ $? -ne 0 ]
 then
-    echo -e ${yellow}meme生成器启动错误"\n"错误原因:${red}${tmux_new_error}${background}
+    echo -e ${yellow}meme生成器启动错误"\n"错误原因:${red}${tmux_output}${background}
     echo
     echo -en ${yellow}回车返回${background};read
     main
@@ -67,18 +77,29 @@ fi
 
 function tmux_attach(){
 Tmux_Name="$1"
-tmux attach -t ${Tmux_Name} > /dev/null 2>&1
+if tmux -L ${Tmux_Name} ls 2>&1 | grep -q ${Tmux_Name}; then
+    tmux -L ${Tmux_Name} attach -t ${Tmux_Name} > /dev/null 2>&1
+else
+    tmux attach -t ${Tmux_Name} > /dev/null 2>&1
+fi
 }
 
 function tmux_kill_session(){
 Tmux_Name="$1"
-tmux kill-session -t ${Tmux_Name}
+# 清理可能存在的默认 socket 中的旧会话
+tmux kill-session -t ${Tmux_Name} >/dev/null 2>&1
+
+# 清理独立 socket 中的会话并销毁 server 进程，确保不留死进程
+tmux -L ${Tmux_Name} kill-server >/dev/null 2>&1
+rm -f /tmp/tmux-$(id -u)/${Tmux_Name} >/dev/null 2>&1
 }
 
 function tmux_ls(){
 Tmux_Name="$1"
-tmux_windows=$(tmux ls 2>&1)
-if echo ${tmux_windows} | grep -q ${Tmux_Name}
+if tmux -L ${Tmux_Name} ls 2>&1 | grep -q ${Tmux_Name}
+then
+    return 0
+elif tmux ls 2>&1 | grep -q ${Tmux_Name}
 then
     return 0
 else
@@ -116,13 +137,24 @@ echo
 
 bot_tmux_attach_log(){
 Tmux_Name="$1"
-if ! tmux attach -t ${Tmux_Name} > /dev/null 2>&1
-then
-    tmux_windows_attach_error=$(tmux attach -t ${Tmux_Name} 2>&1 > /dev/null)
-    echo
-    echo -e ${yellow}meme生成器打开错误"\n"错误原因:${red}${tmux_windows_attach_error}${background}
-    echo
-    echo -en ${yellow}回车返回${background};read
+if tmux -L ${Tmux_Name} ls 2>&1 | grep -q ${Tmux_Name}; then
+    if ! tmux -L ${Tmux_Name} attach -t ${Tmux_Name} > /dev/null 2>&1
+    then
+        tmux_windows_attach_error=$(tmux -L ${Tmux_Name} attach -t ${Tmux_Name} 2>&1)
+        echo
+        echo -e ${yellow}meme生成器打开错误"\n"错误原因:${red}${tmux_windows_attach_error}${background}
+        echo
+        echo -en ${yellow}回车返回${background};read
+    fi
+else
+    if ! tmux attach -t ${Tmux_Name} > /dev/null 2>&1
+    then
+        tmux_windows_attach_error=$(tmux attach -t ${Tmux_Name} 2>&1)
+        echo
+        echo -e ${yellow}meme生成器打开错误"\n"错误原因:${red}${tmux_windows_attach_error}${background}
+        echo
+        echo -en ${yellow}回车返回${background};read
+    fi
 fi
 }
 
@@ -733,6 +765,8 @@ auto_update_meme_generator(){
     was_running=true
     echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在停止meme生成器${background}" >> ${log_file}
     /usr/bin/tmux kill-session -t meme_generator > /dev/null 2>&1
+    /usr/bin/tmux -L meme_generator kill-server > /dev/null 2>&1
+    rm -f /tmp/tmux-$(id -u)/meme_generator > /dev/null 2>&1
     if command -v pm2 >/dev/null 2>&1; then
       pm2 delete meme_generator > /dev/null 2>&1
     fi
@@ -809,7 +843,7 @@ EOF
     chmod +x ${start_script}
     
     # 使用完整路径启动 tmux
-    if /usr/bin/tmux new -s meme_generator -d "/bin/bash ${start_script}" 2>>${log_file}; then
+    if /usr/bin/tmux -L meme_generator new -s meme_generator -d "/bin/bash ${start_script}" 2>>${log_file}; then
       echo -e "${green}[$(date "+%Y-%m-%d %H:%M:%S")] tmux 会话创建成功${background}" >> ${log_file}
       
       # 等待服务启动
