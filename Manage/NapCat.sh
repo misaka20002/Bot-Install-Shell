@@ -350,7 +350,7 @@ start_NapCat() {
         start_option=2
         echo -e ${yellow}自动选择后台启动模式（重启）${background}
     else
-        echo -e ${cyan}请选择启动方式${background}
+        echo -e ${cyan}请选择启动方式 $( [ "$login_option" = "1" ] && echo "-全新登录" || echo "" )${background}
         echo -e ${green}1.  ${cyan}前台启动（首次登录）${background}
         echo -e ${green}2.  ${cyan}后台启动（推荐）${background}
         echo "========================="
@@ -452,9 +452,9 @@ stop_all_instances() {
 # 停止 NapCat
 stop_NapCat() {
     # 第一个参数：QQ号（可选）
+    local specific_qq=""
     # 第二个参数：静默模式（可选，值为"silent"时不等待用户输入）
     local silent_mode=""
-    local specific_qq=""
     
     # 解析参数
     if [ -n "$1" ]; then
@@ -931,6 +931,7 @@ configure_ws() {
         # clear
         echo
         echo -e ${white}"====="${green}WebSocket配置管理 - QQ: ${selected_qq}${white}"====="${background}
+        echo -e ${green}"修改后重启NapCat生效"${background}
         
         # 检查当前配置
         if [ -f "$CONFIG_FILE" ]; then
@@ -1331,15 +1332,10 @@ EOF
                         echo -en ${cyan}请输入token \(当前: ${current_token}\): ${background};read ws_token
                         ws_token=${ws_token:-$current_token}
                         
-                        echo -en ${cyan}是否启用该WebSocket连接? [Y/n]: ${background};read ws_enable
-                        if [[ "$ws_enable" =~ ^[Nn]$ ]]; then
-                            enable_ws="false"
-                        else
-                            enable_ws="true"
-                        fi
-                        
-                        echo -en ${cyan}是否上报自身消息? [y/N]: ${background};read report_self
-                        if [[ "$report_self" =~ ^[Yy]$ ]]; then
+                        echo -en ${cyan}"是否上报自身消息? [y/N] (当前: ${current_report_self}): "${background}; read report_self
+                        if [[ -z "$report_self" ]]; then
+                            report_self_msg="$current_report_self"
+                        elif [[ "$report_self" =~ ^[Yy]$ ]]; then
                             report_self_msg="true"
                         else
                             report_self_msg="false"
@@ -1354,6 +1350,15 @@ EOF
                             msg_post_format=${current_format}
                         fi
                         
+                        echo -en ${cyan}"是否启用该WebSocket连接? [Y/n] (当前: ${current_enable}): "${background}; read ws_enable
+                        if [[ -z "$ws_enable" ]]; then
+                            enable_ws="$current_enable"
+                        elif [[ "$ws_enable" =~ ^[Nn]$ ]]; then
+                            enable_ws="false"
+                        else
+                            enable_ws="true"
+                        fi
+                        
                         # 更新配置
                         jq \
                         --arg name "$ws_name" \
@@ -1366,8 +1371,8 @@ EOF
                          .network.websocketClients[$edit_index].url = \$url | 
                          .network.websocketClients[$edit_index].token = \$token | 
                          .network.websocketClients[$edit_index].enable = \$enable |
-                         .network.websocketServers[$edit_index].reportSelfMessage = \$report |
-                         .network.websocketServers[$edit_index].messagePostFormat = \$format" \
+                         .network.websocketClients[$edit_index].reportSelfMessage = \$report |
+                         .network.websocketClients[$edit_index].messagePostFormat = \$format" \
                         "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && 
                         mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
                         
@@ -1436,15 +1441,10 @@ EOF
                         echo -en ${cyan}请输入token \(当前: ${current_token}\): ${background};read ws_token
                         ws_token=${ws_token:-$current_token}
                         
-                        echo -en ${cyan}是否启用该WebSocket连接? [Y/n]: ${background};read ws_enable
-                        if [[ "$ws_enable" =~ ^[Nn]$ ]]; then
-                            enable_ws="false"
-                        else
-                            enable_ws="true"
-                        fi
-                        
-                        echo -en ${cyan}是否上报自身消息? [y/N]: ${background};read report_self
-                        if [[ "$report_self" =~ ^[Yy]$ ]]; then
+                        echo -en ${cyan}"是否上报自身消息? [y/N] (当前: ${current_report_self}): "${background}; read report_self
+                        if [[ -z "$report_self" ]]; then
+                            report_self_msg="$current_report_self"
+                        elif [[ "$report_self" =~ ^[Yy]$ ]]; then
                             report_self_msg="true"
                         else
                             report_self_msg="false"
@@ -1457,6 +1457,15 @@ EOF
                             msg_post_format="array"
                         else
                             msg_post_format=${current_format}
+                        fi
+                        
+                        echo -en ${cyan}"是否启用该WebSocket连接? [Y/n] (当前: ${current_enable}): "${background}; read ws_enable
+                        if [[ -z "$ws_enable" ]]; then
+                            enable_ws="$current_enable"
+                        elif [[ "$ws_enable" =~ ^[Nn]$ ]]; then
+                            enable_ws="false"
+                        else
+                            enable_ws="true"
                         fi
                         
                         # 更新配置
@@ -2470,8 +2479,8 @@ manage_multi_instances() {
         fi
         
         echo -e ${yellow}"==========================="${background}
-        echo -e ${green}1. ${cyan}启动新的QQ实例${background}
-        echo -e ${green}2. ${cyan}启动指定QQ号${background}
+        echo -e ${green}1. ${cyan}新建新的QQ配置${background}
+        echo -e ${green}2. ${cyan}启动已有QQ配置${background}
         echo -e ${green}3. ${cyan}停止指定QQ实例${background}
         echo -e ${green}4. ${cyan}停止所有QQ实例${background}
         echo -e ${green}5. ${cyan}重启指定QQ实例${background}
@@ -2483,11 +2492,11 @@ manage_multi_instances() {
         
         case $option in
             1)
-                # 启动新的QQ实例，使用force_start=true强制启动新实例
+                # 新建新的QQ配置，使用force_start=true强制启动新实例
                 start_NapCat "" true
                 ;;
             2)
-                # 启动指定QQ号
+                # 启动已有QQ配置
                 # 查找已登录的QQ账号列表
                 CONFIG_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config"
                 if [ ! -d "$CONFIG_DIR" ]; then
@@ -2700,7 +2709,7 @@ manage_multi_instances() {
                 else
                     # 重启特定QQ号
                     echo -e ${yellow}正在重启QQ号 ${cyan}${selected_instance}${yellow}...${background}
-                    stop_NapCat "$selected_instance"
+                    stop_NapCat "$selected_instance" "silent"
                     sleep 2
                     echo -e ${green}正在重新启动...${background}
                     start_NapCat "$selected_instance" false true
@@ -3024,13 +3033,15 @@ main() {
         condition="${red}[未部署]"
     fi
 
+    echo
+    echo
     echo -e ${white}"====="${green}呆毛版-${APP_NAME}管理${white}"====="${background}
     echo -e ${green}1. ${cyan}安装/更新${background}
     echo -e ${green}2. ${cyan}卸载${background}
     echo -e ${green}3. ${cyan}WebUI 配置${background}
     echo -e ${green}4. ${cyan}WebSocket接口配置${background}
     echo -e ${green}5. ${cyan}音乐签名配置${background}
-    echo -e ${green}6. ${cyan}启动/多开QQ管理${background}
+    echo -e ${green}6. ${cyan}启动/多开QQ${background}
     echo -e ${green}0. ${cyan}退出${background}
     echo "========================="
     
@@ -3042,19 +3053,21 @@ main() {
         echo -e ${green}NapCat版本: ${cyan}${napcat_version}${background} ${napcat_update_status}
     fi
     
-    echo -e ${green}${APP_NAME}状态: ${condition}${background}
-    # 如果有实例在运行，显示实例信息
-    if list_running_instances >/dev/null; then
+    # 先检查是否有运行中的实例
+    if ! list_running_instances >/dev/null; then
+        # 没有运行中的实例时，才显示状态信息
+        echo -e ${green}${APP_NAME}状态: ${condition}${background}
+    else
+        # 有运行中的实例时，显示实例信息（保留原有逻辑）
         echo -e ${green}运行中的实例:${background}
         list_running_instances
         echo "========================="
     fi
     
     echo -e ${green}说明: ${cyan}前台登录，ctrl+c退出，WebSocket接口配置-使用预设模板 添加你的平台接口，再管理WebSocket Token（重要），后台启动即可。${background}
-    echo -e ${green}NapCat TUI-CLI 启动指令:  ${cyan}napcat${background}
+    # echo -e ${green}NapCat TUI-CLI 启动指令:  ${cyan}napcat${background}
     echo -e ${green}呆毛版-QQ群: ${cyan}1022982073${background}
     echo "========================="
-    echo
     echo -en ${green}请输入您的选项: ${background};read number
     case ${number} in
         1)
