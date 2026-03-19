@@ -151,12 +151,12 @@ install_NapCat() {
         echo -e "${green}注意 ${red}为了您的账号安全，请优先配置 AccessToken: ${cyan}WebSocket接口配置-管理WebSocket Token${background}"
     done
     
-    echo -en ${yellow}是否启动${APP_NAME}? [Y/n]${background};read yn
-    case ${yn} in
-    Y|y)
-        start_NapCat
-        ;;
-    esac
+    echo -en ${yellow}返回主菜单...${background};read yn
+    # case ${yn} in
+    # Y|y)
+    #     start_NapCat
+    #     ;;
+    # esac
 }
 
 # 检查 NapCat 是否已安装
@@ -2803,42 +2803,26 @@ get_current_qq_version() {
 # 获取当前 NapCat 版本
 get_current_napcat_version() {
     local napcat_dir="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat"
-    local napcat_logs_dir="$napcat_dir/logs"
-    local napcat_version_help="首次运行以获取版本号"
-    
-    # 检查 napcat 目录是否存在
+
     if [ ! -d "$napcat_dir" ]; then
         napcat_version="未安装"
         return
     fi
-    
-    # 检查日志目录是否存在或是否有日志文件
-    if [ ! -d "$napcat_logs_dir" ]; then
-        napcat_version="$napcat_version_help"
-        return
+
+    # 启动 QQ/NapCat，合并输出，超时 5 秒
+    # 用 grep 找到版本行后立即通过 sed 提取，stdbuf 保证不缓冲
+    napcat_version=$(
+        timeout 5 xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox 2>&1 \
+        | stdbuf -oL grep -m1 "NapCat.Core Version:" \
+        | sed 's/.*NapCat\.Core Version: \([0-9][0-9.]*\).*/\1/'
+    )
+
+    # grep -m1 找到第一行匹配后退出，timeout 确保整个管道最多等 5 秒
+    # 管道退出后 xvfb-run 子进程会收到 SIGPIPE 自动终止
+
+    if [ -z "$napcat_version" ]; then
+        napcat_version="获取版本号失败"
     fi
-    
-    local log_count=$(cd "$napcat_logs_dir" 2>/dev/null && ls *.log 2>/dev/null | wc -l)
-    if [ "$log_count" -eq 0 ]; then
-        napcat_version="$napcat_version_help"
-        return
-    fi
-    
-    # 从最新的日志文件中提取版本号
-    # 使用 ls -t 按时间排序，找到最新的日志文件，然后搜索版本信息
-    napcat_version=$(cd "$napcat_logs_dir" 2>/dev/null && ls -t *.log 2>/dev/null | head -n 1 | xargs grep "NapCat.Core Version" 2>/dev/null | sed -n 's/.*NapCat.Core Version: \([0-9.]*\).*/\1/p' | head -1)
-    
-    # 验证版本号是否有效
-    if [ -z "$napcat_version" ] || [ "$napcat_version" = "null" ]; then
-        napcat_version="$napcat_version_help"
-        return
-    fi
-    
-    # # 验证版本号格式（应该是 x.y.z 格式）
-    # if ! [[ "$napcat_version" =~ [0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
-    #     napcat_version="$napcat_version_help"
-    #     return
-    # fi
 }
 
 # 检查版本缓存（内存）
