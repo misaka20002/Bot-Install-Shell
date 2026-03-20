@@ -2809,16 +2809,32 @@ get_current_napcat_version() {
         return
     fi
 
-    # 启动 QQ/NapCat，合并输出，超时 5 秒
-    # 用 grep 找到版本行后立即通过 sed 提取，stdbuf 保证不缓冲
-    napcat_version=$(
-        timeout 5 xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox 2>&1 \
-        | stdbuf -oL grep -m1 "NapCat.Core Version:" \
-        | sed 's/.*NapCat\.Core Version: \([0-9][0-9.]*\).*/\1/'
-    )
+    # 创建一个临时文件来存储输出
+    local tmp_log=$(mktemp)
+    
+    # 1. 将进程放到后台执行，输出重定向到文件。
+    # (外层依然套一个 timeout 3 作为终极兜底，防止出现意外死锁)
+    timeout 3 xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox > "$tmp_log" 2>&1 &
+    local qq_pid=$!
 
-    # grep -m1 找到第一行匹配后退出，timeout 确保整个管道最多等 5 秒
-    # 管道退出后 xvfb-run 子进程会收到 SIGPIPE 自动终止
+    napcat_version=""
+
+    # 2. 轮询检测日志文件，最多等待 2.0 秒 (20次 * 0.1秒)
+    for (( i=0; i<20; i++ )); do
+        # 只要找到了目标行
+        if grep -q "NapCat.Core Version:" "$tmp_log"; then
+            # 提取出版本号
+            napcat_version=$(grep -m1 "NapCat.Core Version:" "$tmp_log" | sed 's/.*NapCat\.Core Version: \([0-9][0-9.]*\).*/\1/')
+            # 立刻跳出循环！
+            break
+        fi
+        sleep 0.1
+    done
+
+    # 3. 无论是否找到，立刻杀掉后台的 QQ/xvfb 进程，无需等待超时
+    kill "$qq_pid" >/dev/null 2>&1
+    # 清理临时文件
+    rm -f "$tmp_log"
 
     if [ -z "$napcat_version" ]; then
         napcat_version="获取版本号失败"
@@ -2875,16 +2891,8 @@ check_qq_update() {
     fi
 }
 
-# 检查 NapCat 是否有更新
-check_napcat_update() {
-    local current_version="$1"
-    
-    if [ "$current_version" = "未安装" ] || [ "$current_version" = "未知" ]; then
-        echo "${yellow}[需要安装]${background}"
-        return
-    fi
-    
-    # 多个镜像源URL
+# 检查 NapCat 是否有更新（获取远程最新版本号）
+fetch_napcat_latest_version() {
     local urls=(
         "https://nclatest.znin.net/"
         "https://jiashu.1win.eu.org/https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
@@ -2892,54 +2900,51 @@ check_napcat_update() {
         "https://spring-night-57a1.3540746063.workers.dev/https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
         "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
     )
-    
+
     local result_file=$(mktemp)
-    trap 'rm -f "$result_file"' RETURN
-    
-    # 子函数：并发获取版本并写入临时文件
-    fetch_version() {
-        local url="$1"
-        local tmp_file="$2"
-        local tag=$(curl -s --connect-timeout 3 --max-time 5 "$url" 2>/dev/null | jq -r '.tag_name // empty' 2>/dev/null)
-        
+
+    _fetch_one() {
+        local url="$1" tmp_file="$2"
+        local tag=$(curl -s --connect-timeout 3 --max-time 5 "$url" 2>/dev/null \
+            | jq -r '.tag_name // empty' 2>/dev/null)
         if [ -n "$tag" ] && [ "$tag" != "null" ]; then
-            # 使用 flock 保证原子写入（仅写入第一个成功的结果）
             (
                 flock -x 9
-                if [ ! -s "$tmp_file" ]; then
-                    echo "$tag" > "$tmp_file"
-                fi
-            ) 9>"$tmp_file" 2>/dev/null
+                [ ! -s "$tmp_file" ] && echo "$tag" > "$tmp_file"
+            ) 9>"${tmp_file}.lock" 2>/dev/null
         fi
     }
-    
-    # 并发获取远程版本
+
     for url in "${urls[@]}"; do
-        fetch_version "$url" "$result_file" &
+        _fetch_one "$url" "$result_file" &
     done
-    
-    # 等待结果（最多3秒）
-    local wait_timeout=3
-    for (( i=0; i < wait_timeout * 10; i++ )); do
-        if [ -s "$result_file" ]; then
-            break
-        fi
+
+    # 最多等 5 秒
+    for (( i=0; i < 50; i++ )); do
+        [ -s "$result_file" ] && break
         sleep 0.1
     done
-    
-    # 获取远程版本
-    local latest_version=""
-    if [ -s "$result_file" ]; then
-        latest_version=$(head -n 1 "$result_file" | sed 's/^v//')
+
+    local latest=""
+    [ -s "$result_file" ] && latest=$(head -n1 "$result_file" | sed 's/^v//')
+    rm -f "$result_file" "${result_file}.lock"
+    echo "$latest"
+}
+# 根据当前版本和最新版本，输出更新状态文字
+format_napcat_update_status() {
+    local current_version="$1"
+    local latest_version="$2"
+
+    if [ "$current_version" = "未安装" ] || [ "$current_version" = "未知" ]; then
+        echo "${yellow}[需要安装]${background}"
+        return
     fi
-    
-    rm -f "$result_file"
-    
+
     if [ -z "$latest_version" ]; then
         echo "${cyan}[无法检查更新]${background}"
         return
     fi
-    
+
     if [ "$current_version" = "$latest_version" ]; then
         echo "${green}[最新]${background}"
     else
@@ -2976,22 +2981,55 @@ stop_spinner() {
     fi
 }
 
-# 获取版本信息（带缓存）
+# 获取版本信息（带缓存）—— 完全并行版
 get_version_info() {
-    if ! check_version_cache; then
-        # 动画特效
-        start_spinner "正在联网检查 NapCat 及 QQ 版本更新，请稍候..."
-        
-        # 获取版本更新
-        get_current_qq_version
-        get_current_napcat_version
-        qq_update_status=$(check_qq_update "$qq_version")
-        napcat_update_status=$(check_napcat_update "$napcat_version")
-        save_version_cache
-        
-        # 停止动画特效
-        stop_spinner
+    if check_version_cache; then
+        return 0
     fi
+
+    start_spinner "正在联网检查 NapCat 及 QQ 版本更新，请稍候..."
+
+    # 本地 QQ 版本（读文件，极快，同步）
+    get_current_qq_version
+
+    local tmp_napcat_ver=$(mktemp)
+    local tmp_qq_status=$(mktemp)
+    local tmp_napcat_latest=$(mktemp)
+
+    # A：启动 QQ 进程获取 NapCat 当前版本（最慢，~5s）
+    (
+        get_current_napcat_version
+        echo "$napcat_version" > "$tmp_napcat_ver"
+    ) &
+    local pid_a=$!
+
+    # B：网络查询 QQ 最新版本并生成状态（~3s）
+    (
+        qq_update_status=$(check_qq_update "$qq_version")
+        echo "$qq_update_status" > "$tmp_qq_status"
+    ) &
+    local pid_b=$!
+
+    # C：网络查询 NapCat 最新版本号（~3s，和 A 完全并行）
+    (
+        fetch_napcat_latest_version > "$tmp_napcat_latest"
+    ) &
+    local pid_c=$!
+
+    # ── 等待全部完成 ────────────────────────────────────────────────────────
+    wait "$pid_a" "$pid_b" "$pid_c"
+
+    # ── 读取结果，合并比较 ──────────────────────────────────────────────────
+    napcat_version=$(cat "$tmp_napcat_ver")
+    qq_update_status=$(cat "$tmp_qq_status")
+    local napcat_latest=$(cat "$tmp_napcat_latest")
+
+    napcat_update_status=$(format_napcat_update_status "$napcat_version" "$napcat_latest")
+
+    rm -f "$tmp_napcat_ver" "$tmp_qq_status" "$tmp_napcat_latest"
+
+    save_version_cache
+    stop_spinner
 }
 
 # 清除版本缓存（在安装/更新后调用）
