@@ -1,5 +1,7 @@
 #!/bin/env bash
-SCRIPT_VERSION="1.0.23"
+
+# 更新版本号后 sh 会自动更新本地 sh 脚本
+SCRIPT_VERSION="1.0.24"
 
 export red="\033[31m"
 export green="\033[32m"
@@ -53,13 +55,13 @@ install_path=$HOME/memeGenerator
 SCRIPT_SYSTEM_PATH="/usr/local/bin/meme_generator.sh"
 
 # ================= 额外MEME仓库配置 =================
-# 格式: "文件夹名|子目录名（该仓库表情包存放目录，用于 toggle_single_repo）|Git仓库地址"
+# 格式: "文件夹名|子目录名（该仓库表情包存放目录，用于 toggle_single_repo）|Git仓库地址|分支名"
 EXTRA_REPOS=(
-    "meme-generator-contrib|memes|https://github.com/MemeCrafters/meme-generator-contrib.git"
-    "meme_emoji|emoji|https://github.com/anyliew/meme_emoji.git"
-    "meme-generator-jj|memes|https://github.com/jinjiao007/meme-generator-jj.git"
-    "meme_emoji_nsfw|emoji|https://github.com/anyliew/meme_emoji_nsfw.git"
-    "tudou-meme|memes|https://github.com/LRZ9712/tudou-meme.git"
+    "meme-generator-contrib|memes|https://github.com/MemeCrafters/meme-generator-contrib.git|main"
+    "meme_emoji|emoji|https://github.com/anyliew/meme_emoji.git|main"
+    "meme-generator-jj|memes|https://github.com/jinjiao007/meme-generator-jj.git|master"
+    "meme_emoji_nsfw|emoji|https://github.com/anyliew/meme_emoji_nsfw.git|main"
+    "tudou-meme|memes|https://github.com/LRZ9712/tudou-meme.git|main"
 )
 # ===================================================
 
@@ -67,7 +69,7 @@ EXTRA_REPOS=(
 get_default_meme_dirs() {
     local dirs=""
     for repo_info in "${EXTRA_REPOS[@]}"; do
-        IFS='|' read -r repo_name repo_subdir repo_url <<< "$repo_info"
+        IFS='|' read -r repo_name repo_subdir repo_url repo_branch <<< "$repo_info"
         if [ -n "$dirs" ]; then
             dirs="${dirs}, "
         fi
@@ -224,10 +226,11 @@ git_clone() {
   fi
 }
 
-# 添加git更新函数，支持镜像自动切换
+# 添加git更新函数，支持镜像自动切换及指定分支
 git_update() {
   repo_dir="$1"
   log_file="$2"
+  branch="${3:-main}" # 默认分支为 main
   
   cd ${repo_dir}
   
@@ -235,7 +238,7 @@ git_update() {
   remote_url=$(git remote get-url origin 2>/dev/null)
   
   # 尝试直接更新
-  if git fetch --all >> ${log_file} 2>&1 && git reset --hard origin/main >> ${log_file} 2>&1 && git pull >> ${log_file} 2>&1; then
+  if git fetch --all >> ${log_file} 2>&1 && git reset --hard origin/${branch} >> ${log_file} 2>&1 && git pull >> ${log_file} 2>&1; then
     return 0
   else
     echo -e "${yellow}更新失败，尝试修改远程URL使用备用镜像...${background}" >> ${log_file}
@@ -245,14 +248,14 @@ git_update() {
     
     # 尝试使用主镜像
     git remote set-url origin ${GithubMirror_1}${original_url} >> ${log_file} 2>&1
-    if git fetch --all >> ${log_file} 2>&1 && git reset --hard origin/main >> ${log_file} 2>&1 && git pull >> ${log_file} 2>&1; then
+    if git fetch --all >> ${log_file} 2>&1 && git reset --hard origin/${branch} >> ${log_file} 2>&1 && git pull >> ${log_file} 2>&1; then
       return 0
     else
       echo -e "${yellow}主镜像失败，尝试使用备用镜像...${background}" >> ${log_file}
       
       # 尝试使用备用镜像
       git remote set-url origin ${GithubMirror_2}${original_url} >> ${log_file} 2>&1
-      if git fetch --all >> ${log_file} 2>&1 && git reset --hard origin/main >> ${log_file} 2>&1 && git pull >> ${log_file} 2>&1; then
+      if git fetch --all >> ${log_file} 2>&1 && git reset --hard origin/${branch} >> ${log_file} 2>&1 && git pull >> ${log_file} 2>&1; then
         return 0
       else
         echo -e "${red}所有镜像都失败，更新失败${background}" >> ${log_file}
@@ -373,7 +376,7 @@ python -m meme_generator.cli meme download
 
 # 动态下载所有额外依赖仓库
 for repo_info in "${EXTRA_REPOS[@]}"; do
-    IFS='|' read -r repo_name repo_subdir repo_url <<< "$repo_info"
+    IFS='|' read -r repo_name repo_subdir repo_url repo_branch <<< "$repo_info"
     echo -e ${green}下载额外图片 ${repo_name}...${background}
     if ! git_clone "${repo_url}" "${install_path}/${repo_name}" "/dev/null"; then
         echo -e ${red}克隆 ${repo_name} 仓库失败${background}
@@ -519,7 +522,7 @@ then
 fi
 
 echo -e ${yellow}正在更新meme生成器核心...${background}
-if ! git_update "${install_path}/meme-generator" "/dev/null"; then
+if ! git_update "${install_path}/meme-generator" "/dev/null" "main"; then
   echo -e ${red}更新meme-generator失败${background}
   echo -e ${yellow}继续更新其他组件...${background}
 fi
@@ -530,9 +533,10 @@ python -m pip install .
 
 # 动态更新所有额外依赖仓库
 for repo_info in "${EXTRA_REPOS[@]}"; do
-    IFS='|' read -r repo_name repo_subdir repo_url <<< "$repo_info"
+    IFS='|' read -r repo_name repo_subdir repo_url repo_branch <<< "$repo_info"
+    repo_branch=${repo_branch:-main}
     echo -e ${yellow}正在更新 ${repo_name}...${background}
-    if ! git_update "${install_path}/${repo_name}" "/dev/null"; then
+    if ! git_update "${install_path}/${repo_name}" "/dev/null" "${repo_branch}"; then
         echo -e ${red}更新 ${repo_name} 失败${background}
         echo -e ${yellow}继续更新其他组件...${background}
     fi
@@ -547,9 +551,24 @@ Y|y)
 esac
 }
 
+confirm_action() {
+    local operate_text="$1"
+    echo -en "${yellow}是否确认${operate_text}？[y/N] ${background}";read user_input
+    case "${user_input}" in
+        Y|y) return 0 ;;
+        *)   return 1 ;;
+    esac
+}
+
 uninstall_meme_generator(){
 if [ ! -d ${install_path}/meme-generator ];then
     echo -en ${red}您还没有安装meme生成器! ${cyan}回车返回${background};read
+    return
+fi
+
+confirm_action "卸载meme生成器"
+if [ $? -ne 0 ]; then
+    echo -en "${yellow}操作已取消，回车返回${background}";read
     return
 fi
 
@@ -699,7 +718,7 @@ auto_update_meme_generator(){
 
   # 更新meme-generator
   echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在更新meme生成器...${background}" >> ${log_file}
-  if ! git_update "${install_path}/meme-generator" "${log_file}"; then
+  if ! git_update "${install_path}/meme-generator" "${log_file}" "main"; then
     echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] meme-generator更新失败${background}" >> ${log_file}
   else
     cd "${install_path}/meme-generator"
@@ -713,9 +732,10 @@ auto_update_meme_generator(){
 
   # 动态更新所有额外依赖仓库
   for repo_info in "${EXTRA_REPOS[@]}"; do
-      IFS='|' read -r repo_name repo_subdir repo_url <<< "$repo_info"
+      IFS='|' read -r repo_name repo_subdir repo_url repo_branch <<< "$repo_info"
+      repo_branch=${repo_branch:-main}
       echo -e "${yellow}[$(date "+%Y-%m-%d %H:%M:%S")] 正在更新${repo_name}...${background}" >> ${log_file}
-      if ! git_update "${install_path}/${repo_name}" "${log_file}"; then
+      if ! git_update "${install_path}/${repo_name}" "${log_file}" "${repo_branch}"; then
           echo -e "${red}[$(date "+%Y-%m-%d %H:%M:%S")] ${repo_name}更新失败${background}" >> ${log_file}
       fi
   done
@@ -996,7 +1016,7 @@ change_github_proxy(){
     # 动态构建仓库列表
     repos=("${install_path}/meme-generator:https://github.com/MemeCrafters/meme-generator.git")
     for repo_info in "${EXTRA_REPOS[@]}"; do
-        IFS='|' read -r repo_name repo_subdir repo_url <<< "$repo_info"
+        IFS='|' read -r repo_name repo_subdir repo_url repo_branch <<< "$repo_info"
         repos+=("${install_path}/${repo_name}:${repo_url}")
     done
     
@@ -1141,7 +1161,7 @@ toggle_extra_memes(){
     # 动态检测所有额外仓库的状态
     local i=1
     for repo_info in "${EXTRA_REPOS[@]}"; do
-        IFS='|' read -r repo_name repo_subdir repo_url <<< "$repo_info"
+        IFS='|' read -r repo_name repo_subdir repo_url repo_branch <<< "$repo_info"
         repo_path="${install_path}/${repo_name}"
         
         status="${red}[未安装]"
@@ -1178,8 +1198,8 @@ toggle_extra_memes(){
     elif [ "$choice" -ge 1 ] && [ "$choice" -lt "$i" ]; then
         local idx=$((choice-1))
         local repo_info="${EXTRA_REPOS[$idx]}"
-        IFS='|' read -r repo_name repo_subdir repo_url <<< "$repo_info"
-        toggle_single_repo "$repo_name" "$repo_subdir" "$repo_url"
+        IFS='|' read -r repo_name repo_subdir repo_url repo_branch <<< "$repo_info"
+        toggle_single_repo "$repo_name" "$repo_subdir" "$repo_url" "${repo_branch:-main}"
     else
         echo -e ${red}输入错误${background}
         echo -en ${yellow}回车返回${background};read
@@ -1191,6 +1211,7 @@ toggle_single_repo(){
     repo_name="$1"
     repo_subdir="$2"
     repo_url="$3"
+    repo_branch="${4:-main}"
     repo_path="${install_path}/${repo_name}"
     
     # 如果仓库未安装，先安装
@@ -1244,7 +1265,7 @@ enable_all_repos(){
     echo -e ${yellow}正在启用所有额外meme仓库...${background}
     
     for repo_info in "${EXTRA_REPOS[@]}"; do
-        IFS='|' read -r repo_name repo_subdir repo_url <<< "$repo_info"
+        IFS='|' read -r repo_name repo_subdir repo_url repo_branch <<< "$repo_info"
         repo_path="${install_path}/${repo_name}"
         
         if [ ! -d ${repo_path} ]; then
@@ -1275,7 +1296,7 @@ enable_all_repos(){
 # 禁用所有仓库
 disable_all_repos(){
     echo -e ${yellow}正在禁用所有额外meme仓库...${background}
-    sed -i "s|meme_dirs = \[.*\]|meme_dirs =[]|g" ${config}
+    sed -i "s|meme_dirs = \[.*\]|meme_dirs = []|g" ${config}
     echo -e ${green}所有额外meme仓库已禁用！${background}
     echo -e ${cyan}注意：仓库文件仍保留在系统中，仅禁用了加载${background}
     
