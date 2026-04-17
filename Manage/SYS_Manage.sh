@@ -411,12 +411,62 @@ install_fonts() {
     esac
 }
 
+# 系统垃圾清理函数
+clean_system() {
+    echo -e ${white}"====="${green}系统管理-清理垃圾${white}"====="${background}
+    echo -e  ${green}1.  ${cyan}常规清理 \(系统日志、Redis日志、系统缓存\)${background}
+    echo -e  ${green}0.  ${cyan}返回主菜单${background}
+    echo "========================="
+    echo -en ${green}请输入您的选项: ${background};read num
+
+    case ${num} in
+    1)
+        echo -e ${yellow}正在清理 systemd 日志 \(保留最近100M\)...${background}
+        journalctl --vacuum-size=100M
+
+        echo -e ${yellow}正在清理暴力登录日志...${background}
+        [ -f /var/log/btmp ] && truncate -s 0 /var/log/btmp
+        [ -f /var/log/btmp.1 ] && truncate -s 0 /var/log/btmp.1
+
+        echo -e ${yellow}正在清理认证日志...${background}
+        [ -f /var/log/auth.log ] && truncate -s 0 /var/log/auth.log
+        [ -f /var/log/auth.log.1 ] && truncate -s 0 /var/log/auth.log.1
+        [ -f /var/log/secure ] && truncate -s 0 /var/log/secure
+
+        echo -e ${yellow}正在清理 redis 日志...${background}
+        [ -f /var/log/redis/redis-server.log ] && truncate -s 0 /var/log/redis/redis-server.log
+
+        echo -e ${yellow}正在清理包管理器缓存...${background}
+        if [ -x "$(command -v apt)" ]; then
+            apt autoremove -y && apt clean
+        elif [ -x "$(command -v yum)" ]; then
+            yum autoremove -y && yum clean all
+        elif [ -x "$(command -v dnf)" ]; then
+            dnf autoremove -y && dnf clean all
+        elif [ -x "$(command -v pacman)" ]; then
+            pacman -Scc --noconfirm
+        fi
+
+        echo -e ${green}常规清理完成！${background}
+        echo -en ${yellow}回车返回${background};read
+        ;;
+    0)
+        return
+        ;;
+    *)
+        echo -e ${red}输入错误${background}
+        echo -en ${yellow}回车返回${background};read
+        ;;
+    esac
+}
+
 # 主菜单函数
 main() {
     echo -e ${white}"====="${green}呆毛版-系统管理${white}"====="${background}
     echo -e  ${green}1.  ${cyan}Hosts文件管理${background}
     echo -e  ${green}2.  ${cyan}虚拟内存管理${background}
     echo -e  ${green}3.  ${cyan}安装常用字体${background}
+    echo -e  ${green}4.  ${cyan}清理系统垃圾${background}
     echo -e  ${green}0.  ${cyan}退出${background}
     echo "========================="
     echo -e ${green}系统信息: $(uname -s) $(uname -r) $(uname -m)${background}
@@ -437,6 +487,10 @@ main() {
     3)
         echo
         install_fonts
+        ;;
+    4)
+        echo
+        clean_system
         ;;
     0)
         exit
