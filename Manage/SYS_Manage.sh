@@ -450,28 +450,38 @@ manage_singbox() {
     CONF_DIR="/etc/sing-box"
     CONF_FILE="${CONF_DIR}/config.json"
     INFO_FILE="${CONF_DIR}/info.txt"
+    CERT_FILE="${CONF_DIR}/cert.pem"
+    KEY_FILE="${CONF_DIR}/private.key"
 
     # 获取 docker 容器运行状态 (屏蔽报错输出)
     STATUS_CHECK=$(docker inspect -f '{{.State.Running}}' sing-box 2>/dev/null)
+    MEM_USAGE="0.00MB"
     
     if [ "$STATUS_CHECK" == "true" ]; then
         SINGBOX_STATUS="${green}▶ 运行中${background}"
+        # 获取当前内存占用
+        MEM_USAGE=$(docker stats --no-stream --format "{{.MemUsage}}" sing-box 2>/dev/null | awk '{print $1}')
     elif [ "$STATUS_CHECK" == "false" ]; then
         SINGBOX_STATUS="${red}■ 已停止${background}"
     else
         SINGBOX_STATUS="${yellow}● 未安装${background}"
     fi
 
-    echo -e ${white}"====="${green}系统管理-Sing-box正向代理${white}"====="${background}
-    echo -e  ${green}1.  ${cyan}安装/更新并创建正向代理 \(HTTP/HTTPS\)${background}
-    echo -e  ${green}2.  ${cyan}启动 Sing-box${background}
-    echo -e  ${green}3.  ${cyan}停止 Sing-box${background}
-    echo -e  ${green}4.  ${cyan}重启 Sing-box${background}
-    echo -e  ${green}5.  ${cyan}查看连接信息及白名单提示${background}
-    echo -e  ${green}6.  ${cyan}卸载 Sing-box${background}
+    clear
+    echo -e ${white}"====="${green}系统管理-Sing-box \(Hysteria2\)${white}"====="${background}
+    echo -e  ${green}1.  ${cyan}部署 服务端 \(中转机 / 开放外网访问\)${background}
+    echo -e  ${green}2.  ${cyan}部署 客户端 \(本地机 / 连接到中转机\)${background}
+    echo -e  ${green}3.  ${cyan}启动 Sing-box${background}
+    echo -e  ${green}4.  ${cyan}停止 Sing-box${background}
+    echo -e  ${green}5.  ${cyan}重启 Sing-box${background}
+    echo -e  ${green}6.  ${cyan}查看连接信息及使用帮助${background}
+    echo -e  ${green}7.  ${cyan}卸载 Sing-box${background}
     echo -e  ${green}0.  ${cyan}返回主菜单${background}
     echo "========================="
     echo -e "  当前状态: ${SINGBOX_STATUS}"
+    if [ "$STATUS_CHECK" == "true" ]; then
+        echo -e "  内存占用: ${cyan}${MEM_USAGE}${background}"
+    fi
     echo "========================="
     echo -en ${green}请输入您的选项: ${background};read num
 
@@ -479,104 +489,158 @@ manage_singbox() {
     1)
         check_docker
         
-        # 收集用户配置
-        echo -en "${cyan}请输入代理端口 (默认 50846): ${background}"
+        if [ -f "${CONF_FILE}" ]; then
+            echo -en "${yellow}检测到已存在配置文件，继续将覆盖原有配置！是否继续？[y/N]: ${background}"
+            read overwrite
+            if [[ "$overwrite" != "y" && "$overwrite" != "Y" ]]; then
+                manage_singbox
+                return
+            fi
+        fi
+
+        echo -e "${purple}=== 配置 Hysteria2 服务端 ===${background}"
+        echo -en "${cyan}请输入监听端口 (Hysteria2使用UDP, 默认 50846): ${background}"
         read PORT
         PORT=${PORT:-50846}
 
-        echo -en "${cyan}请输入用户名 (默认 admin): ${background}"
-        read USERNAME
-        USERNAME=${USERNAME:-admin}
-
-        # 生成随机密码作为默认值
-        RANDOM_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
+        RANDOM_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
         echo -en "${cyan}请输入密码 (默认随机生成: ${RANDOM_PASS}): ${background}"
         read PASSWORD
         PASSWORD=${PASSWORD:-$RANDOM_PASS}
 
-        # 准备目录
         mkdir -p ${CONF_DIR}
 
-        # 写入 config.json
+        # Hysteria2 必须使用 TLS，这里自动生成自签名证书
+        echo -e "${yellow}正在生成自签名 TLS 证书...${background}"
+        openssl ecparam -genkey -name prime256v1 -out ${KEY_FILE}
+        openssl req -new -x509 -days 36500 -key ${KEY_FILE} -out ${CERT_FILE} -subj "/CN=bing.com" >/dev/null 2>&1
+
+        # 写入 服务端 config.json
         cat > ${CONF_FILE} << EOF
 {
-  "log": {
-    "disabled": false,
-    "level": "info",
-    "timestamp": true
-  },
+  "log": { "disabled": false, "level": "info", "timestamp": true },
   "inbounds":[
     {
-      "type": "http",
-      "tag": "http-in",
+      "type": "hysteria2",
+      "tag": "hy2-in",
       "listen": "::",
       "listen_port": ${PORT},
-      "users":[
-        {
-          "username": "${USERNAME}",
-          "password": "${PASSWORD}"
-        }
-      ]
+      "users":[ { "password": "${PASSWORD}" } ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "/etc/sing-box/cert.pem",
+        "key_path": "/etc/sing-box/private.key"
+      }
+    }
+  ],
+  "outbounds": [ { "type": "direct", "tag": "direct" } ]
+}
+EOF
+        
+        PUBLIC_IP=$(curl -sL ipinfo.io/ip)
+        cat > ${INFO_FILE} << EOF
+======================================
+      Sing-box Hysteria2 [服务端]     
+======================================
+节点角色 : 中转机 (Server)
+服务器IP : ${PUBLIC_IP}
+代理端口 : ${PORT} (UDP协议)
+认证密码 : ${PASSWORD}
+======================================
+【连接帮助】: 
+1. 服务端已就绪，请务必在防火墙/安全组放行 ${PORT} 的 UDP 端口！
+2. 请在您的“本地机”上运行此脚本，选择 [选项2. 部署客户端]
+3. 填入上方的 IP、端口 和 密码 即可建立连接。
+======================================
+EOF
+        start_singbox_docker "服务端"
+        ;;
+    2)
+        check_docker
+
+        if [ -f "${CONF_FILE}" ]; then
+            echo -en "${yellow}检测到已存在配置文件，继续将覆盖原有配置！是否继续？[y/N]: ${background}"
+            read overwrite
+            if [[ "$overwrite" != "y" && "$overwrite" != "Y" ]]; then
+                manage_singbox
+                return
+            fi
+        fi
+
+        echo -e "${purple}=== 配置 Hysteria2 客户端 ===${background}"
+        echo -en "${cyan}请输入中转机(服务端)的 IP 地址: ${background}"
+        read SERVER_IP
+        echo -en "${cyan}请输入中转机(服务端)的 端口: ${background}"
+        read SERVER_PORT
+        echo -en "${cyan}请输入中转机(服务端)的 密码: ${background}"
+        read PASSWORD
+        
+        echo -en "${cyan}请设置本地局域网提供的 Mixed(HTTP/Socks5) 代理端口 (默认 2080): ${background}"
+        read LOCAL_PORT
+        LOCAL_PORT=${LOCAL_PORT:-2080}
+
+        mkdir -p ${CONF_DIR}
+
+        # 写入 客户端 config.json
+        cat > ${CONF_FILE} << EOF
+{
+  "log": { "disabled": false, "level": "info", "timestamp": true },
+  "inbounds":[
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "0.0.0.0",
+      "listen_port": ${LOCAL_PORT}
     }
   ],
   "outbounds":[
     {
-      "type": "direct",
-      "tag": "direct"
+      "type": "hysteria2",
+      "tag": "hy2-out",
+      "server": "${SERVER_IP}",
+      "server_port": ${SERVER_PORT},
+      "password": "${PASSWORD}",
+      "tls": {
+        "enabled": true,
+        "server_name": "bing.com",
+        "insecure": true
+      }
     }
   ]
 }
 EOF
         
-        # 记录信息用于查看
-        PUBLIC_IP=$(curl -sL ipinfo.io/ip)
         cat > ${INFO_FILE} << EOF
 ======================================
-     Sing-box 正向代理 (HTTP/HTTPS)   
+      Sing-box Hysteria2 [客户端]     
 ======================================
-代理协议 : HTTP / HTTPS
-服务器IP : ${PUBLIC_IP}
-代理端口 : ${PORT}
-用户名   : ${USERNAME}
-密  码   : ${PASSWORD}
+节点角色 : 本地机 (Client)
+连接目标 : ${SERVER_IP}:${SERVER_PORT}
+本地端口 : ${LOCAL_PORT} (HTTP/Socks5)
+======================================
+【使用帮助】: 
+本地客户端已启动。您现在可以让本地的其他软件或设备，
+通过 HTTP 或 Socks5 代理连接到本机:
+代理地址: 127.0.0.1 (或本机的局域网IP)
+代理端口: ${LOCAL_PORT}
+流量将通过 Hysteria2 加密传输至中转机。
 ======================================
 EOF
-
-        echo -e "${yellow}正在拉取最新官方 Sing-box 镜像...${background}"
-        docker pull ghcr.io/sagernet/sing-box:latest
-
-        echo -e "${yellow}正在配置并启动容器...${background}"
-        # 移除可能存在的旧容器 (这保证了不会多开)
-        docker rm -f sing-box >/dev/null 2>&1
-        
-        docker run -d \
-            --name sing-box \
-            --restart unless-stopped \
-            --network host \
-            -v ${CONF_FILE}:/etc/sing-box/config.json \
-            ghcr.io/sagernet/sing-box:latest run -c /etc/sing-box/config.json
-
-        echo -e "${green}Sing-box 安装/更新并启动完成！${background}"
-        cat ${INFO_FILE}
-        
-        echo -e "${purple}【IP白名单安全设置提示】${background}"
-        echo -e "  呆毛强力推荐配置IP白名单，请配置防火墙限制 ${PORT} 端口"
-        pause
-        manage_singbox # 返回当前菜单刷新状态
+        start_singbox_docker "客户端"
         ;;
-    2)
+    3)
         if [ "$STATUS_CHECK" == "true" ]; then
             echo -e "${yellow}Sing-box 已经在运行中，无需重复启动。${background}"
         elif [ "$STATUS_CHECK" == "false" ]; then
             docker start sing-box
             echo -e "${green}Sing-box 容器已启动。${background}"
         else
-            echo -e "${red}未找到 Sing-box 容器，请先执行选项 1 进行安装。${background}"
+            echo -e "${red}未找到 Sing-box 容器，请先部署。${background}"
         fi
         pause
-        manage_singbox # 重新加载菜单刷新状态
+        manage_singbox 
         ;;
-    3)
+    4)
         if [ "$STATUS_CHECK" == "false" ]; then
             echo -e "${yellow}Sing-box 已经是停止状态。${background}"
         elif [ "$STATUS_CHECK" == "true" ]; then
@@ -588,9 +652,9 @@ EOF
         pause
         manage_singbox
         ;;
-    4)
+    5)
         if [ "$STATUS_CHECK" == "" ]; then
-            echo -e "${red}未找到 Sing-box 容器，请先安装。${background}"
+            echo -e "${red}未找到 Sing-box 容器，请先部署。${background}"
         else
             echo -e "${yellow}正在重启 Sing-box...${background}"
             docker restart sing-box
@@ -599,19 +663,16 @@ EOF
         pause
         manage_singbox
         ;;
-    5)
+    6)
         if [ -f "${INFO_FILE}" ]; then
             cat "${INFO_FILE}"
-            PORT=$(grep "代理端口" "${INFO_FILE}" | awk '{print $3}')
-            echo -e "${purple}【IP白名单安全设置提示】${background}"
-            echo -e "  呆毛强力推荐配置IP白名单，请配置防火墙限制 ${PORT} 端口"
         else
             echo -e "${red}未找到配置信息，请确认是否已安装。${background}"
         fi
         pause
         manage_singbox
         ;;
-    6)
+    7)
         echo -en "${yellow}确定要卸载 Sing-box 及其配置文件吗？[y/N]: ${background}"
         read rm_confirm
         if [[ "$rm_confirm" == "y" || "$rm_confirm" == "Y" ]]; then
@@ -627,6 +688,28 @@ EOF
     0) return ;;
     *) echo -e ${red}输入错误${background}; pause; manage_singbox ;;
     esac
+}
+
+# 辅助函数：用于统一启动 Docker
+start_singbox_docker() {
+    local ROLE=$1
+    echo -e "${yellow}正在拉取最新官方 Sing-box 镜像...${background}"
+    docker pull ghcr.io/sagernet/sing-box:latest
+
+    echo -e "${yellow}正在配置并启动容器...${background}"
+    docker rm -f sing-box >/dev/null 2>&1
+    
+    docker run -d \
+        --name sing-box \
+        --restart unless-stopped \
+        --network host \
+        -v ${CONF_DIR}:/etc/sing-box \
+        ghcr.io/sagernet/sing-box:latest run -c /etc/sing-box/config.json
+
+    echo -e "${green}Sing-box Hysteria2 ${ROLE} 部署并启动完成！${background}"
+    cat ${INFO_FILE}
+    pause
+    manage_singbox
 }
 
 # 主菜单函数
