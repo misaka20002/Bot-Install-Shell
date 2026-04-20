@@ -9,30 +9,34 @@ export white="\033[37m"
 export background="\033[0m"
 
 cd $HOME
-if [ "$(uname -o)" = "Android" ];then
-echo -e ${red}请在Linux系统上运行${background}
-exit
+if [ "$(uname -o)" = "Android" ]; then
+    echo -e "${red}请在Linux系统上运行${background}"
+    exit 1
 fi
 if [ ! "$(uname)" = "Linux" ]; then
-	echo -e ${red}请在Linux系统上运行${background}
-    exit
+    echo -e "${red}请在Linux系统上运行${background}"
+    exit 1
 fi
 if [ ! "$(id -u)" = "0" ]; then
-    echo -e ${red}请使用root用户${background}
-    exit 0
+    echo -e "${red}请使用root用户${background}"
+    exit 1
 fi
-
 
 URL="https://ipinfo.io"
 Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
-if [ "${Address}" = "CN" ]
-then
-  GitMirror="gitee.com"
-  GithubMirror="https://ghfast.top/"
+if [ "${Address}" = "CN" ]; then
+    GitMirror="gitee.com"
+    GithubMirror="https://ghfast.top/"
 else
-  GitMirror="github.com"
-  GithubMirror=""
+    GitMirror="github.com"
+    GithubMirror=""
 fi
+
+# 按任意键继续函数
+pause() {
+    echo -en "${yellow}按回车键继续...${background}"
+    read
+}
 
 # hosts文件管理函数
 manage_hosts() {
@@ -51,7 +55,7 @@ manage_hosts() {
         echo -e ${yellow}当前hosts文件内容:${background}
         cat ${hosts_file}
         echo
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
     2)
         echo -en ${cyan}请输入IP地址: ${background};read ip
@@ -62,7 +66,7 @@ manage_hosts() {
             echo "${ip} ${domain}" >> ${hosts_file}
             echo -e ${green}已添加: ${ip} ${domain}${background}
         fi
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
     3)
         echo -e ${yellow}当前hosts文件内容:${background}
@@ -74,26 +78,21 @@ manage_hosts() {
         else
             echo -e ${red}请输入有效的行号${background}
         fi
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
     4)
-        if [ -x "$(command -v nano)" ]; then
+        if command -v nano >/dev/null 2>&1; then
             nano ${hosts_file}
-        elif [ -x "$(command -v vim)" ]; then
+        elif command -v vim >/dev/null 2>&1; then
             vim ${hosts_file}
         else
             echo -e ${red}未找到编辑器，请安装nano或vim${background}
         fi
         echo -e ${green}hosts文件已编辑完成${background}
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
-    0)
-        return
-        ;;
-    *)
-        echo -e ${red}输入错误${background}
-        echo -en ${yellow}回车返回${background};read
-        ;;
+    0) return ;;
+    *) echo -e ${red}输入错误${background}; pause ;;
     esac
 }
 
@@ -119,116 +118,100 @@ manage_swap() {
         echo
         echo -e ${yellow}当前swappiness值:${background}
         cat /proc/sys/vm/swappiness
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
     2)
-    echo -en ${cyan}请输入要创建的swap分区大小\(GB\) （建议：如果系统内存是 2GB 的话建议设置虚拟内存也为 2GB，输入 2 即可）: ${background};read swap_size
-    if [[ ! "${swap_size}" =~ ^[0-9]+$ ]]; then
-        echo -e ${red}请输入有效的数字${background}
-        echo -en ${yellow}回车返回${background};read
-        return
-    fi
-    
-    # 检查swap大小是否合理
-    if [ ${swap_size} -le 0 ]; then
-        echo -e ${red}swap大小必须大于0GB${background}
-        echo -en ${yellow}回车返回${background};read
-        return
-    fi
-    
-    # 获取可用磁盘空间(GB)
-    available_space=$(df -BG --output=avail / | tail -n 1 | tr -d 'G')
-    if [ ${swap_size} -gt ${available_space} ]; then
-        echo -e ${red}磁盘空间不足，可用空间: ${available_space}GB${background}
-        echo -en ${yellow}回车返回${background};read
-        return
-    fi
-    
-    # 检查大小是否过大（建议限制最大值）
-    if [ ${swap_size} -gt 64 ]; then
-        echo -e ${yellow}警告: 创建过大的swap分区可能导致系统不稳定${background}
-        echo -en ${cyan}确定要创建${swap_size}GB的swap分区吗？[y/n]: ${background};read confirm
-        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-            echo -e ${yellow}已取消创建swap分区${background}
-            echo -en ${yellow}回车返回${background};read
+        echo -en ${cyan}请输入要创建的swap分区大小\(GB\) （建议：如果系统内存是 2GB 的话建议设置虚拟内存也为 2GB，输入 2 即可）: ${background};read swap_size
+        if [[ ! "${swap_size}" =~ ^[0-9]+$ ]] || [ ${swap_size} -le 0 ]; then
+            echo -e ${red}请输入大于0的有效数字${background}
+            pause
             return
         fi
-    fi
-
-    swap_file="/swapfile"
-    if [ -f "${swap_file}" ]; then
-        echo -e ${yellow}已存在swap文件${background}
-        echo -en ${cyan}是否删除现有swap文件并创建新的? [y/n]: ${background};read confirm
-        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-            # 先尝试关闭并删除已激活的swap
-            if swapon --show | grep -q "/swapfile"; then
-                swapoff /swapfile
-                sed -i '/\/swapfile/d' /etc/fstab
-            fi
-            rm -f /swapfile
-            echo -e ${green}已删除原有swap文件${background}
-        else
-            echo -e ${yellow}已取消操作${background}
-            echo -en ${yellow}回车返回${background};read
+        
+        available_space=$(df -BG --output=avail / | tail -n 1 | tr -d 'G' | tr -d ' ')
+        if [ ${swap_size} -gt ${available_space} ]; then
+            echo -e ${red}磁盘空间不足，可用空间: ${available_space}GB${background}
+            pause
             return
         fi
-    fi
-    
-    echo -e ${yellow}正在创建${swap_size}GB的swap文件，请稍候...${background}
-    
-    # 使用fallocate创建稀疏文件（更快、更节省内存）
-    if command -v fallocate >/dev/null 2>&1; then
-        echo -e ${cyan}使用fallocate创建swap文件...${background}
-        if ! fallocate -l ${swap_size}G ${swap_file}; then
-            echo -e ${red}创建swap文件失败，尝试使用传统方法...${background}
-            create_swap_traditional=true
-        fi
-    else
-        create_swap_traditional=true
-    fi
-    
-    # 如果fallocate不可用或失败，使用传统的dd方法分块创建
-    if [ "$create_swap_traditional" = true ]; then
-        echo -e ${cyan}使用dd创建swap文件，这可能需要较长时间...${background}
-        # 分块创建大文件，每次创建1GB
-        for i in $(seq 1 ${swap_size}); do
-            echo -e ${cyan}正在创建第 $i/${swap_size} GB...${background}
-            if ! dd if=/dev/zero of=${swap_file} bs=1G seek=$((i-1)) count=1 status=progress; then
-                echo -e ${red}创建swap文件失败${background}
-                rm -f ${swap_file}
-                echo -en ${yellow}回车返回${background};read
+        
+        if [ ${swap_size} -gt 64 ]; then
+            echo -e ${yellow}警告: 创建过大的swap分区可能导致系统不稳定${background}
+            echo -en ${cyan}确定要创建${swap_size}GB的swap分区吗？[y/n]: ${background};read confirm
+            if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+                echo -e ${yellow}已取消创建swap分区${background}
+                pause
                 return
             fi
-        done
-    fi
-    
-    # 设置权限并格式化为swap
-    chmod 600 ${swap_file}
-    if ! mkswap ${swap_file}; then
-        echo -e ${red}格式化swap文件失败${background}
-        rm -f ${swap_file}
-        echo -en ${yellow}回车返回${background};read
-        return
-    fi
-    
-    # 激活swap
-    if ! swapon ${swap_file}; then
-        echo -e ${red}激活swap分区失败${background}
-        rm -f ${swap_file}
-        echo -en ${yellow}回车返回${background};read
-        return
-    fi
-    
-    # 添加到fstab以便开机自动挂载
-    if ! grep -q "${swap_file}" /etc/fstab; then
-        echo "${swap_file} none swap sw 0 0" >> /etc/fstab
-    fi
-    
-    echo -e ${green}swap分区创建完成并已激活${background}
-    echo -e ${yellow}当前虚拟内存状态:${background}
-    free -h | grep -i swap
-    echo -en ${yellow}回车返回${background};read
-    ;;
+        fi
+
+        swap_file="/swapfile"
+        if [ -f "${swap_file}" ]; then
+            echo -e ${yellow}已存在swap文件${background}
+            echo -en ${cyan}是否删除现有swap文件并创建新的? [y/n]: ${background};read confirm
+            if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+                if swapon --show | grep -q "/swapfile"; then
+                    swapoff /swapfile
+                    sed -i '/\/swapfile/d' /etc/fstab
+                fi
+                rm -f /swapfile
+                echo -e ${green}已删除原有swap文件${background}
+            else
+                echo -e ${yellow}已取消操作${background}
+                pause
+                return
+            fi
+        fi
+        
+        echo -e ${yellow}正在创建${swap_size}GB的swap文件，请稍候...${background}
+        
+        if command -v fallocate >/dev/null 2>&1; then
+            echo -e ${cyan}使用fallocate创建swap文件...${background}
+            if ! fallocate -l ${swap_size}G ${swap_file}; then
+                echo -e ${red}创建swap文件失败，尝试使用传统方法...${background}
+                create_swap_traditional=true
+            fi
+        else
+            create_swap_traditional=true
+        fi
+        
+        if [ "$create_swap_traditional" = true ]; then
+            echo -e ${cyan}使用dd创建swap文件，这可能需要较长时间...${background}
+            for i in $(seq 1 ${swap_size}); do
+                echo -e ${cyan}正在创建第 $i/${swap_size} GB...${background}
+                if ! dd if=/dev/zero of=${swap_file} bs=1G seek=$((i-1)) count=1 status=progress; then
+                    echo -e ${red}创建swap文件失败${background}
+                    rm -f ${swap_file}
+                    pause
+                    return
+                fi
+            done
+        fi
+        
+        chmod 600 ${swap_file}
+        if ! mkswap ${swap_file}; then
+            echo -e ${red}格式化swap文件失败${background}
+            rm -f ${swap_file}
+            pause
+            return
+        fi
+        
+        if ! swapon ${swap_file}; then
+            echo -e ${red}激活swap分区失败${background}
+            rm -f ${swap_file}
+            pause
+            return
+        fi
+        
+        if ! grep -q "${swap_file}" /etc/fstab; then
+            echo "${swap_file} none swap sw 0 0" >> /etc/fstab
+        fi
+        
+        echo -e ${green}swap分区创建完成并已激活${background}
+        echo -e ${yellow}当前虚拟内存状态:${background}
+        free -h | grep -i swap
+        pause
+        ;;
     3)
         echo -e ${yellow}当前swappiness值:${background}
         current_swappiness=$(cat /proc/sys/vm/swappiness)
@@ -244,7 +227,7 @@ manage_swap() {
         else
             echo -e ${red}请输入0-100之间的有效数字${background}
         fi
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
     4)
         if swapon --show | grep -q "/swapfile"; then
@@ -255,15 +238,10 @@ manage_swap() {
         else
             echo -e ${yellow}未找到活动的swap分区${background}
         fi
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
-    0)
-        return
-        ;;
-    *)
-        echo -e ${red}输入错误${background}
-        echo -en ${yellow}回车返回${background};read
-        ;;
+    0) return ;;
+    *) echo -e ${red}输入错误${background}; pause ;;
     esac
 }
 
@@ -284,130 +262,93 @@ install_fonts() {
     1)
         echo -e ${yellow}系统已安装字体列表:${background}
         fc-list : family | sort
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
     2)
         echo -e ${yellow}正在安装中文字体包...${background}
-        
-        # 安装依赖
-        if [ $(command -v apt) ]; then
-            apt update
-            apt install -y wget unzip fontconfig
-        elif [ $(command -v yum) ]; then
+        if command -v apt >/dev/null 2>&1; then
+            apt update && apt install -y wget unzip fontconfig
+        elif command -v yum >/dev/null 2>&1; then
             yum install -y wget unzip fontconfig
-        elif [ $(command -v dnf) ]; then
+        elif command -v dnf >/dev/null 2>&1; then
             dnf install -y wget unzip fontconfig
-        elif [ $(command -v pacman) ]; then
+        elif command -v pacman >/dev/null 2>&1; then
             pacman -Sy --noconfirm wget unzip fontconfig
         fi
         
-        # 创建字体目录
         mkdir -p ${fonts_dir}/chinese
-        
-        # 下载并安装思源黑体
         echo -e ${cyan}正在下载思源黑体...${background}
         wget -q --show-progress ${GithubMirror}https://github.com/adobe-fonts/source-han-sans/releases/download/2.004R/SourceHanSansSC.zip -O /tmp/SourceHanSansSC.zip
         unzip -q /tmp/SourceHanSansSC.zip -d /tmp/SourceHanSansSC
         cp /tmp/SourceHanSansSC/SubsetOTF/SC/*.otf ${fonts_dir}/chinese/
         rm -rf /tmp/SourceHanSansSC /tmp/SourceHanSansSC.zip
         
-        # 下载并安装文泉驿字体
         echo -e ${cyan}正在下载文泉驿字体...${background}
-        if [ $(command -v apt) ]; then
+        if command -v apt >/dev/null 2>&1; then
             apt install -y fonts-wqy-microhei fonts-wqy-zenhei
-        elif [ $(command -v yum) ]; then
+        elif command -v yum >/dev/null 2>&1; then
             yum install -y wqy-microhei-fonts wqy-zenhei-fonts
-        elif [ $(command -v dnf) ]; then
+        elif command -v dnf >/dev/null 2>&1; then
             dnf install -y wqy-microhei-fonts wqy-zenhei-fonts
-        elif [ $(command -v pacman) ]; then
+        elif command -v pacman >/dev/null 2>&1; then
             pacman -Sy --noconfirm wqy-microhei wqy-zenhei
         fi
         
-        # 刷新字体缓存
         fc-cache -fv
-        
         echo -e ${green}中文字体安装完成并已刷新字体缓存${background}
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
     3)
         echo -e ${yellow}正在安装编程字体...${background}
-        
-        # 安装依赖
-        if [ $(command -v apt) ]; then
-            apt update
-            apt install -y wget unzip fontconfig
-        elif [ $(command -v yum) ]; then
+        if command -v apt >/dev/null 2>&1; then
+            apt update && apt install -y wget unzip fontconfig
+        elif command -v yum >/dev/null 2>&1; then
             yum install -y wget unzip fontconfig
-        elif [ $(command -v dnf) ]; then
+        elif command -v dnf >/dev/null 2>&1; then
             dnf install -y wget unzip fontconfig
-        elif [ $(command -v pacman) ]; then
-            pacman -Sy --noconfirm wget unzip fontconfig
         fi
         
-        # 创建字体目录
         mkdir -p ${fonts_dir}/programming
-        
-        # 下载并安装JetBrains Mono字体
         echo -e ${cyan}正在下载JetBrains Mono字体...${background}
         wget -q --show-progress ${GithubMirror}https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip -O /tmp/JetBrainsMono.zip
         unzip -q /tmp/JetBrainsMono.zip -d /tmp/JetBrainsMono
         cp /tmp/JetBrainsMono/fonts/ttf/*.ttf ${fonts_dir}/programming/
         rm -rf /tmp/JetBrainsMono /tmp/JetBrainsMono.zip
         
-        # 下载并安装Fira Code字体
         echo -e ${cyan}正在下载Fira Code字体...${background}
         wget -q --show-progress ${GithubMirror}https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip -O /tmp/FiraCode.zip
         unzip -q /tmp/FiraCode.zip -d /tmp/FiraCode
         cp /tmp/FiraCode/ttf/*.ttf ${fonts_dir}/programming/
         rm -rf /tmp/FiraCode /tmp/FiraCode.zip
         
-        # 刷新字体缓存
         fc-cache -fv
-        
         echo -e ${green}编程字体安装完成并已刷新字体缓存${background}
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
     4)
         echo -e ${yellow}正在安装表情符号字体...${background}
-        
-        # 安装依赖
-        if [ $(command -v apt) ]; then
-            apt update
-            apt install -y wget fontconfig
-        elif [ $(command -v yum) ]; then
+        if command -v apt >/dev/null 2>&1; then
+            apt update && apt install -y wget fontconfig
+        elif command -v yum >/dev/null 2>&1; then
             yum install -y wget fontconfig
-        elif [ $(command -v dnf) ]; then
-            dnf install -y wget fontconfig
-        elif [ $(command -v pacman) ]; then
-            pacman -Sy --noconfirm wget fontconfig
         fi
         
-        # 创建字体目录
         mkdir -p ${fonts_dir}/emoji
-        
-        # 下载并安装Noto Color Emoji字体
         echo -e ${cyan}正在下载Noto Color Emoji字体...${background}
         wget -q --show-progress ${GithubMirror}https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf -O ${fonts_dir}/emoji/NotoColorEmoji.ttf
         
-        # 刷新字体缓存
         fc-cache -fv
-        
         echo -e ${green}表情符号字体安装完成并已刷新字体缓存${background}
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
     5)
         echo -e ${yellow}正在刷新字体缓存...${background}
         fc-cache -fv
         echo -e ${green}字体缓存刷新完成${background}
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
-    0)
-        return
-        ;;
-    *)
-        echo -e ${red}输入错误${background}
-        echo -en ${yellow}回车返回${background};read
-        ;;
+    0) return ;;
+    *) echo -e ${red}输入错误${background}; pause ;;
     esac
 }
 
@@ -437,26 +378,21 @@ clean_system() {
         [ -f /var/log/redis/redis-server.log ] && truncate -s 0 /var/log/redis/redis-server.log
 
         echo -e ${yellow}正在清理包管理器缓存...${background}
-        if [ -x "$(command -v apt)" ]; then
+        if command -v apt >/dev/null 2>&1; then
             apt autoremove -y && apt clean
-        elif [ -x "$(command -v yum)" ]; then
+        elif command -v yum >/dev/null 2>&1; then
             yum autoremove -y && yum clean all
-        elif [ -x "$(command -v dnf)" ]; then
+        elif command -v dnf >/dev/null 2>&1; then
             dnf autoremove -y && dnf clean all
-        elif [ -x "$(command -v pacman)" ]; then
+        elif command -v pacman >/dev/null 2>&1; then
             pacman -Scc --noconfirm
         fi
 
         echo -e ${green}常规清理完成！${background}
-        echo -en ${yellow}回车返回${background};read
+        pause
         ;;
-    0)
-        return
-        ;;
-    *)
-        echo -e ${red}输入错误${background}
-        echo -en ${yellow}回车返回${background};read
-        ;;
+    0) return ;;
+    *) echo -e ${red}输入错误${background}; pause ;;
     esac
 }
 
@@ -494,7 +430,203 @@ manage_bbr() {
             echo -e ${red}BBR 开启失败！请确认您的系统内核版本是否大于等于 4.9 。${background}
         fi
     fi
-    echo -en ${yellow}回车返回${background};read
+    pause
+}
+
+# 检测并安装 Docker
+check_docker() {
+    if ! command -v docker >/dev/null 2>&1; then
+        echo -e "${yellow}未检测到 Docker，正在为您自动安装...${background}"
+        curl -fsSL https://get.docker.com | bash
+        systemctl enable --now docker
+        echo -e "${green}Docker 安装并启动成功！${background}"
+    else
+        echo -e "${green}Docker 已安装。${background}"
+    fi
+}
+
+# Sing-box 管理函数
+manage_singbox() {
+    CONF_DIR="/etc/sing-box"
+    CONF_FILE="${CONF_DIR}/config.json"
+    INFO_FILE="${CONF_DIR}/info.txt"
+
+    # 获取 docker 容器运行状态 (屏蔽报错输出)
+    STATUS_CHECK=$(docker inspect -f '{{.State.Running}}' sing-box 2>/dev/null)
+    
+    if [ "$STATUS_CHECK" == "true" ]; then
+        SINGBOX_STATUS="${green}▶ 运行中${background}"
+    elif [ "$STATUS_CHECK" == "false" ]; then
+        SINGBOX_STATUS="${red}■ 已停止${background}"
+    else
+        SINGBOX_STATUS="${yellow}● 未安装${background}"
+    fi
+
+    echo -e ${white}"====="${green}系统管理-Sing-box正向代理${white}"====="${background}
+    echo -e  ${green}1.  ${cyan}安装/更新并创建正向代理 \(HTTP/HTTPS\)${background}
+    echo -e  ${green}2.  ${cyan}启动 Sing-box${background}
+    echo -e  ${green}3.  ${cyan}停止 Sing-box${background}
+    echo -e  ${green}4.  ${cyan}重启 Sing-box${background}
+    echo -e  ${green}5.  ${cyan}查看连接信息及白名单提示${background}
+    echo -e  ${green}6.  ${cyan}卸载 Sing-box${background}
+    echo -e  ${green}0.  ${cyan}返回主菜单${background}
+    echo "========================="
+    echo -e "  当前状态: ${SINGBOX_STATUS}"
+    echo "========================="
+    echo -en ${green}请输入您的选项: ${background};read num
+
+    case ${num} in
+    1)
+        check_docker
+        
+        # 收集用户配置
+        echo -en "${cyan}请输入代理端口 (默认 50846): ${background}"
+        read PORT
+        PORT=${PORT:-50846}
+
+        echo -en "${cyan}请输入用户名 (默认 admin): ${background}"
+        read USERNAME
+        USERNAME=${USERNAME:-admin}
+
+        # 生成随机密码作为默认值
+        RANDOM_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
+        echo -en "${cyan}请输入密码 (默认随机生成: ${RANDOM_PASS}): ${background}"
+        read PASSWORD
+        PASSWORD=${PASSWORD:-$RANDOM_PASS}
+
+        # 准备目录
+        mkdir -p ${CONF_DIR}
+
+        # 写入 config.json
+        cat > ${CONF_FILE} << EOF
+{
+  "log": {
+    "disabled": false,
+    "level": "info",
+    "timestamp": true
+  },
+  "inbounds":[
+    {
+      "type": "http",
+      "tag": "http-in",
+      "listen": "::",
+      "listen_port": ${PORT},
+      "users":[
+        {
+          "username": "${USERNAME}",
+          "password": "${PASSWORD}"
+        }
+      ]
+    }
+  ],
+  "outbounds":[
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ]
+}
+EOF
+        
+        # 记录信息用于查看
+        PUBLIC_IP=$(curl -sL ipinfo.io/ip)
+        cat > ${INFO_FILE} << EOF
+======================================
+     Sing-box 正向代理 (HTTP/HTTPS)   
+======================================
+代理协议 : HTTP / HTTPS
+服务器IP : ${PUBLIC_IP}
+代理端口 : ${PORT}
+用户名   : ${USERNAME}
+密  码   : ${PASSWORD}
+======================================
+EOF
+
+        echo -e "${yellow}正在拉取最新官方 Sing-box 镜像...${background}"
+        docker pull ghcr.io/sagernet/sing-box:latest
+
+        echo -e "${yellow}正在配置并启动容器...${background}"
+        # 移除可能存在的旧容器 (这保证了不会多开)
+        docker rm -f sing-box >/dev/null 2>&1
+        
+        docker run -d \
+            --name sing-box \
+            --restart unless-stopped \
+            --network host \
+            -v ${CONF_FILE}:/etc/sing-box/config.json \
+            ghcr.io/sagernet/sing-box:latest run -c /etc/sing-box/config.json
+
+        echo -e "${green}Sing-box 安装/更新并启动完成！${background}"
+        cat ${INFO_FILE}
+        
+        echo -e "${purple}【IP白名单安全设置提示】${background}"
+        echo -e "  呆毛强力推荐配置IP白名单，请配置防火墙限制 ${PORT} 端口"
+        pause
+        manage_singbox # 返回当前菜单刷新状态
+        ;;
+    2)
+        if [ "$STATUS_CHECK" == "true" ]; then
+            echo -e "${yellow}Sing-box 已经在运行中，无需重复启动。${background}"
+        elif [ "$STATUS_CHECK" == "false" ]; then
+            docker start sing-box
+            echo -e "${green}Sing-box 容器已启动。${background}"
+        else
+            echo -e "${red}未找到 Sing-box 容器，请先执行选项 1 进行安装。${background}"
+        fi
+        pause
+        manage_singbox # 重新加载菜单刷新状态
+        ;;
+    3)
+        if [ "$STATUS_CHECK" == "false" ]; then
+            echo -e "${yellow}Sing-box 已经是停止状态。${background}"
+        elif [ "$STATUS_CHECK" == "true" ]; then
+            docker stop sing-box
+            echo -e "${green}Sing-box 容器已停止。${background}"
+        else
+            echo -e "${red}未找到 Sing-box 容器。${background}"
+        fi
+        pause
+        manage_singbox
+        ;;
+    4)
+        if [ "$STATUS_CHECK" == "" ]; then
+            echo -e "${red}未找到 Sing-box 容器，请先安装。${background}"
+        else
+            echo -e "${yellow}正在重启 Sing-box...${background}"
+            docker restart sing-box
+            echo -e "${green}Sing-box 容器已重启。${background}"
+        fi
+        pause
+        manage_singbox
+        ;;
+    5)
+        if [ -f "${INFO_FILE}" ]; then
+            cat "${INFO_FILE}"
+            PORT=$(grep "代理端口" "${INFO_FILE}" | awk '{print $3}')
+            echo -e "${purple}【IP白名单安全设置提示】${background}"
+            echo -e "  呆毛强力推荐配置IP白名单，请配置防火墙限制 ${PORT} 端口"
+        else
+            echo -e "${red}未找到配置信息，请确认是否已安装。${background}"
+        fi
+        pause
+        manage_singbox
+        ;;
+    6)
+        echo -en "${yellow}确定要卸载 Sing-box 及其配置文件吗？[y/N]: ${background}"
+        read rm_confirm
+        if [[ "$rm_confirm" == "y" || "$rm_confirm" == "Y" ]]; then
+            docker rm -f sing-box >/dev/null 2>&1
+            rm -rf ${CONF_DIR}
+            echo -e "${green}Sing-box 已完全卸载。${background}"
+        else
+            echo -e "${green}已取消卸载操作。${background}"
+        fi
+        pause
+        manage_singbox
+        ;;
+    0) return ;;
+    *) echo -e ${red}输入错误${background}; pause; manage_singbox ;;
+    esac
 }
 
 # 主菜单函数
@@ -505,6 +637,7 @@ main() {
     echo -e  ${green}3.  ${cyan}安装常用字体${background}
     echo -e  ${green}4.  ${cyan}清理系统垃圾${background}
     echo -e  ${green}5.  ${cyan}开启BBR网络加速${background}
+    echo -e  ${green}6.  ${cyan}Sing-box正向代理${background}
     echo -e  ${green}0.  ${cyan}退出${background}
     echo "========================="
     echo -e ${green}系统信息: $(uname -s) $(uname -r) $(uname -m)${background}
@@ -514,34 +647,14 @@ main() {
     echo
     echo -en ${green}请输入您的选项: ${background};read number
     case ${number} in
-    1)
-        echo
-        manage_hosts
-        ;;
-    2)
-        echo
-        manage_swap
-        ;;
-    3)
-        echo
-        install_fonts
-        ;;
-    4)
-        echo
-        clean_system
-        ;;
-    5)
-        echo
-        manage_bbr
-        ;;
-    0)
-        exit
-        ;;
-    *)
-        echo
-        echo -e ${red}输入错误${background}
-        echo -en ${yellow}回车返回${background};read
-        ;;
+    1) manage_hosts ;;
+    2) manage_swap ;;
+    3) install_fonts ;;
+    4) clean_system ;;
+    5) manage_bbr ;;
+    6) manage_singbox ;;
+    0) exit 0 ;;
+    *) echo -e "\n${red}输入错误${background}"; pause ;;
     esac
 }
 
