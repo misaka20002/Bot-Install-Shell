@@ -460,6 +460,43 @@ clean_system() {
     esac
 }
 
+# 一键开启 BBR 函数
+manage_bbr() {
+    echo -e ${white}"====="${green}系统管理-开启BBR${white}"====="${background}
+    echo -e ${yellow}正在检测当前BBR开启状态...${background}
+    
+    current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    if [ "$current_cc" = "bbr" ]; then
+        echo -e ${green}检测结果：当前系统已成功开启 BBR 加速！${background}
+        lsmod | grep bbr
+    else
+        echo -e ${yellow}当前系统未开启 BBR，正在为您自动配置并开启...${background}
+        
+        if ! grep -q "net.core.default_qdisc" /etc/sysctl.conf; then
+            echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+        else
+            sed -i 's/.*net.core.default_qdisc.*/net.core.default_qdisc=fq/g' /etc/sysctl.conf
+        fi
+
+        if ! grep -q "net.ipv4.tcp_congestion_control" /etc/sysctl.conf; then
+            echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+        else
+            sed -i 's/.*net.ipv4.tcp_congestion_control.*/net.ipv4.tcp_congestion_control=bbr/g' /etc/sysctl.conf
+        fi
+        
+        sysctl -p >/dev/null 2>&1
+        
+        new_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+        if [ "$new_cc" = "bbr" ]; then
+            echo -e ${green}恭喜，BBR 开启成功！网络吞吐量已优化。${background}
+            lsmod | grep bbr
+        else
+            echo -e ${red}BBR 开启失败！请确认您的系统内核版本是否大于等于 4.9 。${background}
+        fi
+    fi
+    echo -en ${yellow}回车返回${background};read
+}
+
 # 主菜单函数
 main() {
     echo -e ${white}"====="${green}呆毛版-系统管理${white}"====="${background}
@@ -467,6 +504,7 @@ main() {
     echo -e  ${green}2.  ${cyan}虚拟内存管理${background}
     echo -e  ${green}3.  ${cyan}安装常用字体${background}
     echo -e  ${green}4.  ${cyan}清理系统垃圾${background}
+    echo -e  ${green}5.  ${cyan}开启BBR网络加速${background}
     echo -e  ${green}0.  ${cyan}退出${background}
     echo "========================="
     echo -e ${green}系统信息: $(uname -s) $(uname -r) $(uname -m)${background}
@@ -491,6 +529,10 @@ main() {
     4)
         echo
         clean_system
+        ;;
+    5)
+        echo
+        manage_bbr
         ;;
     0)
         exit

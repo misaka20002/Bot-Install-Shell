@@ -1,4 +1,4 @@
-old_version="1.1.93"
+old_version="1.1.95"
 
 cd $HOME
 export red="\033[31m"
@@ -179,6 +179,7 @@ echo -e ${cyan} xdm lag"    | "${blue}拉格朗日脚本${background}
 echo -e ${cyan} xdm nap"    | "${blue}NapCat 脚本${background}
 echo -e ${cyan} xdm plugin" | "${blue}插件管理脚本${background}
 echo -e ${cyan} xdm meme"   | "${blue}meme 管理脚本${background}
+echo -e ${cyan} xdm sys"   | "${blue}系统管理脚本${background}
 echo -e ${green}===============================${background}
 echo -e ${cyan} xdm mz ${blue}Miao-Yunzai根目录${background}
 echo -e ${cyan} xdm tz ${blue}TRSS-Yunzai根目录${background}
@@ -203,6 +204,12 @@ meme)
 MirrorCheck
 URL="${GitMirror}/raw/master/Manage"
 bash <(curl -sL ${URL}/meme_generator.sh)
+exit
+;;
+sys)
+MirrorCheck
+URL="${GitMirror}/raw/master/Manage"
+bash <(curl -sL ${URL}/SYS_Manage.sh)
 exit
 ;;
 SWPKG)
