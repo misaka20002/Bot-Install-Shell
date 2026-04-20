@@ -433,15 +433,45 @@ manage_bbr() {
     pause
 }
 
-# 检测并安装 Docker
 check_docker() {
-    if ! command -v docker >/dev/null 2>&1; then
+    if ! command -v docker &> /dev/null; then
         echo -e "${yellow}未检测到 Docker，正在为您自动安装...${background}"
-        curl -fsSL https://get.docker.com | bash
-        systemctl enable --now docker
-        echo -e "${green}Docker 安装并启动成功！${background}"
+        
+        echo -e "${red}呆毛注：${yellow}自己去问ai Docker 可用的 registry-mirrors 写入并刷新的指令${background}"
+        
+        # 尝试使用官方安装脚本（加入 10 秒超时限制，使用 Aliyun 镜像）
+        if curl -fsSL --connect-timeout 10 https://get.docker.com -o get-docker.sh; then
+            echo -e "${yellow}成功获取官方安装脚本，正在使用 Aliyun 镜像源进行安装...${background}"
+            sh get-docker.sh --mirror Aliyun
+        else
+            echo -e "${red}官方源连接失败，正在尝试使用系统包管理器进行基础安装...${background}"
+            # 备用方案：直接使用 apt 或 yum 安装系统默认的 docker
+            if command -v apt-get &> /dev/null; then
+                apt-get update -y && apt-get install -y docker.io
+            elif command -v yum &> /dev/null; then
+                yum install -y docker
+            fi
+        fi
+        # 尝试设置开机自启并启动 Docker
+        systemctl enable docker >/dev/null 2>&1
+        systemctl start docker >/dev/null 2>&1
+        # 严格的最终检查
+        if ! command -v docker &> /dev/null; then
+            echo -e "${red}====================================================${background}"
+            echo -e "${red}严重错误: Docker 软件安装失败！${background}"
+            echo -e "${red}原因: 您的服务器基础网络存在问题，无法下载安装包。${background}"
+            echo -e "${red}建议: 1. 检查 DNS 配置 (修改 /etc/resolv.conf) ${background}"
+            echo -e "${red}      2. 手动执行安装后再运行本脚本。${background}"
+            echo -e "${red}====================================================${background}"
+            return 1 # 返回上一层菜单而不是直接退出整个环境
+        fi
+        echo -e "${green}Docker 软件安装并启动成功！${background}"
     else
-        echo -e "${green}Docker 已安装。${background}"
+        # 如果已经安装了，确保服务是启动状态
+        echo -e "${green}检测到已安装 Docker，正在确保服务启动...${background}"
+        systemctl enable docker >/dev/null 2>&1
+        systemctl start docker >/dev/null 2>&1
+        echo -e "${green}Docker 服务当前运行正常！${background}"
     fi
 }
 
@@ -453,24 +483,34 @@ manage_singbox() {
     CERT_FILE="${CONF_DIR}/cert.pem"
     KEY_FILE="${CONF_DIR}/private.key"
 
+    # 获取节点角色信息 (从 info.txt 中提取)
+    ROLE_INFO=""
+    if [ -f "${INFO_FILE}" ]; then
+        # 截取 "节点角色 : 服务端 (Server)" 后半部分
+        ROLE_INFO=$(grep "节点角色" "${INFO_FILE}" | awk -F ' : ' '{print $2}')
+    fi
+    ROLE_DISPLAY=""
+    if [ -n "$ROLE_INFO" ]; then
+        ROLE_DISPLAY="[${ROLE_INFO}]"
+    fi
+
     # 获取 docker 容器运行状态 (屏蔽报错输出)
     STATUS_CHECK=$(docker inspect -f '{{.State.Running}}' sing-box 2>/dev/null)
     MEM_USAGE="0.00MB"
     
     if [ "$STATUS_CHECK" == "true" ]; then
-        SINGBOX_STATUS="${green}▶ 运行中${background}"
+        SINGBOX_STATUS="${green}▶ 运行中${ROLE_DISPLAY}${background}"
         # 获取当前内存占用
         MEM_USAGE=$(docker stats --no-stream --format "{{.MemUsage}}" sing-box 2>/dev/null | awk '{print $1}')
     elif [ "$STATUS_CHECK" == "false" ]; then
-        SINGBOX_STATUS="${red}■ 已停止${background}"
+        SINGBOX_STATUS="${red}■ 已停止${ROLE_DISPLAY}${background}"
     else
         SINGBOX_STATUS="${yellow}● 未安装${background}"
     fi
 
-    clear
     echo -e ${white}"====="${green}系统管理-Sing-box \(Hysteria2\)${white}"====="${background}
-    echo -e  ${green}1.  ${cyan}部署 服务端 \(中转机 / 开放外网访问\)${background}
-    echo -e  ${green}2.  ${cyan}部署 客户端 \(本地机 / 连接到中转机\)${background}
+    echo -e  ${green}1.  ${cyan}部署 服务端 \(远程节点 / 接收外网访问\)${background}
+    echo -e  ${green}2.  ${cyan}部署 客户端 \(本地设备 / 连接到服务端\)${background}
     echo -e  ${green}3.  ${cyan}启动 Sing-box${background}
     echo -e  ${green}4.  ${cyan}停止 Sing-box${background}
     echo -e  ${green}5.  ${cyan}重启 Sing-box${background}
@@ -542,15 +582,16 @@ EOF
 ======================================
       Sing-box Hysteria2 [服务端]     
 ======================================
-节点角色 : 中转机 (Server)
+节点角色 : 服务端 (Server)
 服务器IP : ${PUBLIC_IP}
 代理端口 : ${PORT} (UDP协议)
 认证密码 : ${PASSWORD}
 ======================================
 【连接帮助】: 
 1. 服务端已就绪，请务必在防火墙/安全组放行 ${PORT} 的 UDP 端口！
-2. 请在您的“本地机”上运行此脚本，选择 [选项2. 部署客户端]
+2. 请在您的“本地设备(客户端)”上运行此脚本，选择 [选项2. 部署客户端]
 3. 填入上方的 IP、端口 和 密码 即可建立连接。
+4. 呆毛注：强烈建议设置 UDP:${PORT} 的 ip地址白名单
 ======================================
 EOF
         start_singbox_docker "服务端"
@@ -568,11 +609,11 @@ EOF
         fi
 
         echo -e "${purple}=== 配置 Hysteria2 客户端 ===${background}"
-        echo -en "${cyan}请输入中转机(服务端)的 IP 地址: ${background}"
+        echo -en "${cyan}请输入服务端(远程节点)的 IP 地址: ${background}"
         read SERVER_IP
-        echo -en "${cyan}请输入中转机(服务端)的 端口: ${background}"
+        echo -en "${cyan}请输入服务端(远程节点)的 端口: ${background}"
         read SERVER_PORT
-        echo -en "${cyan}请输入中转机(服务端)的 密码: ${background}"
+        echo -en "${cyan}请输入服务端(远程节点)的 密码: ${background}"
         read PASSWORD
         
         echo -en "${cyan}请设置本地局域网提供的 Mixed(HTTP/Socks5) 代理端口 (默认 2080): ${background}"
@@ -614,7 +655,7 @@ EOF
 ======================================
       Sing-box Hysteria2 [客户端]     
 ======================================
-节点角色 : 本地机 (Client)
+节点角色 : 客户端 (Client)
 连接目标 : ${SERVER_IP}:${SERVER_PORT}
 本地端口 : ${LOCAL_PORT} (HTTP/Socks5)
 ======================================
@@ -623,7 +664,7 @@ EOF
 通过 HTTP 或 Socks5 代理连接到本机:
 代理地址: 127.0.0.1 (或本机的局域网IP)
 代理端口: ${LOCAL_PORT}
-流量将通过 Hysteria2 加密传输至中转机。
+流量将通过 Hysteria2 加密传输至服务端。
 ======================================
 EOF
         start_singbox_docker "客户端"
@@ -714,6 +755,7 @@ start_singbox_docker() {
 
 # 主菜单函数
 main() {
+    echo
     echo -e ${white}"====="${green}呆毛版-系统管理${white}"====="${background}
     echo -e  ${green}1.  ${cyan}Hosts文件管理${background}
     echo -e  ${green}2.  ${cyan}虚拟内存管理${background}
@@ -721,13 +763,13 @@ main() {
     echo -e  ${green}4.  ${cyan}清理系统垃圾${background}
     echo -e  ${green}5.  ${cyan}开启BBR网络加速${background}
     echo -e  ${green}6.  ${cyan}Sing-box正向代理${background}
+    echo -e  ${green}7.  ${cyan}安装docker代理${background}
     echo -e  ${green}0.  ${cyan}退出${background}
     echo "========================="
     echo -e ${green}系统信息: $(uname -s) $(uname -r) $(uname -m)${background}
     echo -e ${green}内存状态: $(free -h | grep Mem | awk '{print $3"/"$2" 使用"}')${background}
     echo -e ${green}QQ群: ${cyan}呆毛版-QQ群:1022982073${background}
     echo "========================="
-    echo
     echo -en ${green}请输入您的选项: ${background};read number
     case ${number} in
     1) manage_hosts ;;
@@ -736,6 +778,7 @@ main() {
     4) clean_system ;;
     5) manage_bbr ;;
     6) manage_singbox ;;
+    7) check_docker ;;
     0) exit 0 ;;
     *) echo -e "\n${red}输入错误${background}"; pause ;;
     esac
