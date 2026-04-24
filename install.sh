@@ -23,78 +23,78 @@ if [ "$(id -u)" != "0" ]; then
     echo -e ${red} 请使用root用户!${background}
     exit 0
 fi
+
 function Dependency(){
-InstallDependency(){
-echo -e ${green}正在安装必要依赖 dialog${background}
-if [ $(command -v apt) ];then
-    apt install -y dialog curl
-elif [ $(command -v dnf) ];then
-    dnf install -y dialog curl
-elif [ $(command -v yum) ];then
-    yum install -y dialog curl
-elif [ $(command -v pacman) ];then
-    pacman -S --noconfirm --needed dialog curl
-fi
-}
-if [ -x "$(command -v whiptail)" ];then
-    dialog_whiptail=whiptail
-elif [ -x "$(command -v dialog)" ];then
-    dialog_whiptail=dialog
-else
-    dialog_whiptail=dialog
-    InstallDependency
-fi
-if [ ! -x "$(command -v curl)" ];then
-    InstallDependency
-fi
+    InstallDependency(){
+        echo -e ${green}正在安装必要依赖 dialog${background}
+        if [ $(command -v apt) ];then
+            apt install -y dialog curl
+        elif [ $(command -v dnf) ];then
+            dnf install -y dialog curl
+        elif [ $(command -v yum) ];then
+            yum install -y dialog curl
+        elif [ $(command -v pacman) ];then
+            pacman -S --noconfirm --needed dialog curl
+        fi
+    }
+    
+    if [ -x "$(command -v whiptail)" ];then
+        dialog_whiptail=whiptail
+    elif [ -x "$(command -v dialog)" ];then
+        dialog_whiptail=dialog
+    else
+        dialog_whiptail=dialog
+        InstallDependency
+    fi
+    
+    if [ ! -x "$(command -v curl)" ];then
+        InstallDependency
+    fi
 }
 
 function SystemCheck(){
-if grep -q -E -i Arch /etc/issue && [ -x /usr/bin/pacman ];then
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i Kernel /etc/issue && [ -x /usr/bin/dnf ];then
-    echo -e ${red}暂时放弃对centos的支持${background}
-    exit
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i Kernel /etc/issue && [ -x /usr/bin/yum ];then
-    echo -e ${red}暂时放弃对centos的支持${background}
-    exit
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i Ubuntu /etc/issue && [ -x /usr/bin/apt ];then
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i Debian /etc/issue && [ -x /usr/bin/apt ];then
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i Kali /etc/issue && [ -x /usr/bin/apt ];then
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i Alpine /etc/os-release && [ -x /sbin/apk ];then
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i Arch /etc/os-release && [ -x /usr/bin/pacman ];then
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i CentOS /etc/os-release && [ -x /usr/bin/dnf ];then
-    echo -e ${red}暂时放弃对centos的支持${background}
-    exit
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i CentOS /etc/os-release && [ -x /usr/bin/yum ];then
-    echo -e ${red}暂时放弃对centos的支持${background}
-    exit
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i Ubuntu /etc/os-release && [ -x /usr/bin/apt ];then
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i Debian /etc/os-release && [ -x /usr/bin/apt ];then
-    echo -e ${green}系统校验通过${background}
-elif grep -q -E -i Kali /etc/os-release && [ -x /usr/bin/apt ];then
-    echo -e ${green}系统校验通过${background}
-else
-    echo -e ${red}不受支持的系统${background}
-    echo -e ${red}程序终止!! 脚本停止运行${background}
-    exit
-fi
+    if grep -q -E -i Arch /etc/issue && [ -x /usr/bin/pacman ];then
+        echo -e ${green}系统校验通过${background}
+    elif grep -q -E -i Kernel /etc/issue && [ -x /usr/bin/dnf ];then
+        echo -e ${red}暂时放弃对centos的支持${background}
+        exit
+    elif grep -q -E -i Kernel /etc/issue && [ -x /usr/bin/yum ];then
+        echo -e ${red}暂时放弃对centos的支持${background}
+        exit
+    elif grep -q -E -i Ubuntu /etc/issue && [ -x /usr/bin/apt ];then
+        echo -e ${green}系统校验通过${background}
+    elif grep -q -E -i Debian /etc/issue && [ -x /usr/bin/apt ];then
+        echo -e ${green}系统校验通过${background}
+    elif grep -q -E -i Kali /etc/issue && [ -x /usr/bin/apt ];then
+        echo -e ${green}系统校验通过${background}
+    elif grep -q -E -i Alpine /etc/os-release && [ -x /sbin/apk ];then
+        echo -e ${green}系统校验通过${background}
+    elif grep -q -E -i Arch /etc/os-release && [ -x /usr/bin/pacman ];then
+        echo -e ${green}系统校验通过${background}
+    elif grep -q -E -i CentOS /etc/os-release && [ -x /usr/bin/dnf ];then
+        echo -e ${red}暂时放弃对centos的支持${background}
+        exit
+    elif grep -q -E -i CentOS /etc/os-release && [ -x /usr/bin/yum ];then
+        echo -e ${red}暂时放弃对centos的支持${background}
+        exit
+    elif grep -q -E -i Ubuntu /etc/os-release && [ -x /usr/bin/apt ];then
+        echo -e ${green}系统校验通过${background}
+    elif grep -q -E -i Debian /etc/os-release && [ -x /usr/bin/apt ];then
+        echo -e ${green}系统校验通过${background}
+    elif grep -q -E -i Kali /etc/os-release && [ -x /usr/bin/apt ];then
+        echo -e ${green}系统校验通过${background}
+    else
+        echo -e ${red}不受支持的系统${background}
+        echo -e ${red}程序终止!! 脚本停止运行${background}
+        exit
+    fi
 }
+
 function Script_Install(){
     echo -e ${green}正在获取版本信息${background}
     if [  -z  "${GitMirror}"  ];then
       URL="https://ipinfo.io"
-      Address=$(curl ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
+      Address=$(curl -sL ${URL} | sed -n 's/.*"country": "\(.*\)",.*/\1/p')
       if [ "${Address}" = "CN" ]
       then
           GitMirror="gitee.com"
@@ -135,39 +135,75 @@ function Script_Install(){
             exit
             ;;
     esac
-    echo -e ${yellow} - ${cyan}正在安装${background}
-    curl ${URL} > xdm
-    if [ -f "/usr/local/bin/bh" ]; then
-        rm -f /usr/local/bin/bh
-    fi
-    mv -f xdm /usr/local/bin/xdm
-    chmod +x /usr/local/bin/xdm
-    echo
-    if ! /usr/local/bin/xdm help; then
-        echo -e ${yellow} - ${red}安装失败，脚本无法正常运行${background}
-        echo -e ${yellow} - ${cyan}正在尝试解决shebang问题${background}
+
+    while true; do
+        echo -e "${yellow} - ${cyan}正在下载安装...${background}"
         
-        # 尝试修复shebang
-        old_xdm_bash='#!/bin/env bash'
-        new_xdm_bash=$(command -v bash)
-        if [ -n "${new_xdm_bash}" ]; then
-            sed -i "s|${old_xdm_bash}|#!${new_xdm_bash}|g" /usr/local/bin/xdm
+        # 记录 HTTP 状态码并下载
+        HTTP_CODE=$(curl -sL -w "%{http_code}" -o xdm_temp "${URL}")
+        CURL_RET=$?
+
+        # 尝试捕获 help 页面内容
+        HELP_OUTPUT=$(bash xdm_temp help 2>&1)
+        HELP_RET=$?
+        
+        # 需要验证下载的文档的正确性，用于修复垃圾 gitee 下载到空文件或拦截页面
+        if [ ${CURL_RET} -eq 0 ] && [ "${HTTP_CODE}" = "200" ] && [ -s xdm_temp ] && grep -q "function mainbak" xdm_temp && [ ${HELP_RET} -eq 0 ] && echo "${HELP_OUTPUT}" | grep -q "呆毛版"; then
+            echo "${HELP_OUTPUT}"
             
-            # 再次测试
-            if /usr/local/bin/xdm help; then
-                echo -e ${yellow} - ${green}shebang修复成功${background}
+            mv -f xdm_temp /usr/local/bin/xdm
+            chmod +x /usr/local/bin/xdm
+            echo
+
+            if ! /usr/local/bin/xdm help >/dev/null 2>&1; then
+                echo -e "${yellow} - ${red}执行异常，无法正常运行直接命令${background}"
+                echo -e "${yellow} - ${cyan}正在尝试解决shebang问题${background}"
+                
+                old_xdm_bash='#!/bin/env bash'
+                new_xdm_bash=$(command -v bash)
+                if [ -n "${new_xdm_bash}" ]; then
+                    sed -i "s|${old_xdm_bash}|#!${new_xdm_bash}|g" /usr/local/bin/xdm
+                    
+                    # 再次测试
+                    if /usr/local/bin/xdm help >/dev/null 2>&1; then
+                        echo -e "${yellow} - ${green}shebang修复成功${background}"
+                        break
+                    else
+                        echo -e "${yellow} - ${red}修复失败，请手动检查脚本${background}"
+                        echo -e "${yellow} - ${cyan}脚本位置: /usr/local/bin/xdm${background}"
+                        exit 1
+                    fi
+                else
+                    echo -e "${yellow} - ${red}无法找到bash路径，修复失败${background}"
+                    exit 1
+                fi
             else
-                echo -e ${yellow} - ${red}修复失败，请手动检查脚本${background}
-                echo -e ${yellow} - ${cyan}脚本位置: /usr/local/bin/xdm${background}
-                exit 1
+                break
             fi
         else
-            echo -e ${yellow} - ${red}无法找到bash路径，修复失败${background}
-            exit 1
+            rm -f xdm_temp
+            echo -e "${yellow} - ${red}下载失败，或文件校验未通过！(HTTP状态码: ${HTTP_CODE}，Curl返回码: ${CURL_RET})${background}"
+            echo -e "${white}=========================${background}"
+            echo -e "${green}请选择备用下载方式:${background}"
+            echo -e "${cyan}1) 切换为 Github 原生下载${background}"
+            echo -e "${cyan}2) 切换为 Github 代理下载 (ghfast.top)${background}"
+            echo -e "${cyan}3) 切换为 Gitee 原生下载${background}"
+            echo -e "${cyan}4) 重试当前线路${background}"
+            echo -e "${red}0) 退出安装${background}"
+            echo -en "${green}请选择: ${background}"; read retry_choice
+            case ${retry_choice} in
+                1) URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/Main.sh" ;;
+                2) URL="https://ghfast.top/https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/Main.sh" ;;
+                3) URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/Main.sh" ;;
+                4) continue ;;
+                0) exit 1 ;;
+                *) echo -e "${red}输入错误，重试当前 URL${background}" ;;
+            esac
         fi
-    fi
-    echo -e ${yellow} - ${yellow}安装成功${background}
-    echo -e ${yellow} - ${cyan}请使用 ${green}xdm ${cyan}命令 打开脚本${background}
+    done
+
+    echo -e "${yellow} - ${green}安装成功${background}"
+    echo -e "${yellow} - ${cyan}请使用 ${green}xdm ${cyan}命令 打开脚本${background}"
 }
 
 echo -e ${white}"====="${green}呆毛版-Script${white}"====="${background}

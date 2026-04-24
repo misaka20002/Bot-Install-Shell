@@ -1,4 +1,4 @@
-old_version="1.1.95"
+old_version="1.1.98"
 
 cd $HOME
 export red="\033[31m"
@@ -312,26 +312,38 @@ export up="false"
 esac
 ##############################
 function UPDATE(){
-    version_date=$(curl -sL ${VersionURL})
+    version_date=$(curl -sL "${VersionURL}")
     new_version="$(echo "${version_date}" | grep 'version:' | awk '{print $2}')"
     help_message="$(echo "${version_date}" | grep 'help:' | sed 's/help: //')"
     
+    # 获取不到新版本号时直接跳过更新
+    if [ -z "${new_version}" ]; then
+        return
+    fi
+    
+    # 需要验证更新后文档的正确性才覆盖，用于修复垃圾 Gitee 下载到空文件
     if [ "${new_version}" != "${old_version}" ];then
-        echo -e ${cyan}正在更新${background}
-        curl -o xdm ${URL}
+        echo -e "${cyan}检测到新版本: ${new_version}，正在更新${background}"
+        HTTP_CODE=$(curl -sL -w "%{http_code}" -o xdm_update_temp "${URL}")
+        CURL_RET=$?
+
+        HELP_OUTPUT=$(bash xdm_update_temp help 2>&1)
+        HELP_RET=$?
         
-        if bash xdm help; then
-            if [ -f "/usr/local/bin/bh" ]; then
-                rm -f /usr/local/bin/bh
-            fi
-            rm -f /usr/local/bin/xdm
-            mv xdm /usr/local/bin/xdm
+        if [ ${CURL_RET} -eq 0 ] && [ "${HTTP_CODE}" = "200" ] && [ -s xdm_update_temp ] && grep -q "old_version=" xdm_update_temp && [ ${HELP_RET} -eq 0 ] && echo "${HELP_OUTPUT}" | grep -q "呆毛版"; then
+            echo "${HELP_OUTPUT}"
+            
+            mv -f xdm_update_temp /usr/local/bin/xdm
             chmod +x /usr/local/bin/xdm
-            echo -en "${cyan}版本${new_version} 更新完成 ${help_message}${background}";read
+            echo -en "${cyan}版本 ${new_version} 更新完成 ${help_message}${background}"
+            read
             exit
         else
-            echo -en "${red}版本${new_version} 更新出现错误 跳过更新 ${help_message} ${cyan}回车继续${background}";read
-            rm xdm
+            echo -e "${red}下载更新文件失败，或文件校验未通过！(HTTP状态码: ${HTTP_CODE}，Curl返回码: ${CURL_RET})${background}"
+            echo -e "${yellow}可能是网络拥堵导致拉取到了空文件、不完整文件或服务器拒绝访问。${background}"
+            echo -en "${red}版本 ${new_version} 更新失败，已跳过更新并保留当前旧版本运行 ${help_message} ${cyan}回车继续${background}"
+            read
+            rm -f xdm_update_temp
         fi
     fi
 }
@@ -462,7 +474,7 @@ for pattern in "${process_patterns[@]}"; do
   PIDS=$(ps -ef | grep "${pattern}" | grep -v grep | grep -v tmux | grep -v "$$" | awk '{print $2}')
   if [ -n "${PIDS}" ]; then
     found_processes=true
-    echo -e ${yellow}发现孤立进程 [${pattern}]: ${PIDS}${background}
+    echo -e ${yellow}发现孤立进程[${pattern}]: ${PIDS}${background}
     for pid in ${PIDS}; do
       echo -e ${red}正在终止孤立进程: ${pid}${background}
       # 先尝试优雅终止
@@ -629,11 +641,11 @@ case $1 in
     if [ ${res} -eq 1 ];then
       TmuxAttachWithScrollMode
     elif [ ${res} -eq 2 ];then
-      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [前台运行]\n无法打开日志" 10 60
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName}[前台运行]\n无法打开日志" 10 60
     elif [ ${res} -eq 3 ];then
       pnpm pm2 log ${BotName} --lines 1000
     else
-      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName} [未运行]" 10 60
+      ${DialogWhiptail} --title "呆毛版-Script" --msgbox "${BotName}[未运行]" 10 60
     fi
     ;;
   plugin_1)
@@ -943,5 +955,3 @@ function mainbak()
     done
 }
 mainbak
-
-
