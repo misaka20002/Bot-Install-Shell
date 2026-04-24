@@ -2813,14 +2813,14 @@ get_current_napcat_version() {
     local tmp_log=$(mktemp)
     
     # 1. 将进程放到后台执行，输出重定向到文件。
-    # (外层依然套一个 timeout 3 作为终极兜底，防止出现意外死锁)
-    timeout 3 xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox > "$tmp_log" 2>&1 &
+    # (外层依然套一个 timeout 5 作为终极兜底，防止出现意外死锁)
+    timeout 5 xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox > "$tmp_log" 2>&1 &
     local qq_pid=$!
 
     napcat_version=""
 
-    # 2. 轮询检测日志文件，最多等待 2.0 秒 (20次 * 0.1秒)
-    for (( i=0; i<20; i++ )); do
+    # 2. 轮询检测日志文件，最多等待 4.0 秒 (40次 * 0.1秒)
+    for (( i=0; i<40; i++ )); do
         # 只要找到了目标行
         if grep -q "NapCat.Core Version:" "$tmp_log"; then
             # 提取出版本号
