@@ -1,4 +1,4 @@
-old_version="1.1.98"
+old_version="1.1.99"
 
 cd $HOME
 export red="\033[31m"
@@ -318,6 +318,8 @@ function UPDATE(){
     
     # 获取不到新版本号时直接跳过更新
     if [ -z "${new_version}" ]; then
+        echo -en "${red}获取新版本号时失败 ${cyan}回车继续${background}";
+        read
         return
     fi
     
