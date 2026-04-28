@@ -943,7 +943,7 @@ main() {
     echo -e  ${green}5.  ${cyan}开启BBR网络加速${background}
     echo -e  ${green}6.  ${cyan}Sing-box正向代理${background}
     echo -e  ${green}7.  ${cyan}安装docker代理${background}
-    echo -e  ${green}8.  ${cyan}安装Clash CLI${background}
+    echo -e  ${green}8.  ${cyan}Clash CLI${background}
     echo -e  ${green}0.  ${cyan}退出${background}
     echo "========================="
     echo -e ${green}系统信息: $(uname -s) $(uname -r) $(uname -m)${background}
