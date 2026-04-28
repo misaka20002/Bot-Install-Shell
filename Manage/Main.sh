@@ -1,4 +1,4 @@
-old_version="1.1.99"
+old_version="1.1.100"
 
 cd $HOME
 export red="\033[31m"
@@ -175,10 +175,11 @@ echo -e ${yellow}"         "快捷方式${cyan}${background}
 echo -e ${green}===============================${background}
 echo -e ${cyan} xdm"        | "${blue}呆毛版脚本入口${background}
 # echo -e ${cyan} xdm help"   | "${blue}呆毛版脚本帮助${background}
-echo -e ${cyan} xdm lag"    | "${blue}拉格朗日脚本${background}
+# echo -e ${cyan} xdm lag"    | "${blue}拉格朗日脚本${background}
 echo -e ${cyan} xdm nap"    | "${blue}NapCat 脚本${background}
 echo -e ${cyan} xdm plugin" | "${blue}插件管理脚本${background}
 echo -e ${cyan} xdm meme"   | "${blue}meme 管理脚本${background}
+echo -e ${cyan} xdm sayu"   | "${blue}早柚核心管理${background}
 echo -e ${cyan} xdm sys"    | "${blue}系统管理脚本${background}
 echo -e ${green}===============================${background}
 echo -e ${cyan} xdm mz ${blue}Miao-Yunzai根目录${background}
@@ -216,6 +217,12 @@ SWPKG)
 MirrorCheck
 URL="${GitMirror}/raw/master/Manage"
 bash <(curl -sL ${URL}/BOT_INSTALL.sh)
+exit
+;;
+sayu)
+MirrorCheck
+URL="${GitMirror}/raw/master/Manage"
+bash <(curl -sL ${URL}/Sayu_Bot.sh)
 exit
 ;;
 lag)
@@ -901,9 +908,9 @@ Number=$(${DialogWhiptail} \
 20 38 10 \
 "1" "Miao-Yunzai" \
 "2" "TRSS-Yunzai" \
-"3" "拉格朗日管理" \
-"4" "NapCat管理" \
-"5" "部署meme服务器" \
+"3" "NapCat管理" \
+"4" "部署meme管理" \
+"5" "早柚核心管理" \
 "6" "操作系统管理" \
 "0" "退出" \
 3>&1 1>&2 2>&3)
@@ -927,17 +934,17 @@ case ${Number} in
     3)
         MirrorCheck
         URL="${GitMirror}/raw/master/Manage"
-        bash <(curl -sL ${URL}/Lagrange_OneBot.sh)
+        bash <(curl -sL ${URL}/NapCat.sh)
         ;;
     4)
         MirrorCheck
         URL="${GitMirror}/raw/master/Manage"
-        bash <(curl -sL ${URL}/NapCat.sh)
+        bash <(curl -sL ${URL}/meme_generator.sh)
         ;;
     5)
         MirrorCheck
         URL="${GitMirror}/raw/master/Manage"
-        bash <(curl -sL ${URL}/meme_generator.sh)
+        bash <(curl -sL ${URL}/Sayu_Bot.sh)
         ;;
     6)
         MirrorCheck

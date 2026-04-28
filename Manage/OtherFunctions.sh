@@ -97,7 +97,7 @@ read
 
 QSignAPIChange(){
 if [ ${BotName} == "TRSS-Yunzai" ];then
-    echo -e ${cyan}TRSS崽推荐使用 拉格朗日 或 NapCat 连接QQ； ${background}
+    echo -e ${cyan}TRSS崽推荐使用 NapCat 连接QQ； ${background}
     echo -e ${cyan}若打算继续使用ICQQ则前台启动后使用 ${yellow}"#QQ签名 + 签名服务器地址" ${background}
     echo -en ${cyan}回车返回${background};read
     return

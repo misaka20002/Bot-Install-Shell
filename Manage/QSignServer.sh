@@ -10,11 +10,11 @@ export background="\033[0m"
 
 cd $HOME
 if [ "$(uname -o)" = "Android" ];then
-echo -e ${red}你是大聪明吗?${background}
+echo -e ${red}不支持Android环境${background}
 exit
 fi
 if [ ! "$(uname)" = "Linux" ]; then
-	echo -e ${red}你是大聪明吗?${background}
+	echo -e ${red}仅支持Linux环境${background}
     exit
 fi
 if [ ! "$(id -u)" = "0" ]; then

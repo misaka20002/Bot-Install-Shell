@@ -10,7 +10,7 @@ export background="\033[0m"
 
 cd $HOME
 if [ "$(uname -o)" = "Android" ]; then
-    echo -e "${red}请在Linux系统上运行${background}"
+    echo -e "${red}不支持Android环境${background}"
     exit 1
 fi
 if [ ! "$(uname)" = "Linux" ]; then
@@ -753,6 +753,185 @@ start_singbox_docker() {
     manage_singbox
 }
 
+# Clash for Linux 管理函数
+manage_clash() {
+    echo -e "${white}=====${green}系统管理-Clash for Linux${white}=====${background}"
+    if command -v clashctl >/dev/null 2>&1; then
+        echo -e "  当前状态: ${green}已安装${background}"
+    else
+        echo -e "  当前状态: ${yellow}未安装 或 环境变量未生效${background}"
+    fi
+    echo "========================="
+    echo -e  "${green}1.  ${cyan}一键安装 / 更新 Clash 环境${background}"
+    echo -e  "${green}2.  ${cyan}开启代理 (clashon)${background}"
+    echo -e  "${green}3.  ${cyan}关闭代理 (clashoff)${background}"
+    echo -e  "${green}4.  ${cyan}查看状况与升级 (status/upgrade)${background}"
+    echo -e  "${green}5.  ${cyan}Web控制面板与密钥 (ui/secret)${background}"
+    echo -e  "${green}6.  ${cyan}订阅管理 (sub)${background}"
+    echo -e  "${green}7.  ${cyan}Tun模式管理 (tun)${background}"
+    echo -e  "${green}8.  ${cyan}Mixin配置管理 (mixin)${background}"
+    echo -e  "${green}9.  ${cyan}完全卸载${background}"
+    echo -e  "${green}0.  ${cyan}返回主菜单${background}"
+    echo "========================="
+    echo -en ${green}请输入您的选项: ${background};read num
+
+    case ${num} in
+    1)
+        echo -e "${yellow}正在准备安装 Clash for Linux...${background}"
+        if ! command -v git >/dev/null 2>&1; then
+            echo -e "${yellow}未检测到 git，尝试自动安装...${background}"
+            if command -v apt >/dev/null 2>&1; then apt update && apt install -y git;
+            elif command -v yum >/dev/null 2>&1; then yum install -y git;
+            elif command -v dnf >/dev/null 2>&1; then dnf install -y git;
+            elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm git;
+            fi
+        fi
+        
+        cd $HOME
+        rm -rf clash-for-linux-install
+        if git clone --branch master --depth 1 https://gh-proxy.org/https://github.com/nelvko/clash-for-linux-install.git; then
+            cd clash-for-linux-install
+            bash install.sh
+            cd $HOME
+            echo -e "${green}======================================${background}"
+            echo -e "${green}安装流程结束！${background}"
+            echo -e "${yellow}提示：如果执行后续功能提示'命令未找到'，请退出本脚本执行 ${cyan}source ~/.bashrc${yellow} 或重新连接终端即可生效。${background}"
+            echo -e "${green}======================================${background}"
+        else
+            echo -e "${red}克隆仓库失败，请检查网络或加速链接可用性。${background}"
+            cd $HOME
+        fi
+        pause; manage_clash ;;
+    2)
+        if command -v clashctl >/dev/null 2>&1; then clashctl on; else echo -e "${red}未检测到 clashctl 命令，请先安装或重新加载环境变量。${background}"; fi
+        pause; manage_clash ;;
+    3)
+        if command -v clashctl >/dev/null 2>&1; then clashctl off; else echo -e "${red}未检测到 clashctl 命令。${background}"; fi
+        pause; manage_clash ;;
+    4)
+        if command -v clashctl >/dev/null 2>&1; then 
+            echo -e "${white}==== 状态与内核 ====${background}"
+            clashctl status
+            echo "-------------------------"
+            echo -en "${cyan}是否请求内核升级更新？[y/N]: ${background}"; read up_ans
+            if [[ "$up_ans" == "y" || "$up_ans" == "Y" ]]; then
+                clashctl upgrade
+            fi
+        else 
+            echo -e "${red}未检测到 clashctl 命令。${background}"
+        fi
+        pause; manage_clash ;;
+    5)
+        if command -v clashctl >/dev/null 2>&1; then 
+            clashctl ui
+            echo "-------------------------"
+            echo -en "${cyan}是否需要修改 Web 访问密钥？[y/N]: ${background}"; read set_sec
+            if [[ "$set_sec" == "y" || "$set_sec" == "Y" ]]; then
+                echo -en "${cyan}请输入新密钥: ${background}"; read new_sec
+                if [ -n "$new_sec" ]; then
+                    clashctl secret "$new_sec"
+                fi
+            else
+                clashctl secret
+            fi
+        else 
+            echo -e "${red}未检测到 clashctl 命令。${background}"
+        fi
+        pause; manage_clash ;;
+    6)
+        if command -v clashctl >/dev/null 2>&1; then 
+            echo -e "${white}==== 订阅管理 ====${background}"
+            echo -e "  [1] 查看当前订阅 (ls)"
+            echo -e "  [2] 添加新订阅 (add)"
+            echo -e "  [3] 更新所有订阅 (update)"
+            echo -e "  [4] 切换使用订阅 (use)"
+            echo -e "  [5] 删除指定订阅 (del)"
+            echo -e "  [6] 查看订阅日志 (log)"
+            echo -e "  [0] 取消并返回"
+            echo "-------------------------"
+            echo -en "${cyan}请选择操作: ${background}"; read sub_num
+            case $sub_num in
+                1) clashctl sub ls ;;
+                2) 
+                   echo -en "${cyan}请输入订阅链接 (建议用双引号包裹): ${background}"
+                   read sub_url
+                   if [ -n "$sub_url" ]; then clashctl sub add "$sub_url"; fi
+                   ;;
+                3) clashctl sub update ;;
+                4)
+                   clashctl sub ls
+                   echo -en "${cyan}请输入要使用的订阅 ID: ${background}"
+                   read sub_id
+                   if [ -n "$sub_id" ]; then clashctl sub use "$sub_id"; fi
+                   ;;
+                5)
+                   clashctl sub ls
+                   echo -en "${cyan}请输入要删除的订阅 ID: ${background}"
+                   read del_id
+                   if [ -n "$del_id" ]; then clashctl sub del "$del_id"; fi
+                   ;;
+                6) clashctl sub log ;;
+                0) ;;
+                *) echo -e "${red}输入错误${background}" ;;
+            esac
+        else 
+            echo -e "${red}未检测到 clashctl 命令。${background}"
+        fi
+        pause; manage_clash ;;
+    7)
+        if command -v clashctl >/dev/null 2>&1; then 
+            clashctl tun
+            echo "-------------------------"
+            echo -en "${cyan}要改变Tun模式状态吗？[on 开启 / off 关闭 / 0 退出]: ${background}"; read tun_op
+            if [[ "$tun_op" == "on" || "$tun_op" == "off" ]]; then
+                clashctl tun "$tun_op"
+            fi
+        else 
+            echo -e "${red}未检测到 clashctl 命令。${background}"
+        fi
+        pause; manage_clash ;;
+    8)
+        if command -v clashctl >/dev/null 2>&1; then 
+            echo -e "${white}==== Mixin配置管理 ====${background}"
+            echo -e "  [1] 查看 Mixin 配置"
+            echo -e "  [2] 编辑 Mixin 配置 (-e)"
+            echo -e "  [3] 查看原始订阅配置 (-c)"
+            echo -e "  [4] 查看运行时配置 (-r)"
+            echo -e "  [0] 取消并返回"
+            echo "-------------------------"
+            echo -en "${cyan}请选择操作: ${background}"; read mix_num
+            case $mix_num in
+                1) clashctl mixin ;;
+                2) clashctl mixin -e ;;
+                3) clashctl mixin -c ;;
+                4) clashctl mixin -r ;;
+                0) ;;
+                *) echo -e "${red}输入错误${background}" ;;
+            esac
+        else 
+            echo -e "${red}未检测到 clashctl 命令。${background}"
+        fi
+        pause; manage_clash ;;
+    9)
+        echo -en "${yellow}确定要完全卸载 Clash for Linux 吗？[y/N]: ${background}"; read rm_clash
+        if [[ "$rm_clash" == "y" || "$rm_clash" == "Y" ]]; then
+            if [ -f "$HOME/clash-for-linux-install/uninstall.sh" ]; then
+                cd $HOME/clash-for-linux-install && bash uninstall.sh
+                cd $HOME
+            else
+                echo -e "${yellow}本地找不到卸载脚本，正在重新拉取...${background}"
+                cd $HOME
+                git clone --branch master --depth 1 https://gh-proxy.org/https://github.com/nelvko/clash-for-linux-install.git
+                cd clash-for-linux-install && bash uninstall.sh
+                cd $HOME
+            fi
+        fi
+        pause; manage_clash ;;
+    0) return ;;
+    *) echo -e "${red}输入错误${background}"; pause; manage_clash ;;
+    esac
+}
+
 # 主菜单函数
 main() {
     echo
@@ -764,6 +943,7 @@ main() {
     echo -e  ${green}5.  ${cyan}开启BBR网络加速${background}
     echo -e  ${green}6.  ${cyan}Sing-box正向代理${background}
     echo -e  ${green}7.  ${cyan}安装docker代理${background}
+    echo -e  ${green}8.  ${cyan}安装Clash CLI${background}
     echo -e  ${green}0.  ${cyan}退出${background}
     echo "========================="
     echo -e ${green}系统信息: $(uname -s) $(uname -r) $(uname -m)${background}
@@ -779,6 +959,7 @@ main() {
     5) manage_bbr ;;
     6) manage_singbox ;;
     7) check_docker ;;
+    8) manage_clash ;;
     0) exit 0 ;;
     *) echo -e "\n${red}输入错误${background}"; pause ;;
     esac
