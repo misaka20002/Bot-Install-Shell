@@ -287,7 +287,7 @@ config_and_info_gscore() {
         echo -e "${cyan}2. 运行端口 (PORT): ${white}$port${background}"
         echo -e "${cyan}3. 连接Token (WS_TOKEN): ${white}$token${background}"
         echo -e "${cyan}4. 主人QQ (masters): ${white}$masters${background}"
-        echo -e "${cyan}5. 配置 异环 强制前缀 (#nte)${background}"
+        echo -e "${cyan}5. 配置命令前缀${background}"
         echo -e "${white}------------------------------${background}"
         echo -e "${cyan}控制台注册码: ${white}$code${background}"
         echo -e "${cyan}网页控制台地址: ${yellow}http://$ip:$port/app${background}"
@@ -327,7 +327,7 @@ config_and_info_gscore() {
                 fi
                 echo -e "${green}masters 修改成功！${background}"
                 ;;
-            5) echo; config_nte_prefix ;;
+            5) echo; config_sayu_prefix ;;
             *)
                 break
                 ;;
@@ -336,7 +336,7 @@ config_and_info_gscore() {
 }
 
 # 5. 配置 异环(NTE) 插件前缀
-config_nte_prefix() {
+config_sayu_prefix() {
     if ! check_gscore_installed; then return; fi
 
     local conf_file="$GS_CORE_DIR/data/config.json"
@@ -346,42 +346,46 @@ config_nte_prefix() {
     fi
     
     # 提取当前状态
-    local current_prefix=$(jq -r '.plugins.NTEUID.prefix[0] // "empty"' "$conf_file" 2>/dev/null)
-    local current_disable=$(jq -r '.plugins.NTEUID.disable_force_prefix // "empty"' "$conf_file" 2>/dev/null)
+    local current_prefix=$(jq -r '.plugins.core_command.prefix[0] // "empty"' "$conf_file" 2>/dev/null)
+    local current_disable=$(jq -r '.plugins.core_command.disable_force_prefix // "empty"' "$conf_file" 2>/dev/null)
+    local current_cmd_start=$(jq -r '.command_start[0] // "empty"' "$conf_file" 2>/dev/null)
     
     echo
-    echo -e "${white}====== ${green}异环(NTE) 前缀配置 ${white}======${background}"
-    if [ "$current_prefix" = "#nte" ] && [ "$current_disable" = "true" ]; then
-        echo -e "${cyan}当前状态: ${yellow}已开启强制前缀 [#nte] (指令如: #nte帮助)${background}"
+    echo -e "${white}====== ${green}早柚核心 前缀配置 ${white}======${background}"
+    # 判断是否为 #sayu 的组合配置
+    if [ "$current_prefix" = "sayu" ] && [ "$current_disable" = "true" ] && [ "$current_cmd_start" = "#" ]; then
+        echo -e "${cyan}当前状态: ${yellow}已开启强制前缀 [#sayu] (指令: #sayu帮助)${background}"
     else
-        echo -e "${cyan}当前状态: ${green}默认配置 (使用全局核心前缀或自带默认前缀)${background}"
+        echo -e "${cyan}当前状态: ${green}默认配置 (指令: core帮助)${background}"
     fi
     echo -e "${white}==============================${background}"
     
-    echo -e "${cyan}1. 开启强制前缀为 '#nte帮助'${background}"
-    echo -e "${cyan}2. 恢复为默认配置  'nte帮助'${background}"
+    echo -e "${cyan}1. 开启强制前缀 '#sayu帮助'${background}"
+    echo -e "${cyan}2. 恢复默认前缀  'core帮助'${background}"
     echo -e "${green}0. 返回主菜单${background}"
     echo -en "${yellow}请选择操作: ${background}"; read -r choice
     
     case $choice in
         1)
-            jq 'if .plugins == null then .plugins = {} else . end | 
-                if .plugins.NTEUID == null then .plugins.NTEUID = {} else . end | 
-                .plugins.NTEUID.prefix = ["#nte"] | 
-                .plugins.NTEUID.disable_force_prefix = true' "$conf_file" > tmp.json && mv tmp.json "$conf_file"
+            # 写入全局设定和 core_command 的设定
+            jq '.enable_empty_start = false | 
+                .command_start = ["#"] | 
+                if .plugins == null then .plugins = {} else . end | 
+                if .plugins.core_command == null then .plugins.core_command = {} else . end | 
+                .plugins.core_command.prefix = ["sayu"] | 
+                .plugins.core_command.disable_force_prefix = true' "$conf_file" > tmp.json && mv tmp.json "$conf_file"
             echo -e "${green}配置成功！需重启 早柚核心 才能生效。${background}"
             ;;
         2)
-            jq 'if .plugins != null and .plugins.NTEUID != null then 
-                    del(.plugins.NTEUID.prefix, .plugins.NTEUID.disable_force_prefix) 
+            # 恢复默认：删除写入的配置字段
+            jq 'del(.enable_empty_start, .command_start) | 
+                if .plugins != null and .plugins.core_command != null then 
+                    del(.plugins.core_command.prefix, .plugins.core_command.disable_force_prefix) 
                 else . end' "$conf_file" > tmp.json && mv tmp.json "$conf_file"
             echo -e "${green}已恢复默认配置！需重启 早柚核心 才能生效。${background}"
             ;;
-        0|"")
-            return
-            ;;
         *)
-            echo -e "${red}无效的选择。${background}"
+            return
             ;;
     esac
 }
@@ -477,6 +481,7 @@ main() {
     echo -e "${green}0. ${cyan}退出脚本${background}"
     echo -e "${white}============================================${background}"
     echo -e "${green}早柚核心状态: ${gs_status}"
+    echo -e "${green}呆毛版-QQ群: ${cyan}1022982073${background}"
     echo -e "${white}============================================${background}"
     echo -en "${green}请输入您的选项: ${background}"; read -r number
     
