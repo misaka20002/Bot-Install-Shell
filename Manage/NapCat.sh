@@ -71,6 +71,29 @@ check_tmux() {
     fi
 }
 
+# 检查 jq 是否安装
+check_jq() {
+    if ! command -v jq &> /dev/null; then
+        echo -e ${yellow}需要安装 jq 来管理 JSON 配置文件${background}
+        if [ $(command -v apt) ]; then
+            apt update -y
+            apt install -y jq
+        elif [ $(command -v yum) ]; then
+            yum makecache -y
+            yum install -y jq
+        elif [ $(command -v dnf) ]; then
+            dnf makecache -y
+            dnf install -y jq
+        elif [ $(command -v pacman) ]; then
+            pacman -Syy --noconfirm --needed jq
+        else
+            echo -e ${red}不支持的Linux发行版，无法安装jq${background}
+            return 1
+        fi
+    fi
+    return 0
+}
+
 # 安装 NapCat
 install_NapCat() {
     if check_installed; then
@@ -712,24 +735,9 @@ manage_webui_config() {
     fi
     
     # 检查 jq 是否安装
-    if ! command -v jq &> /dev/null; then
-        echo -e ${yellow}需要安装 jq 来管理 JSON 配置文件${background}
-        if [ $(command -v apt) ]; then
-            apt update -y
-            apt install -y jq
-        elif [ $(command -v yum) ]; then
-            yum makecache -y
-            yum install -y jq
-        elif [ $(command -v dnf) ]; then
-            dnf makecache -y
-            dnf install -y jq
-        elif [ $(command -v pacman) ]; then
-            pacman -Syy --noconfirm --needed jq
-        else
-            echo -e ${red}不支持的Linux发行版，无法安装jq${background}
-            echo -en ${cyan}回车返回${background};read
-            return 1
-        fi
+    if ! check_jq; then
+        echo -en ${cyan}回车返回${background};read
+        return 1
     fi
     
     # 备份原配置文件
@@ -838,24 +846,9 @@ configure_ws() {
     fi
     
     # 检查 jq 是否安装
-    if ! command -v jq &> /dev/null; then
-        echo -e ${yellow}需要安装 jq 来管理 JSON 配置文件${background}
-        if [ $(command -v apt) ]; then
-            apt update -y
-            apt install -y jq
-        elif [ $(command -v yum) ]; then
-            yum makecache -y
-            yum install -y jq
-        elif [ $(command -v dnf) ]; then
-            dnf makecache -y
-            dnf install -y jq
-        elif [ $(command -v pacman) ]; then
-            pacman -Syy --noconfirm --needed jq
-        else
-            echo -e ${red}不支持的Linux发行版，无法安装jq${background}
-            echo -en ${cyan}回车返回${background};read
-            return 1
-        fi
+    if ! check_jq; then
+        echo -en ${cyan}回车返回${background};read
+        return 1
     fi
     
     # 查找已登录的QQ账号
@@ -2249,24 +2242,9 @@ configure_music_sign() {
     fi
     
     # 检查 jq 是否安装
-    if ! command -v jq &> /dev/null; then
-        echo -e ${yellow}需要安装 jq 来管理 JSON 配置文件${background}
-        if [ $(command -v apt) ];then
-            apt update -y
-            apt install -y jq
-        elif [ $(command -v yum) ];then
-            yum makecache -y
-            yum install -y jq
-        elif [ $(command -v dnf) ];then
-            dnf makecache -y
-            dnf install -y jq
-        elif [ $(command -v pacman) ];then
-            pacman -Syy --noconfirm --needed jq
-        else
-            echo -e ${red}不支持的Linux发行版，无法安装jq${background}
-            echo -en ${cyan}回车返回${background};read
-            return 1
-        fi
+    if ! check_jq; then
+        echo -en ${cyan}回车返回${background};read
+        return 1
     fi
     
     # 预设音乐签名URL
@@ -2459,6 +2437,94 @@ configure_music_sign() {
                 ;;
             *)
                 echo -e ${red}无效选项${background}
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# 管理 NapCat 配置 (包括内置插件指令等)
+manage_napcat_plugin() {
+    # 检查 NapCat 是否已安装
+    if ! check_installed; then
+        echo -e "${red}${APP_NAME}未安装，无法管理 NapCat 配置${background}"
+        echo -en "${cyan}回车返回${background}";read
+        return 1
+    fi
+    
+    # 检查 jq 是否安装
+    if ! check_jq; then
+        echo -en "${cyan}回车返回${background}";read
+        return 1
+    fi
+
+    local PLUGIN_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config/plugins/napcat-plugin-builtin"
+    local PLUGIN_CONFIG="${PLUGIN_DIR}/config.json"
+
+    while true; do
+        # clear
+        echo
+        echo -e "${white}=====${green} NapCat 高级配置管理 ${white}=====${background}"
+        
+        # 读取当前配置状态
+        local current_status="${red}配置未生成${background}"
+        if [ -f "$PLUGIN_CONFIG" ]; then
+            local enable_reply=$(jq -r '.enableReply' "$PLUGIN_CONFIG" 2>/dev/null)
+            if [ "$enable_reply" = "false" ]; then
+                current_status="${red}已关闭${background}"
+            elif [ "$enable_reply" = "true" ]; then
+                current_status="${green}已开启${background}"
+            elif [ "$enable_reply" = "null" ]; then
+                current_status="${yellow}未配置${background}"
+            fi
+        fi
+
+        echo -e "内置指令(#napcat)当前状态: [ ${current_status} ]"
+        echo -e "${white}-----------------------------------${background}"
+        
+        echo -e "${yellow}1. ${cyan}关闭内置插件指令 (#napcat)${background}"
+        echo -e "${yellow}2. ${cyan}开启内置插件指令 (#napcat)${background}"
+        echo -e "${green}0. ${cyan}返回主菜单${background}"
+        echo "==================================="
+        
+        echo -en "${green}请输入选项: ${background}";read option
+        
+        case $option in
+            1)
+                if [ ! -d "$PLUGIN_DIR" ]; then
+                    mkdir -p "$PLUGIN_DIR"
+                fi
+                
+                # 如果 config.json 不存在，初始化一个；如果存在，则修改
+                if [ ! -f "$PLUGIN_CONFIG" ]; then
+                    echo '{"prefix": "#napcat", "enableReply": false, "description": "内置插件"}' > "$PLUGIN_CONFIG"
+                else
+                    jq '.enableReply = false' "$PLUGIN_CONFIG" > "${PLUGIN_CONFIG}.tmp" && mv "${PLUGIN_CONFIG}.tmp" "$PLUGIN_CONFIG"
+                fi
+                
+                echo -e "${green}已关闭内置插件指令(#napcat)；重启napcat生效${background}"
+                sleep 1
+                ;;
+            2)
+                if [ ! -d "$PLUGIN_DIR" ]; then
+                    mkdir -p "$PLUGIN_DIR"
+                fi
+                
+                # 如果 config.json 不存在，初始化一个；如果存在，则修改
+                if [ ! -f "$PLUGIN_CONFIG" ]; then
+                    echo '{"prefix": "#napcat", "enableReply": true, "description": "内置插件"}' > "$PLUGIN_CONFIG"
+                else
+                    jq '.enableReply = true' "$PLUGIN_CONFIG" > "${PLUGIN_CONFIG}.tmp" && mv "${PLUGIN_CONFIG}.tmp" "$PLUGIN_CONFIG"
+                fi
+                
+                echo -e "${green}已开启内置插件指令(#napcat)；重启napcat生效${background}"
+                sleep 1
+                ;;
+            0)
+                return 0
+                ;;
+            *)
+                echo -e "${red}无效选项${background}"
                 sleep 1
                 ;;
         esac
@@ -3063,7 +3129,8 @@ main() {
     echo -e ${green}3. ${cyan}WebUI 配置${background}
     echo -e ${green}4. ${cyan}WebSocket接口配置${background}
     echo -e ${green}5. ${cyan}音乐签名配置${background}
-    echo -e ${green}6. ${cyan}启动/多开QQ${background}
+    echo -e ${green}6. ${cyan}NapCat插件配置${background}
+    echo -e ${green}7. ${cyan}启动/多开QQ${background}
     echo -e ${green}0. ${cyan}退出${background}
     echo "========================="
     
@@ -3092,38 +3159,15 @@ main() {
     echo "========================="
     echo -en ${green}请输入您的选项: ${background};read number
     case ${number} in
-        1)
-            echo
-            install_NapCat
-            ;;
-        2)
-            echo
-            uninstall_NapCat
-            ;;
-        3)
-            echo
-            manage_webui_config
-            ;;
-        4)
-            echo
-            configure_ws
-            ;;
-        5)
-            echo
-            configure_music_sign
-            ;;
-        6)
-            echo
-            manage_multi_instances
-            ;;
-        0)
-            exit
-            ;;
-        *)
-            echo
-            echo -e ${red}输入错误${background}
-            sleep 1
-            ;;
+        1) echo; install_NapCat ;;
+        2) echo; uninstall_NapCat ;;
+        3) echo; manage_webui_config ;;
+        4) echo; configure_ws ;;
+        5) echo; configure_music_sign ;;
+        6) echo; manage_napcat_plugin ;;
+        7) echo; manage_multi_instances ;;
+        0) exit ;;
+        *) echo; echo -e ${red}输入错误${background}; sleep 1 ;;
     esac
 }
 
