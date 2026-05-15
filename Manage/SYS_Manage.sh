@@ -753,11 +753,50 @@ start_singbox_docker() {
     manage_singbox
 }
 
+# 自动加载 Clash 环境变量辅助函数， 修复在非交互式脚本中“未检测到 clashctl”的问题
+load_clash_env() {
+    # 如果已经识别到命令，则直接返回
+    if command -v clashctl >/dev/null 2>&1; then return 0; fi
+
+    # 开启 alias 扩展，防止 clashctl 被定义为纯别名而无法解析
+    shopt -s expand_aliases 2>/dev/null
+
+    # 尝试从 ~/.bashrc 中提取加载语句并执行
+    if [ -f ~/.bashrc ]; then
+        local env_cmd
+        env_cmd=$(grep -E '(source|\.) .*clashctl\.sh' ~/.bashrc | tail -n 1)
+        if [ -n "$env_cmd" ]; then
+            eval "$env_cmd" >/dev/null 2>&1
+        fi
+    fi
+
+    # 如果依旧识别不到，尝试硬编码查找默认安装目录并强制加载
+    if ! command -v clashctl >/dev/null 2>&1; then
+        local p
+        for p in /opt/clash /opt/clashctl ~/.local/share/clash ~/clashctl /usr/local/clash; do
+            # 兼容旧版本路径结构
+            if [ -f "$p/script/clashctl.sh" ]; then
+                source "$p/script/common.sh" >/dev/null 2>&1
+                source "$p/script/clashctl.sh" >/dev/null 2>&1
+                break
+            # 兼容新版本路径结构
+            elif [ -f "$p/scripts/cmd/clashctl.sh" ]; then
+                source "$p/scripts/core/common.sh" >/dev/null 2>&1
+                source "$p/scripts/cmd/clashctl.sh" >/dev/null 2>&1
+                break
+            fi
+        done
+    fi
+}
 # Clash for Linux 管理函数
 manage_clash() {
+    # 每次进入菜单前，尝试自动加载环境
+    load_clash_env
+
     echo -e "${white}=====${green}系统管理-Clash for Linux${white}=====${background}"
     if command -v clashctl >/dev/null 2>&1; then
         echo -e "  当前状态: ${green}已安装${background}"
+        echo -e "  ${yellow}CLI指令: clashctl${background}"
     else
         echo -e "  当前状态: ${yellow}未安装 或 环境变量未生效${background}"
     fi
@@ -773,7 +812,7 @@ manage_clash() {
     echo -e  "${green}9.  ${cyan}完全卸载${background}"
     echo -e  "${green}0.  ${cyan}返回主菜单${background}"
     echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read num
+    echo -en "${green}请输入您的选项: ${background}"; read num
 
     case ${num} in
     1)
@@ -793,9 +832,13 @@ manage_clash() {
             cd clash-for-linux-install
             bash install.sh
             cd $HOME
+            
+            # 安装后立刻加载环境变量，无需退出即可继续使用菜单
+            load_clash_env
+
             echo -e "${green}======================================${background}"
             echo -e "${green}安装流程结束！${background}"
-            echo -e "${yellow}提示：如果执行后续功能提示'命令未找到'，请退出本脚本执行 ${cyan}source ~/.bashrc${yellow} 或重新连接终端即可生效。${background}"
+            echo -e "${yellow}提示：脚本已尝试自动加载环境。如后续功能仍提示'命令未找到'，请退出本脚本执行 ${cyan}source ~/.bashrc${yellow} 即可生效。${background}"
             echo -e "${green}======================================${background}"
         else
             echo -e "${red}克隆仓库失败，请检查网络或加速链接可用性。${background}"
@@ -925,6 +968,8 @@ manage_clash() {
                 cd clash-for-linux-install && bash uninstall.sh
                 cd $HOME
             fi
+            # 卸载后从当前脚本进程中取消相关函数的定义，防止面板误判“已安装”
+            unset -f clashctl 2>/dev/null
         fi
         pause; manage_clash ;;
     0) return ;;
