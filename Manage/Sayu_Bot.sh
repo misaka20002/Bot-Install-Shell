@@ -111,8 +111,7 @@ handle_napcat_adapter() {
         cd "$NC_PLUGIN_DIR" || exit
         
         ZIP_FILE="napcat-plugin-gscore-adapter.zip"
-        WGET_URL="${GH_PROXY}https://github.com/xiowo/napcat-plugin-gscore-adapter/releases/download/v1.2.2/$ZIP_FILE"
-        
+        WGET_URL="${GH_PROXY}https://github.com/xiowo/napcat-plugin-gscore-adapter/releases/latest/download/$ZIP_FILE"
         wget "$WGET_URL" -O "$ZIP_FILE"
         unzip -o "$ZIP_FILE" -d "${ZIP_FILE%.zip}"
         rm "$ZIP_FILE"
@@ -124,16 +123,16 @@ handle_napcat_adapter() {
         fi
         jq '."napcat-plugin-gscore-adapter" = true' "$NC_CONFIG_DIR/plugins.json" > tmp.json && mv tmp.json "$NC_CONFIG_DIR/plugins.json"
         
-        echo -e "${green}插件下载并解压成功，已在 plugins.json 中启用！${background}"
+        echo -e "${green}Napcat的早柚核心适配插件 (gscore-adapter) 下载并解压成功，并已在 plugins.json 中启用！${background}"
     else
-        echo -e "${green}已检测到 Napcat-早柚核心 适配器${background}"
+        echo -e "${green}已检测到 Napcat的早柚核心适配插件 (gscore-adapter) ${background}"
     fi
 
     # 确保配置目录存在
     mkdir -p "$adapter_conf_dir"
 
     if [ ! -f "$conf_file" ]; then
-        echo -e "${yellow}未找到配置文件，请先运行一次 NapCat${background}"
+        echo -e "${yellow}未找到配置文件，请重启 NapCat${background}"
         return
     fi
 
@@ -149,12 +148,14 @@ handle_napcat_adapter() {
         echo -e "${cyan}1. masterQQ (主人QQ): ${white}${current_master:-[为空]}${background}"
         echo -e "${cyan}2. gscoreToken (连接Token): ${white}${current_token:-[为空]}${background}"
         echo -e "${cyan}3. silentNoPermission (无权限静默): ${white}${current_silent}${background}"
+        echo -e "${cyan}4. 检查并更新适配器版本${background}"
         echo -e "${white}====== ${green}适配器指令${white}======${background}"
         echo -e "${cyan}适配器帮助: ${white}#早柚help${background}"
         echo -e "${cyan}开启群响应: ${white}#早柚群开启${background}"
         echo -e "${white}修改后重启 NatCat 生效${background}"
         echo -e "${white}==============================${background}"
-        echo -en "${cyan}请输入数字修改对应项: ${background}"; read -r adapter_choice
+        echo -e "${green}0. 返回主菜单${background}"
+        echo -en "${cyan}请输入数字修改对应项或执行操作: ${background}"; read -r adapter_choice
         
         case $adapter_choice in
             1)
@@ -179,7 +180,51 @@ handle_napcat_adapter() {
                     echo -e "${green}silentNoPermission 已修改为 true！${background}"
                 fi
                 ;;
-            *)
+            4)
+                echo -e "${cyan}正在检查更新，请稍候...${background}"
+                check_github
+                
+                # 获取本地版本
+                local local_pkg="$adapter_plugin_dir/package.json"
+                local local_version="未知"
+                if [ -f "$local_pkg" ]; then
+                    local_version=$(jq -r '.version // "未知"' "$local_pkg" 2>/dev/null)
+                fi
+                
+                # 获取远程最新版本
+                local remote_pkg_url="${GH_PROXY}https://raw.githubusercontent.com/xiowo/napcat-plugin-gscore-adapter/main/package.json"
+                local remote_version=$(curl -s -m 5 "$remote_pkg_url" | jq -r '.version // "获取失败"' 2>/dev/null)
+                
+                if [ "$remote_version" = "获取失败" ] || [ -z "$remote_version" ]; then
+                    echo -e "${red}获取远程版本失败，请检查网络状态！${background}"
+                else
+                    echo -e "${white}当前本地版本: ${green}${local_version}${background}"
+                    echo -e "${white}最新远程版本: ${yellow}${remote_version}${background}"
+                    
+                    if [ "$local_version" = "$remote_version" ]; then
+                        echo -e "${green}当前已是最新版本，无需更新！${background}"
+                    else
+                        echo -en "${yellow}发现新版本，是否立即更新？(y/n): ${background}"; read -r update_choice
+                        if [[ "$update_choice" == "y" || "$update_choice" == "Y" ]]; then
+                            echo -e "${cyan}开始更新 napcat-plugin-gscore-adapter...${background}"
+                            cd "$NC_PLUGIN_DIR" || exit
+                            
+                            local ZIP_FILE="napcat-plugin-gscore-adapter.zip"
+                            local WGET_URL="${GH_PROXY}https://github.com/xiowo/napcat-plugin-gscore-adapter/releases/latest/download/$ZIP_FILE"
+                            
+                            wget "$WGET_URL" -O "$ZIP_FILE"
+                            # 解压覆盖旧文件（不影响外部的配置目录 config/）
+                            unzip -o "$ZIP_FILE" -d "${ZIP_FILE%.zip}"
+                            rm -f "$ZIP_FILE"
+                            
+                            echo -e "${green}更新完成！修改已保存，请重启 NapCat 生效。${background}"
+                        else
+                            echo -e "${green}已取消更新。${background}"
+                        fi
+                    fi
+                fi
+                ;;
+            0|*)
                 break
                 ;;
         esac
@@ -469,7 +514,7 @@ main() {
 
     echo
     echo -e "${white}=====${green} 早柚核心 (gsuid_core) 综合管理 ${white}=====${background}"
-    echo -e "${green}1. ${cyan}配置 Napcat-早柚核心 适配器${background}"
+    echo -e "${green}1. ${cyan}配置 Napcat的早柚核心适配插件${background}"
     echo -e "${green}2. ${cyan}安装 早柚核心${background}"
     echo -e "${green}3. ${cyan}安装 早柚核心插件${background}"
     echo -e "${green}4. ${cyan}配置 早柚核心${background}"
