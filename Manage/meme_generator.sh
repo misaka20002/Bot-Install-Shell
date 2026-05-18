@@ -1,7 +1,7 @@
 #!/bin/env bash
 
 # 更新版本号后 sh 会自动更新本地 sh 脚本
-SCRIPT_VERSION="1.0.24"
+SCRIPT_VERSION="1.0.25"
 
 export red="\033[31m"
 export green="\033[32m"
@@ -61,7 +61,7 @@ EXTRA_REPOS=(
     "meme_emoji|emoji|https://github.com/anyliew/meme_emoji.git|main"
     "meme-generator-jj|memes|https://github.com/jinjiao007/meme-generator-jj.git|master"
     "meme_emoji_nsfw|emoji|https://github.com/anyliew/meme_emoji_nsfw.git|main"
-    "tudou-meme|memes|https://github.com/LRZ9712/tudou-meme.git|main"
+    "tudou-meme|meme|https://github.com/LRZ9712/tudou-meme.git|main"
 )
 # ===================================================
 
