@@ -1478,7 +1478,7 @@ echo "========================="
 echo -e ${green}meme生成器状态: ${condition}${background}
 echo -e ${green}meme自动更新服务: ${auto_update_condition}${background}
 if [ "${condition}" = "${green}[运行中]" ]; then
-    echo -e ${green}MEME api: ${cyan}http://localhost:${Port}${background}
+    echo -e ${green}MEME api: ${cyan}http://0.0.0.0:${Port}${background}
 fi
 echo -e ${green}QQ群:${cyan}呆毛版-QQ群:1022982073${background}
 echo "========================="
