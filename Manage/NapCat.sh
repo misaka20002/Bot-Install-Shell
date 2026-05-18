@@ -2266,13 +2266,6 @@ configure_music_sign() {
         echo -e ${green}2. ${cyan}为指定QQ账号设置音乐签名URL${background}
         echo -e ${green}0. ${cyan}返回主菜单${background}
         echo -e ${yellow}"========================="${background}
-        echo -e ${green}预设URL选项:${background}
-        # 动态遍历输出所有预设URL
-        for i in "${!PRESET_URLS[@]}"; do
-            echo -e ${cyan}$((i+1)). ${PRESET_URLS[$i]}${background}
-        done
-        echo -e ${yellow}"========================="${background}
-        
         echo -en ${green}请选择操作: ${background};read option
         
         case $option in
