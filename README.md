@@ -37,7 +37,7 @@
 
 <details ><summary>购买服务器</summary>
 
-- 纯小白推荐买一个 38元/年的2核2GB 或 188元/年的2核4GB 的[华为云（该链接无任何推广AFF）](https://activity.huaweicloud.com/discount_area_v5/index.html?utm_adplace=ecs-xsfwq_guanggao1)，使用Ubuntu24+镜像开机后，学习[使用SSH登陆服务器](https://www.bing.com/search?q=Termius%E4%BD%BF%E7%94%A8SSH%E7%99%BB%E9%99%86%E6%9C%8D%E5%8A%A1%E5%99%A8)然后输入以下命令：
+- 纯小白推荐买一个 38元/年的2核2GB 或 188元/年的2核4GB 的[华为云（该链接无任何推广AFF）](https://activity.huaweicloud.com/discount_area_v5/index.html?utm_adplace=ecs-xsfwq_guanggao1)，使用Ubuntu24+镜像开机后，学习[使用SSH登陆服务器](https://www.bing.com/search?q=Tabby%E4%BD%BF%E7%94%A8SSH%E7%99%BB%E9%99%86%E6%9C%8D%E5%8A%A1%E5%99%A8)然后输入以下命令：
 
 </details>
 
@@ -114,6 +114,7 @@ bash <(curl -sL https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/
 ## 脚本中使用的呆毛版插件链接
 
 - [TRSS-Yunzai-NapC](https://github.com/AIGC-Yunzai/TRSS-Yunzai-NapC)
+- [TRSS-WeChat-OC-Plugin](https://github.com/AIGC-Yunzai/TRSS-WeChat-OC-Plugin)
 - [椰奶v2-misaka-fork](https://github.com/misaka20002/yenai-plugin/tree/v2)
 - [chatgpt-misaka-fork](https://github.com/misaka20002/chatgpt-plugin)
 - [ap-plugin-misaka-fork](https://github.com/misaka20002/ap-plugin)
