@@ -430,12 +430,12 @@ InstallNodeVersion(){
     echo -e ${white}"====="${green}安装 Node.js 版本${white}"====="${background}
     echo -e ${green}请选择要安装的版本${background}
     echo -e  ${green} 1. ${cyan}Node.js v18 LTS${background}
-    echo -e  ${green} 2. ${cyan}Node.js v19${background}
-    echo -e  ${green} 3. ${cyan}Node.js v20 LTS${background}
-    echo -e  ${green} 4. ${cyan}Node.js v21${background}
-    echo -e  ${green} 5. ${cyan}Node.js v22${background}
-    echo -e  ${green} 6. ${cyan}Node.js v23（推荐）${background}
-    echo -e  ${green} 7. ${cyan}Node.js v24${background}
+    echo -e  ${green} 2. ${cyan}Node.js v20 LTS${background}
+    echo -e  ${green} 3. ${cyan}Node.js v21${background}
+    echo -e  ${green} 4. ${cyan}Node.js v22${background}
+    echo -e  ${green} 5. ${cyan}Node.js v23（推荐）${background}
+    echo -e  ${green} 6. ${cyan}Node.js v24${background}
+    echo -e  ${green} 7. ${cyan}Node.js v26${background}
     echo -e  ${green} 8. ${cyan}安装其他版本${background}
     echo -e  ${green} 0. ${cyan}返回上级菜单${background}
     echo "========================="
@@ -448,22 +448,22 @@ InstallNodeVersion(){
         nvm install 18
         ;;
       2)
-        nvm install 19
-        ;;
-      3)
         nvm install 20
         ;;
-      4)
+      3)
         nvm install 21
         ;;
-      5)
+      4)
         nvm install 22
         ;;
-      6)
+      5)
         nvm install 23
         ;;
-      7)
+      6)
         nvm install 24
+        ;;
+      7)
+        nvm install 26
         ;;
       8)
         echo -en ${cyan}请输入要安装的 Node.js 版本 \(例如: 16.14.2\): ${background}
