@@ -2455,15 +2455,19 @@ manage_napcat_plugin() {
         return 1
     fi
 
-    local PLUGIN_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config/plugins/napcat-plugin-builtin"
+    local PLUGINS_BASE_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config/plugins"
+    local PLUGIN_DIR="${PLUGINS_BASE_DIR}/napcat-plugin-builtin"
     local PLUGIN_CONFIG="${PLUGIN_DIR}/config.json"
+    
+    # 第三方插件市场的目录
+    local MARKET_DIR="${PLUGINS_BASE_DIR}/napcat-plugin-update-checker"
 
     while true; do
         # clear
         echo
         echo -e "${white}=====${green} NapCat 高级配置管理 ${white}=====${background}"
         
-        # 读取当前配置状态
+        # 读取当前内置配置状态
         local current_status="${red}配置未生成${background}"
         if [ -f "$PLUGIN_CONFIG" ]; then
             local enable_reply=$(jq -r '.enableReply' "$PLUGIN_CONFIG" 2>/dev/null)
@@ -2476,11 +2480,25 @@ manage_napcat_plugin() {
             fi
         fi
 
+        # 读取第三方插件市场状态
+        local market_status="${red}未安装${background}"
+        if [ -d "$MARKET_DIR" ] && [ -f "$MARKET_DIR/package.json" ]; then
+            local market_version=$(jq -r '.version // empty' "$MARKET_DIR/package.json" 2>/dev/null)
+            if [ -n "$market_version" ]; then
+                market_status="${green}已安装 (v${market_version})${background}"
+            else
+                market_status="${green}已安装 (未知版本)${background}"
+            fi
+        fi
+
         echo -e "内置指令(#napcat)当前状态: [ ${current_status} ]"
+        echo -e "第三方插件市场当前状态:    [ ${market_status} ]"
         echo -e "${white}-----------------------------------${background}"
         
         echo -e "${yellow}1. ${cyan}关闭内置插件指令 (#napcat)${background}"
         echo -e "${yellow}2. ${cyan}开启内置插件指令 (#napcat)${background}"
+        echo -e "${yellow}3. ${cyan}安装/更新 NapCat 第三方插件市场${background}"
+        echo -e "${yellow}4. ${cyan}删除 NapCat 第三方插件市场${background}"
         echo -e "${green}0. ${cyan}返回主菜单${background}"
         echo "==================================="
         
@@ -2499,7 +2517,7 @@ manage_napcat_plugin() {
                     jq '.enableReply = false' "$PLUGIN_CONFIG" > "${PLUGIN_CONFIG}.tmp" && mv "${PLUGIN_CONFIG}.tmp" "$PLUGIN_CONFIG"
                 fi
                 
-                echo -e "${green}已关闭内置插件指令(#napcat)；重启napcat生效${background}"
+                echo -e "${green}已关闭内置插件指令(#napcat)；重启 NapCat 生效${background}"
                 sleep 1
                 ;;
             2)
@@ -2514,7 +2532,90 @@ manage_napcat_plugin() {
                     jq '.enableReply = true' "$PLUGIN_CONFIG" > "${PLUGIN_CONFIG}.tmp" && mv "${PLUGIN_CONFIG}.tmp" "$PLUGIN_CONFIG"
                 fi
                 
-                echo -e "${green}已开启内置插件指令(#napcat)；重启napcat生效${background}"
+                echo -e "${green}已开启内置插件指令(#napcat)；重启 NapCat 生效${background}"
+                sleep 1
+                ;;
+            3)
+                echo -e "${yellow}正在安装/更新 第三方插件市场 (napcat-plugin-update-checker)...${background}"
+                # 检查并安装 unzip 工具
+                if ! command -v unzip &> /dev/null; then
+                    echo -e "${yellow}未检测到 unzip，正在尝试自动安装...${background}"
+                    if [ $(command -v apt) ]; then
+                        apt update -y && apt install -y unzip
+                    elif [ $(command -v yum) ]; then
+                        yum install -y unzip
+                    elif [ $(command -v dnf) ]; then
+                        dnf install -y unzip
+                    elif [ $(command -v pacman) ]; then
+                        pacman -Syy --noconfirm --needed unzip
+                    else
+                        echo -e "${red}不支持的Linux发行版，无法自动安装 unzip 工具，请手动安装后重试${background}"
+                        sleep 2
+                        continue
+                    fi
+                fi
+
+                if [ ! -d "$PLUGINS_BASE_DIR" ]; then
+                    mkdir -p "$PLUGINS_BASE_DIR"
+                fi
+
+                local temp_zip="/tmp/napcat-plugin-update-checker.zip"
+                local download_url="https://github.com/xiowo/napcat-plugin-update-checker/releases/latest/download/napcat-plugin-update-checker.zip"
+                
+                echo -e "${cyan}正在下载插件包...${background}"
+                if ! curl -L -o "$temp_zip" "$download_url"; then
+                    echo -e "${yellow}直接下载失败，尝试使用代理镜像(ghproxy)加速下载...${background}"
+                    if ! curl -L -o "$temp_zip" "https://ghproxy.cn/$download_url"; then
+                        echo -e "${red}下载失败，请检查服务器网络连接状态。${background}"
+                        sleep 2
+                        continue
+                    fi
+                fi
+
+                echo -e "${cyan}正在解压并配置...${background}"
+                local temp_extract_dir="/tmp/napcat_market_extract"
+                rm -rf "$temp_extract_dir"
+                mkdir -p "$temp_extract_dir"
+                
+                if ! unzip -q -o "$temp_zip" -d "$temp_extract_dir"; then
+                    echo -e "${red}解压失败，下载的压缩包可能已损坏。${background}"
+                    rm -f "$temp_zip"
+                    sleep 2
+                    continue
+                fi
+
+                # 处理嵌套目录：应对解压后只产生一个子文件夹的情况
+                (
+                    shopt -s dotglob nullglob
+                    local top_level_items=("$temp_extract_dir"/*)
+                    if [ ${#top_level_items[@]} -eq 1 ] && [ -d "${top_level_items[0]}" ]; then
+                        rm -rf "${MARKET_DIR}"
+                        mv "${top_level_items[0]}" "${MARKET_DIR}"
+                    else
+                        rm -rf "${MARKET_DIR}"
+                        mv "$temp_extract_dir" "${MARKET_DIR}"
+                    fi
+                )
+
+                rm -f "$temp_zip"
+                rm -rf "$temp_extract_dir"
+                
+                echo -e "${green}第三方插件市场 安装/更新成功！请重启 NapCat 实例使配置生效。${background}"
+                sleep 2
+                ;;
+            4)
+                if [ ! -d "$MARKET_DIR" ]; then
+                    echo -e "${yellow}未安装第三方插件市场，无需删除${background}"
+                    sleep 1
+                    continue
+                fi
+                echo -en "${yellow}确认删除第三方插件市场吗? [y/N]: ${background}"; read confirm
+                if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                    rm -rf "$MARKET_DIR"
+                    echo -e "${green}已成功删除第三方插件市场；请重启 NapCat 实例使配置生效。${background}"
+                else
+                    echo -e "${yellow}操作已取消${background}"
+                fi
                 sleep 1
                 ;;
             0)
