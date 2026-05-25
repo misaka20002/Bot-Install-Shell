@@ -795,7 +795,26 @@ manage_clash() {
 
     echo -e "${white}=====${green}系统管理-Clash for Linux${white}=====${background}"
     if command -v clashctl >/dev/null 2>&1; then
-        echo -e "  当前状态: ${green}已安装${background}"
+        # --- 检测运行状态与模式 ---
+        local proxy_status="${red}● 已关闭${background}"
+        local mode_status="${yellow}未运行${background}"
+        
+        # 使用 systemctl 检测 mihomo 或 clash 服务进程是否在活跃状态
+        if systemctl is-active --quiet mihomo 2>/dev/null || systemctl is-active --quiet clash 2>/dev/null; then
+            proxy_status="${green}▶ 已开启${background}"
+            
+            # 进程开启时，判断当前是 Tun 模式还是系统代理模式
+            # 通常 mihomo 内核在开启 Tun 模式时，会创建一个名为 Meta 的虚拟网卡（或 utun / clash）
+            if ip link show 2>/dev/null | grep -iE "meta|utun|clash" >/dev/null 2>&1; then
+                mode_status="${green}Tun 模式 (全局虚拟网卡)${background}"
+            else
+                mode_status="${cyan}系统代理模式 (环境变量)${background}"
+            fi
+        fi
+
+        echo -e "  安装状态: ${green}已安装${background}"
+        echo -e "  运行状态: ${proxy_status}"
+        echo -e "  当前模式: ${mode_status}"
         echo -e "  ${yellow}CLI指令: clashctl${background}"
     else
         echo -e "  当前状态: ${yellow}未安装 或 环境变量未生效${background}"
@@ -928,6 +947,10 @@ manage_clash() {
             echo -en "${cyan}要改变Tun模式状态吗？[on 开启 / off 关闭 / 0 退出]: ${background}"; read tun_op
             if [[ "$tun_op" == "on" || "$tun_op" == "off" ]]; then
                 clashctl tun "$tun_op"
+                # --- 添加提示用户已自动重启开启代理 ---
+                echo -e "\n${yellow}================ 提示 =================${background}"
+                echo -e "${green}✔ Tun 模式已成功切换！${background}"
+                echo -e "${yellow}=======================================${background}"
             fi
         else 
             echo -e "${red}未检测到 clashctl 命令。${background}"
@@ -996,6 +1019,7 @@ main() {
     echo -e ${green}QQ群: ${cyan}呆毛版-QQ群:1022982073${background}
     echo "========================="
     echo -en ${green}请输入您的选项: ${background};read number
+    echo
     case ${number} in
     1) manage_hosts ;;
     2) manage_swap ;;
