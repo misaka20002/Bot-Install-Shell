@@ -433,10 +433,10 @@ Tmux_Start(){
     if tmux_gauge meme_generator
     then
         echo
-        echo -en ${green}${Start_Stop_Restart}成功 是否打开窗口 进入TMUX窗口后，退出请按 Ctrl+B 然后按 D [Y/N]:${background}
+        echo -en ${green}${Start_Stop_Restart}成功 是否打开窗口 进入TMUX窗口后，退出请按 Ctrl+B 然后按 D [y/N]:${background}
     else
         echo
-        echo -en ${green}${Start_Stop_Restart}等待超时 是否打开窗口 进入TMUX窗口后，退出请按 Ctrl+B 然后按 D [Y/N]:${background}
+        echo -en ${green}${Start_Stop_Restart}等待超时 是否打开窗口 进入TMUX窗口后，退出请按 Ctrl+B 然后按 D [y/N]:${background}
     fi
     read YN
     case ${YN} in
