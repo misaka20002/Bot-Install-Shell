@@ -755,7 +755,7 @@ start_singbox_docker() {
 
 # Hapi / Claude Code 管理辅助函数
 HAPI_HUB_TMUX_NAME="hapi_hub"
-HAPI_SELECTED_WORKSPACE=""
+HAPI_SELECTED_WORKSPACES=()
 HAPI_HUB_URL=""
 
 hapi_load_node_env() {
@@ -792,7 +792,7 @@ hapi_ensure_pnpm() {
 hapi_ensure_command() {
     hapi_load_node_env
     if ! command -v hapi >/dev/null 2>&1; then
-        echo -e "${red}未检测到 hapi 命令，请先安装 Hapi。${background}"
+        echo -e "${red}未检测到 hapi 命令，请先安装/更新 Hapi。${background}"
         return 1
     fi
 }
@@ -838,8 +838,8 @@ hapi_add_1m_suffix() {
 
 hapi_install_claude_code() {
     hapi_ensure_pnpm || return
-    echo -e "${yellow}正在安装 / 更新 Claude Code...${background}"
-    pnpm add -g @anthropic-ai/claude-code --allow-build
+    echo -e "${yellow}正在安装/更新 Claude Code...${background}"
+    pnpm add -g @anthropic-ai/claude-code --allow-build=@anthropic-ai/claude-code
     if command -v claude >/dev/null 2>&1; then
         claude --version
     fi
@@ -847,11 +847,23 @@ hapi_install_claude_code() {
 
 hapi_install_hapi() {
     hapi_ensure_pnpm || return
-    echo -e "${yellow}正在安装 / 更新 Hapi...${background}"
+    echo -e "${yellow}正在安装/更新 Hapi...${background}"
     pnpm add -g @twsxtd/hapi
     if command -v hapi >/dev/null 2>&1; then
         hapi --version
     fi
+}
+
+hapi_show_claude_config() {
+    local settings_file="${1:-${HOME}/.claude/settings.json}"
+
+    echo -e "${white}=====${green}当前 Claude Code 配置${white}=====${background}"
+    if [ ! -f "${settings_file}" ]; then
+        echo -e "${yellow}未找到配置文件: ${settings_file}${background}"
+        return 1
+    fi
+
+    sed -E 's#("(ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)"[[:space:]]*:[[:space:]]*")[^"]*#\1******#g' "${settings_file}"
 }
 
 hapi_config_claude() {
@@ -861,6 +873,8 @@ hapi_config_claude() {
     local sonnet_value opus_value backup_file
     local auth_token_json base_url_json sonnet_json opus_json
 
+    hapi_show_claude_config "${settings_file}" || true
+
     if [ -f "${settings_file}" ]; then
         echo -en "${yellow}检测到已存在 Claude Code 配置，继续将覆盖原有配置！是否继续？[y/N]: ${background}"
         read -r overwrite
@@ -868,7 +882,7 @@ hapi_config_claude() {
             echo -e "${yellow}已取消配置。${background}"
             return
         fi
-        backup_file="${settings_file}.bak.$(date +%Y%m%d%H%M%S)"
+        backup_file="${settings_file}.bak"
         cp -a "${settings_file}" "${backup_file}"
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
@@ -953,7 +967,7 @@ hapi_prepare_workspace() {
         echo -en "${yellow}目录不存在: ${workspace_root}，是否创建？[Y/n]: ${background}"
         read -r create_workspace
         if [[ "${create_workspace}" == "n" || "${create_workspace}" == "N" ]]; then
-            echo -e "${yellow}已取消启动 runner。${background}"
+            echo -e "${yellow}已取消添加目录。${background}"
             return 1
         fi
         if ! mkdir -p "${workspace_root}"; then
@@ -968,52 +982,112 @@ hapi_prepare_workspace() {
         return 1
     fi
 
-    HAPI_SELECTED_WORKSPACE="${workspace_root}"
+    local existing_workspace
+    for existing_workspace in "${HAPI_SELECTED_WORKSPACES[@]}"; do
+        if [ "${existing_workspace}" = "${workspace_root}" ]; then
+            echo -e "${yellow}目录已在列表中: ${workspace_root}${background}"
+            return 0
+        fi
+    done
+
+    HAPI_SELECTED_WORKSPACES+=("${workspace_root}")
+    echo -e "${green}已添加工作目录: ${workspace_root}${background}"
 }
 
-hapi_select_workspace() {
+hapi_select_workspaces() {
     local num custom_path
-    echo -e "${white}=====${green}选择 Hapi Runner 工作目录${white}=====${background}"
-    echo -e "${green}1.  ${cyan}${HOME}/TRSS-Yunzai${background}"
-    echo -e "${green}2.  ${cyan}${HOME}/AstrBot${background}"
-    echo -e "${green}3.  ${cyan}自定义目录${background}"
-    echo -e "${green}0.  ${cyan}取消${background}"
-    echo "========================="
-    echo -en "${green}请输入您的选项: ${background}"; read -r num
+    HAPI_SELECTED_WORKSPACES=()
 
-    case "${num}" in
-    1) hapi_prepare_workspace "${HOME}/TRSS-Yunzai" ;;
-    2) hapi_prepare_workspace "${HOME}/AstrBot" ;;
-    3)
-        echo -en "${cyan}请输入 workspace-root 路径: ${background}"
-        read -r custom_path
-        if [ -z "${custom_path}" ]; then
-            echo -e "${red}workspace-root 不能为空。${background}"
-            return 1
+    while true; do
+        echo -e "${white}=====${green}设置 Hapi 工作目录${white}=====${background}"
+        if [ "${#HAPI_SELECTED_WORKSPACES[@]}" -gt 0 ]; then
+            echo -e "${yellow}已选择:${background}"
+            printf '  - %s\n' "${HAPI_SELECTED_WORKSPACES[@]}"
         fi
-        hapi_prepare_workspace "${custom_path}"
-        ;;
-    0) return 1 ;;
-    *) echo -e "${red}输入错误${background}"; return 1 ;;
-    esac
+        echo -e "${green}1.  ${cyan}添加 ${HOME}/TRSS-Yunzai${background}"
+        echo -e "${green}2.  ${cyan}添加 ${HOME}/AstrBot${background}"
+        echo -e "${green}3.  ${cyan}添加自定义目录${background}"
+        echo -e "${green}4.  ${cyan}开始设置${background}"
+        echo -e "${green}0.  ${cyan}取消${background}"
+        echo "========================="
+        echo -en "${green}请输入您的选项: ${background}"; read -r num
+
+        case "${num}" in
+        1) hapi_prepare_workspace "${HOME}/TRSS-Yunzai" ;;
+        2) hapi_prepare_workspace "${HOME}/AstrBot" ;;
+        3)
+            echo -en "${cyan}请输入 workspace-root 路径: ${background}"
+            read -r custom_path
+            if [ -z "${custom_path}" ]; then
+                echo -e "${red}workspace-root 不能为空。${background}"
+                continue
+            fi
+            hapi_prepare_workspace "${custom_path}"
+            ;;
+        4)
+            if [ "${#HAPI_SELECTED_WORKSPACES[@]}" -eq 0 ]; then
+                echo -e "${red}请至少添加一个工作目录。${background}"
+                continue
+            fi
+            return 0
+            ;;
+        0) return 1 ;;
+        *) echo -e "${red}输入错误${background}" ;;
+        esac
+    done
 }
 
 hapi_start_runner() {
+    local runner_args=()
+    local workspace_root
+
     hapi_ensure_command || return
-    echo -e "${yellow}提示：Hapi runner 是全局单实例，新启动会覆盖当前 runner 的 workspace-root。${background}"
-    hapi_select_workspace || return
-    echo -e "${yellow}正在启动 Hapi runner: ${HAPI_SELECTED_WORKSPACE}${background}"
-    hapi runner start --workspace-root "${HAPI_SELECTED_WORKSPACE}"
+    echo -e "${yellow}提示：Hapi runner 是全局单实例，新设置会覆盖当前 runner 的 workspace-root。${background}"
+    hapi_select_workspaces || return
+
+    for workspace_root in "${HAPI_SELECTED_WORKSPACES[@]}"; do
+        runner_args+=(--workspace-root "${workspace_root}")
+    done
+
+    echo -e "${yellow}正在设置/运行 Hapi 工作目录:${background}"
+    printf '  - %s\n' "${HAPI_SELECTED_WORKSPACES[@]}"
+    hapi runner start "${runner_args[@]}"
+}
+
+hapi_runner_workspace_menu() {
+    local num
+
+    while true; do
+        echo -e "${white}=====${green}Hapi runner 工作目录${white}=====${background}"
+        echo -e "${green}1.  ${cyan}设置/运行 Hapi runner 工作目录${background}"
+        echo -e "${green}2.  ${cyan}查看 Hapi runner 状态${background}"
+        echo -e "${green}0.  ${cyan}返回上一级${background}"
+        echo "========================="
+        echo -en "${green}请输入您的选项: ${background}"; read -r num
+
+        case "${num}" in
+        1) hapi_start_runner; pause ;;
+        2) if hapi_ensure_command; then hapi runner status; fi; pause ;;
+        0) return ;;
+        *) echo -e "${red}输入错误${background}"; pause ;;
+        esac
+    done
 }
 
 hapi_capture_hub_url() {
-    local hub_output
+    local hub_output cli_token
     HAPI_HUB_URL=""
     if ! tmux has-session -t "${HAPI_HUB_TMUX_NAME}" 2>/dev/null; then
         return 1
     fi
     hub_output=$(tmux capture-pane -pt "${HAPI_HUB_TMUX_NAME}" -S -200 2>/dev/null)
-    HAPI_HUB_URL=$(printf '%s\n' "${hub_output}" | grep -Eo 'https://app\.hapi\.run/[^[:space:]]+' | tail -n 1)
+    HAPI_HUB_URL=$(printf '%s\n' "${hub_output}" | grep -Eo 'https://app\.hapi\.run/[^[:space:]]*' | tail -n 1)
+    if [[ "${HAPI_HUB_URL}" == *"token=" ]]; then
+        cli_token=$(hapi_read_setting "cliApiToken" "")
+        if [ -n "${cli_token}" ]; then
+            HAPI_HUB_URL="${HAPI_HUB_URL}${cli_token}"
+        fi
+    fi
     [ -n "${HAPI_HUB_URL}" ]
 }
 
@@ -1066,7 +1140,7 @@ hapi_start_hub() {
         attempt=$((attempt + 1))
     done
 
-    echo -e "${red}连续 3 次未提取到 Hapi Hub URL，请稍后使用“查看 hub URL”或检查 tmux 日志。${background}"
+    echo -e "${red}连续 3 次未提取到 Hapi Hub URL，请稍后重新选择“启动/查看 Hapi hub URL”或检查 tmux 日志。${background}"
 }
 
 hapi_stop_all() {
@@ -1086,6 +1160,232 @@ hapi_stop_all() {
     fi
 }
 
+hapi_read_setting() {
+    local key="$1"
+    local default_value="$2"
+    local settings_file="${HOME}/.hapi/settings.json"
+    local value
+
+    if [ -f "${settings_file}" ] && command -v node >/dev/null 2>&1; then
+        value=$(node -e 'const fs = require("fs"); const file = process.argv[1]; const key = process.argv[2]; try { const data = JSON.parse(fs.readFileSync(file, "utf8")); const value = data[key]; if (value !== undefined && value !== null && value !== "") process.stdout.write(String(value)); } catch {}' "${settings_file}" "${key}" 2>/dev/null)
+    fi
+
+    if [ -n "${value}" ]; then
+        printf '%s' "${value}"
+    else
+        printf '%s' "${default_value}"
+    fi
+}
+
+hapi_check_listen_host() {
+    local listen_host
+    listen_host=$(hapi_read_setting "listenHost" "127.0.0.1")
+
+    if [ "${listen_host}" = "0.0.0.0" ]; then
+        # echo -e "${green}检查通过：listenHost -> 0.0.0.0${background}"
+        echo -en ""
+    else
+        echo -e "${green}当前 listenHost -> ${listen_host}，Docker 或局域网访问前建议设置为 0.0.0.0。${background}"
+    fi
+}
+
+hapi_set_listen_config() {
+    local settings_dir="${HOME}/.hapi"
+    local settings_file="${settings_dir}/settings.json"
+    local current_host current_port listen_host listen_port backup_file
+
+    if ! command -v node >/dev/null 2>&1; then
+        echo -e "${red}未检测到 node，无法安全写入 Hapi JSON 配置。${background}"
+        return 1
+    fi
+
+    current_host=$(hapi_read_setting "listenHost" "127.0.0.1")
+    current_port=$(hapi_read_setting "listenPort" "3006")
+    echo -e "${white}=====${green}设置 Hapi listenHost / listenPort${white}=====${background}"
+    echo -e "${yellow}当前 listenHost: ${current_host}${background}"
+    echo -e "${yellow}当前 listenPort: ${current_port}${background}"
+    echo -en "${cyan}请输入 listenHost (默认 ${current_host}，Docker/局域网建议 0.0.0.0): ${background}"
+    read -r listen_host
+    listen_host=${listen_host:-${current_host}}
+    echo -en "${cyan}请输入 listenPort (默认 ${current_port}): ${background}"
+    read -r listen_port
+    listen_port=${listen_port:-${current_port}}
+
+    if [ -z "${listen_host}" ]; then
+        echo -e "${red}listenHost 不能为空。${background}"
+        return 1
+    fi
+    if [[ ! "${listen_port}" =~ ^[0-9]+$ ]] || [ "${listen_port}" -lt 1 ] || [ "${listen_port}" -gt 65535 ]; then
+        echo -e "${red}listenPort 必须是 1-65535 之间的数字。${background}"
+        return 1
+    fi
+
+    mkdir -p "${settings_dir}"
+    if [ -f "${settings_file}" ]; then
+        backup_file="${settings_file}.bak"
+        cp -a "${settings_file}" "${backup_file}"
+        echo -e "${green}已备份原配置到: ${backup_file}${background}"
+    fi
+    if ! node -e 'const fs = require("fs"); const path = require("path"); const file = process.argv[1]; const host = process.argv[2]; const port = Number(process.argv[3]); let data = {}; if (fs.existsSync(file)) { try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch {} } data.listenHost = host; data.listenPort = port; fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");' "${settings_file}" "${listen_host}" "${listen_port}"; then
+        echo -e "${red}Hapi 配置写入失败: ${settings_file}${background}"
+        return 1
+    fi
+    chmod 600 "${settings_file}" 2>/dev/null
+    echo -e "${green}已写入 Hapi 配置: ${settings_file}${background}"
+    hapi_check_listen_host
+    echo -e "${yellow}如果 Hapi Hub 正在运行，请重启 Hub 后让配置生效。${background}"
+}
+
+hapi_show_cli_api_token() {
+    local settings_file="${HOME}/.hapi/settings.json"
+    local token
+
+    echo -e "${white}=====${green}Hapi cliApiToken${white}=====${background}"
+    if [ ! -f "${settings_file}" ]; then
+        echo -e "${yellow}未找到 Hapi 配置文件: ${settings_file}${background}"
+        return 1
+    fi
+
+    if command -v node >/dev/null 2>&1; then
+        token=$(node -e 'const fs = require("fs"); const file = process.argv[1]; const data = JSON.parse(fs.readFileSync(file, "utf8")); if (data.cliApiToken) process.stdout.write(data.cliApiToken);' "${settings_file}" 2>/dev/null)
+    fi
+    if [ -z "${token}" ]; then
+        token=$(sed -nE 's/^[[:space:]]*"cliApiToken"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' "${settings_file}" | head -n 1)
+    fi
+
+    if [ -z "${token}" ]; then
+        echo -e "${yellow}未在 ${settings_file} 中读取到 cliApiToken。${background}"
+        return 1
+    fi
+
+    echo -e "${red}重要：cliApiToken 是敏感凭据，不要发送给其他人！${background}"
+    echo -e "${red}${token}${background}"
+}
+
+hapi_set_cli_api_token() {
+    local settings_dir="${HOME}/.hapi"
+    local settings_file="${settings_dir}/settings.json"
+    local token backup_file
+
+    if ! command -v node >/dev/null 2>&1; then
+        echo -e "${red}未检测到 node，无法安全写入 Hapi JSON 配置。${background}"
+        return 1
+    fi
+
+    echo -en "${cyan}请输入新的 cliApiToken: ${background}"
+    read -rs token
+    echo
+    if [ -z "${token}" ]; then
+        echo -e "${red}cliApiToken 不能为空。${background}"
+        return 1
+    fi
+
+    mkdir -p "${settings_dir}"
+    if [ -f "${settings_file}" ]; then
+        backup_file="${settings_file}.bak"
+        cp -a "${settings_file}" "${backup_file}"
+        echo -e "${green}已备份原配置到: ${backup_file}${background}"
+    fi
+    if ! node -e 'const fs = require("fs"); const path = require("path"); const file = process.argv[1]; const token = process.argv[2]; let data = {}; if (fs.existsSync(file)) { try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch {} } data.cliApiToken = token; fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");' "${settings_file}" "${token}"; then
+        echo -e "${red}cliApiToken 写入失败: ${settings_file}${background}"
+        return 1
+    fi
+    chmod 600 "${settings_file}" 2>/dev/null
+    echo -e "${green}cliApiToken 已写入: ${settings_file}${background}"
+}
+
+hapi_manage_cli_api_token() {
+    local confirm
+
+    hapi_show_cli_api_token || true
+    echo -en "${yellow}是否设置/更新 cliApiToken？[y/N]: ${background}"
+    read -r confirm
+    if [[ "${confirm}" == "y" || "${confirm}" == "Y" ]]; then
+        hapi_set_cli_api_token
+    else
+        echo -e "${yellow}未修改 cliApiToken。${background}"
+    fi
+}
+
+hapi_show_astrbot_plugin_config() {
+    local listen_host listen_port token
+
+    listen_host=$(hapi_read_setting "listenHost" "127.0.0.1")
+    listen_port=$(hapi_read_setting "listenPort" "3006")
+    token=$(hapi_read_setting "cliApiToken" "")
+
+    echo -e "${white}=====${green}AstrBot 插件配置${white}=====${background}"
+    echo -e "${yellow}当前 Hapi listenHost: ${listen_host}${background}"
+    echo -e "${yellow}当前 Hapi listenPort: ${listen_port}${background}"
+    echo -e "${green}在 AstrBot 管理面板的插件配置页填写以下必填字段:${background}"
+    echo -e "${cyan}hapi_endpoint:${background}"
+    echo -e "  同一宿主机（非 Docker）: http://localhost:${listen_port}"
+    echo -e "  AstrBot/TRSS Docker（Linux 宿主机默认）: http://172.17.0.1:${listen_port}"
+    echo -e "  AstrBot/TRSS Docker（Windows/macOS 宿主机）: http://host.docker.internal:${listen_port}"
+    echo -e "  同一内网 / Tailscale: http://<HAPI机器IP>:${listen_port}"
+    echo -e "  公共中继 / 自建隧道: 使用 Hub URL 或你的域名"
+    echo -e "${cyan}access_token:${background}"
+    if [ -n "${token}" ]; then
+        echo -e "  ${red}${token}${background}"
+    else
+        echo -e "  ${yellow}未读取到 cliApiToken，请先启动 Hapi Hub 生成 ~/.hapi/settings.json。${background}"
+    fi
+
+    echo -e "${yellow}如果 AstrBot 是 Docker 启动，本脚本所在 Linux 宿主机通常填写: http://172.17.0.1:${listen_port}${background}"
+    echo -e "${yellow}Docker 场景必须先让 Hapi 监听所有网卡，即 listenHost -> 0.0.0.0。${background}"
+    hapi_check_listen_host
+}
+
+hapi_attach_tmux() {
+    hapi_ensure_tmux || return
+
+    if ! tmux has-session -t "${HAPI_HUB_TMUX_NAME}" 2>/dev/null; then
+        echo -e "${yellow}未检测到正在运行的 Hapi Hub tmux 会话: ${HAPI_HUB_TMUX_NAME}${background}"
+        return 1
+    fi
+
+    echo -e "${yellow}即将打开 tmux 会话 ${HAPI_HUB_TMUX_NAME}。${background}"
+    echo -e "${yellow}返回菜单请按 ctrl+b d。${background}"
+    echo -en "${green}按回车键进入 tmux...${background}"
+    read -r
+    tmux attach-session -t "${HAPI_HUB_TMUX_NAME}"
+}
+
+hapi_restart_hub() {
+    hapi_ensure_command || return
+    hapi_ensure_tmux || return
+
+    if tmux has-session -t "${HAPI_HUB_TMUX_NAME}" 2>/dev/null; then
+        tmux kill-session -t "${HAPI_HUB_TMUX_NAME}" >/dev/null 2>&1
+        echo -e "${green}已停止现有 Hapi Hub tmux 会话。${background}"
+    else
+        echo -e "${yellow}未检测到正在运行的 Hapi Hub tmux 会话，将直接启动。${background}"
+    fi
+    hapi_start_hub
+}
+
+hapi_hub_menu() {
+    local num
+
+    while true; do
+        echo -e "${white}=====${green}Hapi hub${white}=====${background}"
+        echo -e "${green}1.  ${cyan}启动/查看 Hapi hub URL${background}"
+        echo -e "${green}2.  ${cyan}重启 Hapi hub${background}"
+        echo -e "${green}3.  ${cyan}打开当前的 tmux${background}"
+        echo -e "${green}0.  ${cyan}返回上一级${background}"
+        echo "========================="
+        echo -en "${green}请输入您的选项: ${background}"; read -r num
+
+        case "${num}" in
+        1) hapi_start_hub; pause ;;
+        2) hapi_restart_hub; pause ;;
+        3) hapi_attach_tmux; pause ;;
+        0) return ;;
+        *) echo -e "${red}输入错误${background}"; pause ;;
+        esac
+    done
+}
+
 hapi_show_versions() {
     hapi_load_node_env
     echo -e "${white}=====${green}Hapi / Claude Code 版本${white}=====${background}"
@@ -1101,17 +1401,110 @@ hapi_show_versions() {
     fi
 }
 
+hapi_uninstall() {
+    local num confirm remove_status target_label stop_hapi
+    local uninstall_packages=()
+
+    hapi_show_versions
+    echo -e "${white}=====${green}选择卸载目标${white}=====${background}"
+    echo -e "${green}1.  ${cyan}卸载 Claude Code${background}"
+    echo -e "${green}2.  ${cyan}卸载 Hapi${background}"
+    echo -e "${green}3.  ${cyan}卸载 Claude Code 和 Hapi${background}"
+    echo -e "${green}0.  ${cyan}取消${background}"
+    echo "========================="
+    echo -en "${green}请输入您的选项: ${background}"; read -r num
+
+    case "${num}" in
+    1)
+        target_label="Claude Code"
+        uninstall_packages=("@anthropic-ai/claude-code")
+        stop_hapi="false"
+        ;;
+    2)
+        target_label="Hapi"
+        uninstall_packages=("@twsxtd/hapi")
+        stop_hapi="true"
+        ;;
+    3)
+        target_label="Claude Code 和 Hapi"
+        uninstall_packages=("@anthropic-ai/claude-code" "@twsxtd/hapi")
+        stop_hapi="true"
+        ;;
+    0)
+        echo -e "${yellow}已取消卸载。${background}"
+        return
+        ;;
+    *)
+        echo -e "${red}输入错误${background}"
+        return 1
+        ;;
+    esac
+
+    echo -e "${yellow}卸载将移除全局安装的 ${target_label}，不会删除 ~/.claude 或 ~/.hapi 配置目录。${background}"
+    echo -en "${yellow}确定要卸载 ${target_label} 吗？[y/N]: ${background}"
+    read -r confirm
+    if [[ "${confirm}" != "y" && "${confirm}" != "Y" ]]; then
+        echo -e "${yellow}已取消卸载。${background}"
+        return
+    fi
+
+    if [ "${stop_hapi}" = "true" ]; then
+        hapi_stop_all
+    fi
+    hapi_load_node_env
+    if command -v pnpm >/dev/null 2>&1; then
+        echo -e "${yellow}正在卸载 ${target_label}...${background}"
+        pnpm remove -g "${uninstall_packages[@]}"
+        remove_status=$?
+    elif command -v npm >/dev/null 2>&1; then
+        echo -e "${yellow}未检测到 pnpm，正在尝试使用 npm 卸载...${background}"
+        npm uninstall -g "${uninstall_packages[@]}"
+        remove_status=$?
+    else
+        echo -e "${red}未检测到 pnpm/npm，无法自动卸载。${background}"
+        return 1
+    fi
+
+    if [ "${remove_status}" -eq 0 ]; then
+        echo -e "${green}${target_label} 卸载完成。${background}"
+    else
+        echo -e "${red}卸载命令执行失败，请检查上方输出。${background}"
+        return "${remove_status}"
+    fi
+}
+
+hapi_config_menu() {
+    local num
+
+    while true; do
+        echo -e "${white}=====${green}设置 Hapi 配置${white}=====${background}"
+        echo -e "${green}1.  ${cyan}设置 listenHost 和端口号${background}"
+        echo -e "${green}2.  ${cyan}查看/设置 cliApiToken${background}"
+        echo -e "${green}3.  ${cyan}（额外） hapi_connector 插件配置帮助${background}"
+        echo -e "${green}0.  ${cyan}返回上一级${background}"
+        echo "========================="
+        echo -en "${green}请输入您的选项: ${background}"; read -r num
+
+        case "${num}" in
+        1) hapi_set_listen_config; pause ;;
+        2) hapi_manage_cli_api_token; pause ;;
+        3) hapi_show_astrbot_plugin_config; pause ;;
+        0) return ;;
+        *) echo -e "${red}输入错误${background}"; pause ;;
+        esac
+    done
+}
+
 manage_hapi() {
     echo -e "${white}=====${green}系统管理-Hapi / Claude Code${white}=====${background}"
-    echo -e "${green}1.  ${cyan}安装 Claude Code${background}"
+    echo -e "${green}1.  ${cyan}安装/更新 Claude Code${background}"
     echo -e "${green}2.  ${cyan}配置 Claude Code${background}"
-    echo -e "${green}3.  ${cyan}安装 Hapi${background}"
-    echo -e "${green}4.  ${cyan}启动 Hapi runner${background}"
-    echo -e "${green}5.  ${cyan}启动 Hapi hub${background}"
-    echo -e "${green}6.  ${cyan}查看 hub URL${background}"
-    echo -e "${green}7.  ${cyan}查看 runner 状态${background}"
-    echo -e "${green}8.  ${cyan}停止 Hapi${background}"
-    echo -e "${green}9.  ${cyan}查看版本${background}"
+    echo -e "${green}3.  ${cyan}安装/更新 Hapi${background}"
+    echo -e "${green}4.  ${cyan}设置/运行 Hapi runner 工作目录${background}"
+    echo -e "${green}5.  ${cyan}设置 Hapi CLI${background}"
+    echo -e "${green}6.  ${cyan}运行 Hapi hub${background}"
+    echo -e "${green}7.  ${cyan}停止 Hapi${background}"
+    echo -e "${green}8.  ${cyan}卸载${background}"
     echo -e "${green}0.  ${cyan}返回主菜单${background}"
     echo "========================="
     echo -en "${green}请输入您的选项: ${background}"; read -r num
@@ -1120,12 +1513,11 @@ manage_hapi() {
     1) hapi_install_claude_code; pause; manage_hapi ;;
     2) hapi_config_claude; pause; manage_hapi ;;
     3) hapi_install_hapi; pause; manage_hapi ;;
-    4) hapi_start_runner; pause; manage_hapi ;;
-    5) hapi_start_hub; pause; manage_hapi ;;
-    6) hapi_ensure_tmux && hapi_show_hub_url; pause; manage_hapi ;;
-    7) if hapi_ensure_command; then hapi runner status; fi; pause; manage_hapi ;;
-    8) hapi_stop_all; pause; manage_hapi ;;
-    9) hapi_show_versions; pause; manage_hapi ;;
+    4) hapi_runner_workspace_menu; manage_hapi ;;
+    5) hapi_config_menu; manage_hapi ;;
+    6) hapi_hub_menu; manage_hapi ;;
+    7) hapi_stop_all; pause; manage_hapi ;;
+    8) hapi_uninstall; pause; manage_hapi ;;
     0) return ;;
     *) echo -e "${red}输入错误${background}"; pause; manage_hapi ;;
     esac
