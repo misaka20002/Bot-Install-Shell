@@ -41,42 +41,42 @@ pause() {
 # hosts文件管理函数
 manage_hosts() {
     hosts_file="/etc/hosts"
-    echo -e ${white}"====="${green}系统管理-Hosts文件${white}"====="${background}
-    echo -e  ${green}1.  ${cyan}查看当前hosts文件${background}
-    echo -e  ${green}2.  ${cyan}添加hosts条目${background}
-    echo -e  ${green}3.  ${cyan}删除hosts条目${background}
-    echo -e  ${green}4.  ${cyan}编辑hosts文件${background}
-    echo -e  ${green}0.  ${cyan}返回主菜单${background}
+    echo -e "${white}=====${green}系统管理-Hosts文件${white}=====${background}"
+    echo -e "${green}1.  ${cyan}查看当前hosts文件${background}"
+    echo -e "${green}2.  ${cyan}添加hosts条目${background}"
+    echo -e "${green}3.  ${cyan}删除hosts条目${background}"
+    echo -e "${green}4.  ${cyan}编辑hosts文件${background}"
+    echo -e "${green}0.  ${cyan}返回主菜单${background}"
     echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read num
+    echo -en "${green}请输入您的选项: ${background}";read num
     
     case ${num} in
     1)
-        echo -e ${yellow}当前hosts文件内容:${background}
+        echo -e "${yellow}当前hosts文件内容:${background}"
         cat ${hosts_file}
         echo
         pause
         ;;
     2)
-        echo -en ${cyan}请输入IP地址: ${background};read ip
-        echo -en ${cyan}请输入域名: ${background};read domain
+        echo -en "${cyan}请输入IP地址: ${background}";read ip
+        echo -en "${cyan}请输入域名: ${background}";read domain
         if [ -z "${ip}" ] || [ -z "${domain}" ]; then
-            echo -e ${red}IP或域名不能为空${background}
+            echo -e "${red}IP或域名不能为空${background}"
         else
             echo "${ip} ${domain}" >> ${hosts_file}
-            echo -e ${green}已添加: ${ip} ${domain}${background}
+            echo -e "${green}已添加: ${ip} ${domain}${background}"
         fi
         pause
         ;;
     3)
-        echo -e ${yellow}当前hosts文件内容:${background}
+        echo -e "${yellow}当前hosts文件内容:${background}"
         cat -n ${hosts_file}
-        echo -en ${cyan}请输入要删除的行号: ${background};read line_num
+        echo -en "${cyan}请输入要删除的行号: ${background}";read line_num
         if [[ "${line_num}" =~ ^[0-9]+$ ]]; then
             sed -i "${line_num}d" ${hosts_file}
-            echo -e ${green}已删除第 ${line_num} 行${background}
+            echo -e "${green}已删除第 ${line_num} 行${background}"
         else
-            echo -e ${red}请输入有效的行号${background}
+            echo -e "${red}请输入有效的行号${background}"
         fi
         pause
         ;;
@@ -86,60 +86,60 @@ manage_hosts() {
         elif command -v vim >/dev/null 2>&1; then
             vim ${hosts_file}
         else
-            echo -e ${red}未找到编辑器，请安装nano或vim${background}
+            echo -e "${red}未找到编辑器，请安装nano或vim${background}"
         fi
-        echo -e ${green}hosts文件已编辑完成${background}
+        echo -e "${green}hosts文件已编辑完成${background}"
         pause
         ;;
     0) return ;;
-    *) echo -e ${red}输入错误${background}; pause ;;
+    *) echo -e "${red}输入错误${background}"; pause ;;
     esac
 }
 
 # 虚拟内存管理函数
 manage_swap() {
-    echo -e ${white}"====="${green}系统管理-虚拟内存${white}"====="${background}
-    echo -e  ${green}1.  ${cyan}查看当前虚拟内存状态${background}
-    echo -e  ${green}2.  ${cyan}创建新的swap交换分区${background}
-    echo -e  ${green}3.  ${cyan}调整swappiness参数${background}
-    echo -e  ${green}4.  ${cyan}删除swap交换分区${background}
-    echo -e  ${green}0.  ${cyan}返回主菜单${background}
+    echo -e "${white}=====${green}系统管理-虚拟内存${white}=====${background}"
+    echo -e "${green}1.  ${cyan}查看当前虚拟内存状态${background}"
+    echo -e "${green}2.  ${cyan}创建新的swap交换分区${background}"
+    echo -e "${green}3.  ${cyan}调整swappiness参数${background}"
+    echo -e "${green}4.  ${cyan}删除swap交换分区${background}"
+    echo -e "${green}0.  ${cyan}返回主菜单${background}"
     echo "========================="
-    echo -e ${green}说明: ${cyan}初次使用时建议 创建新的swap交换分区2GB 并 调整swappiness参数为20${background}
+    echo -e "${green}说明: ${cyan}初次使用时建议 创建新的swap交换分区2GB 并 调整swappiness参数为20${background}"
     echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read num
+    echo -en "${green}请输入您的选项: ${background}";read num
     
     case ${num} in
     1)
-        echo -e ${yellow}当前虚拟内存状态:${background}
+        echo -e "${yellow}当前虚拟内存状态:${background}"
         free -h
         echo
         swapon --show
         echo
-        echo -e ${yellow}当前swappiness值:${background}
+        echo -e "${yellow}当前swappiness值:${background}"
         cat /proc/sys/vm/swappiness
         pause
         ;;
     2)
-        echo -en ${cyan}请输入要创建的swap分区大小\(GB\) （建议：如果系统内存是 2GB 的话建议设置虚拟内存也为 2GB，输入 2 即可）: ${background};read swap_size
+        echo -en "${cyan}请输入要创建的swap分区大小(GB) （建议：如果系统内存是 2GB 的话建议设置虚拟内存也为 2GB，输入 2 即可）: ${background}";read swap_size
         if [[ ! "${swap_size}" =~ ^[0-9]+$ ]] || [ ${swap_size} -le 0 ]; then
-            echo -e ${red}请输入大于0的有效数字${background}
+            echo -e "${red}请输入大于0的有效数字${background}"
             pause
             return
         fi
         
         available_space=$(df -BG --output=avail / | tail -n 1 | tr -d 'G' | tr -d ' ')
         if [ ${swap_size} -gt ${available_space} ]; then
-            echo -e ${red}磁盘空间不足，可用空间: ${available_space}GB${background}
+            echo -e "${red}磁盘空间不足，可用空间: ${available_space}GB${background}"
             pause
             return
         fi
         
         if [ ${swap_size} -gt 64 ]; then
-            echo -e ${yellow}警告: 创建过大的swap分区可能导致系统不稳定${background}
-            echo -en ${cyan}确定要创建${swap_size}GB的swap分区吗？[y/n]: ${background};read confirm
+            echo -e "${yellow}警告: 创建过大的swap分区可能导致系统不稳定${background}"
+            echo -en "${cyan}确定要创建${swap_size}GB的swap分区吗？[y/n]: ${background}";read confirm
             if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-                echo -e ${yellow}已取消创建swap分区${background}
+                echo -e "${yellow}已取消创建swap分区${background}"
                 pause
                 return
             fi
@@ -147,28 +147,28 @@ manage_swap() {
 
         swap_file="/swapfile"
         if [ -f "${swap_file}" ]; then
-            echo -e ${yellow}已存在swap文件${background}
-            echo -en ${cyan}是否删除现有swap文件并创建新的? [y/n]: ${background};read confirm
+            echo -e "${yellow}已存在swap文件${background}"
+            echo -en "${cyan}是否删除现有swap文件并创建新的? [y/n]: ${background}";read confirm
             if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
                 if swapon --show | grep -q "/swapfile"; then
                     swapoff /swapfile
                     sed -i '/\/swapfile/d' /etc/fstab
                 fi
                 rm -f /swapfile
-                echo -e ${green}已删除原有swap文件${background}
+                echo -e "${green}已删除原有swap文件${background}"
             else
-                echo -e ${yellow}已取消操作${background}
+                echo -e "${yellow}已取消操作${background}"
                 pause
                 return
             fi
         fi
         
-        echo -e ${yellow}正在创建${swap_size}GB的swap文件，请稍候...${background}
+        echo -e "${yellow}正在创建${swap_size}GB的swap文件，请稍候...${background}"
         
         if command -v fallocate >/dev/null 2>&1; then
-            echo -e ${cyan}使用fallocate创建swap文件...${background}
+            echo -e "${cyan}使用fallocate创建swap文件...${background}"
             if ! fallocate -l ${swap_size}G ${swap_file}; then
-                echo -e ${red}创建swap文件失败，尝试使用传统方法...${background}
+                echo -e "${red}创建swap文件失败，尝试使用传统方法...${background}"
                 create_swap_traditional=true
             fi
         else
@@ -176,11 +176,11 @@ manage_swap() {
         fi
         
         if [ "$create_swap_traditional" = true ]; then
-            echo -e ${cyan}使用dd创建swap文件，这可能需要较长时间...${background}
+            echo -e "${cyan}使用dd创建swap文件，这可能需要较长时间...${background}"
             for i in $(seq 1 ${swap_size}); do
-                echo -e ${cyan}正在创建第 $i/${swap_size} GB...${background}
+                echo -e "${cyan}正在创建第 $i/${swap_size} GB...${background}"
                 if ! dd if=/dev/zero of=${swap_file} bs=1G seek=$((i-1)) count=1 status=progress; then
-                    echo -e ${red}创建swap文件失败${background}
+                    echo -e "${red}创建swap文件失败${background}"
                     rm -f ${swap_file}
                     pause
                     return
@@ -190,14 +190,14 @@ manage_swap() {
         
         chmod 600 ${swap_file}
         if ! mkswap ${swap_file}; then
-            echo -e ${red}格式化swap文件失败${background}
+            echo -e "${red}格式化swap文件失败${background}"
             rm -f ${swap_file}
             pause
             return
         fi
         
         if ! swapon ${swap_file}; then
-            echo -e ${red}激活swap分区失败${background}
+            echo -e "${red}激活swap分区失败${background}"
             rm -f ${swap_file}
             pause
             return
@@ -207,25 +207,25 @@ manage_swap() {
             echo "${swap_file} none swap sw 0 0" >> /etc/fstab
         fi
         
-        echo -e ${green}swap分区创建完成并已激活${background}
-        echo -e ${yellow}当前虚拟内存状态:${background}
+        echo -e "${green}swap分区创建完成并已激活${background}"
+        echo -e "${yellow}当前虚拟内存状态:${background}"
         free -h | grep -i swap
         pause
         ;;
     3)
-        echo -e ${yellow}当前swappiness值:${background}
+        echo -e "${yellow}当前swappiness值:${background}"
         current_swappiness=$(cat /proc/sys/vm/swappiness)
-        echo ${current_swappiness}
-        echo -e ${cyan}swappiness范围: 0-100${background}
-        echo -e ${cyan}较低的值减少swap使用，较高的值增加swap使用 （建议值为 20） ${background}
-        echo -en ${cyan}请输入新的swappiness值: ${background};read new_swappiness
+        echo "${current_swappiness}"
+        echo -e "${cyan}swappiness范围: 0-100${background}"
+        echo -e "${cyan}较低的值减少swap使用，较高的值增加swap使用 （建议值为 20） ${background}"
+        echo -en "${cyan}请输入新的swappiness值: ${background}";read new_swappiness
         
         if [[ "${new_swappiness}" =~ ^[0-9]+$ ]] && [ ${new_swappiness} -ge 0 ] && [ ${new_swappiness} -le 100 ]; then
             sysctl vm.swappiness=${new_swappiness}
             echo "vm.swappiness=${new_swappiness}" > /etc/sysctl.d/99-swappiness.conf
-            echo -e ${green}swappiness已设置为${new_swappiness}${background}
+            echo -e "${green}swappiness已设置为${new_swappiness}${background}"
         else
-            echo -e ${red}请输入0-100之间的有效数字${background}
+            echo -e "${red}请输入0-100之间的有效数字${background}"
         fi
         pause
         ;;
@@ -234,38 +234,38 @@ manage_swap() {
             swapoff /swapfile
             sed -i '/\/swapfile/d' /etc/fstab
             rm -f /swapfile
-            echo -e ${green}swap分区已删除${background}
+            echo -e "${green}swap分区已删除${background}"
         else
-            echo -e ${yellow}未找到活动的swap分区${background}
+            echo -e "${yellow}未找到活动的swap分区${background}"
         fi
         pause
         ;;
     0) return ;;
-    *) echo -e ${red}输入错误${background}; pause ;;
+    *) echo -e "${red}输入错误${background}"; pause ;;
     esac
 }
 
 # 安装常用字体函数
 install_fonts() {
     fonts_dir="/usr/share/fonts/custom"
-    echo -e ${white}"====="${green}系统管理-安装字体${white}"====="${background}
-    echo -e  ${green}1.  ${cyan}查看已安装字体${background}
-    echo -e  ${green}2.  ${cyan}安装中文字体包${background}
-    echo -e  ${green}3.  ${cyan}安装编程字体${background}
-    echo -e  ${green}4.  ${cyan}安装表情符号字体${background}
-    echo -e  ${green}5.  ${cyan}刷新字体缓存${background}
-    echo -e  ${green}0.  ${cyan}返回主菜单${background}
+    echo -e "${white}=====${green}系统管理-安装字体${white}=====${background}"
+    echo -e "${green}1.  ${cyan}查看已安装字体${background}"
+    echo -e "${green}2.  ${cyan}安装中文字体包${background}"
+    echo -e "${green}3.  ${cyan}安装编程字体${background}"
+    echo -e "${green}4.  ${cyan}安装表情符号字体${background}"
+    echo -e "${green}5.  ${cyan}刷新字体缓存${background}"
+    echo -e "${green}0.  ${cyan}返回主菜单${background}"
     echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read num
+    echo -en "${green}请输入您的选项: ${background}";read num
     
     case ${num} in
     1)
-        echo -e ${yellow}系统已安装字体列表:${background}
+        echo -e "${yellow}系统已安装字体列表:${background}"
         fc-list : family | sort
         pause
         ;;
     2)
-        echo -e ${yellow}正在安装中文字体包...${background}
+        echo -e "${yellow}正在安装中文字体包...${background}"
         if command -v apt >/dev/null 2>&1; then
             apt update && apt install -y wget unzip fontconfig
         elif command -v yum >/dev/null 2>&1; then
@@ -277,13 +277,13 @@ install_fonts() {
         fi
         
         mkdir -p ${fonts_dir}/chinese
-        echo -e ${cyan}正在下载思源黑体...${background}
+        echo -e "${cyan}正在下载思源黑体...${background}"
         wget -q --show-progress ${GithubMirror}https://github.com/adobe-fonts/source-han-sans/releases/download/2.004R/SourceHanSansSC.zip -O /tmp/SourceHanSansSC.zip
         unzip -q /tmp/SourceHanSansSC.zip -d /tmp/SourceHanSansSC
         cp /tmp/SourceHanSansSC/SubsetOTF/SC/*.otf ${fonts_dir}/chinese/
         rm -rf /tmp/SourceHanSansSC /tmp/SourceHanSansSC.zip
         
-        echo -e ${cyan}正在下载文泉驿字体...${background}
+        echo -e "${cyan}正在下载文泉驿字体...${background}"
         if command -v apt >/dev/null 2>&1; then
             apt install -y fonts-wqy-microhei fonts-wqy-zenhei
         elif command -v yum >/dev/null 2>&1; then
@@ -295,11 +295,11 @@ install_fonts() {
         fi
         
         fc-cache -fv
-        echo -e ${green}中文字体安装完成并已刷新字体缓存${background}
+        echo -e "${green}中文字体安装完成并已刷新字体缓存${background}"
         pause
         ;;
     3)
-        echo -e ${yellow}正在安装编程字体...${background}
+        echo -e "${yellow}正在安装编程字体...${background}"
         if command -v apt >/dev/null 2>&1; then
             apt update && apt install -y wget unzip fontconfig
         elif command -v yum >/dev/null 2>&1; then
@@ -309,24 +309,24 @@ install_fonts() {
         fi
         
         mkdir -p ${fonts_dir}/programming
-        echo -e ${cyan}正在下载JetBrains Mono字体...${background}
+        echo -e "${cyan}正在下载JetBrains Mono字体...${background}"
         wget -q --show-progress ${GithubMirror}https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip -O /tmp/JetBrainsMono.zip
         unzip -q /tmp/JetBrainsMono.zip -d /tmp/JetBrainsMono
         cp /tmp/JetBrainsMono/fonts/ttf/*.ttf ${fonts_dir}/programming/
         rm -rf /tmp/JetBrainsMono /tmp/JetBrainsMono.zip
         
-        echo -e ${cyan}正在下载Fira Code字体...${background}
+        echo -e "${cyan}正在下载Fira Code字体...${background}"
         wget -q --show-progress ${GithubMirror}https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip -O /tmp/FiraCode.zip
         unzip -q /tmp/FiraCode.zip -d /tmp/FiraCode
         cp /tmp/FiraCode/ttf/*.ttf ${fonts_dir}/programming/
         rm -rf /tmp/FiraCode /tmp/FiraCode.zip
         
         fc-cache -fv
-        echo -e ${green}编程字体安装完成并已刷新字体缓存${background}
+        echo -e "${green}编程字体安装完成并已刷新字体缓存${background}"
         pause
         ;;
     4)
-        echo -e ${yellow}正在安装表情符号字体...${background}
+        echo -e "${yellow}正在安装表情符号字体...${background}"
         if command -v apt >/dev/null 2>&1; then
             apt update && apt install -y wget fontconfig
         elif command -v yum >/dev/null 2>&1; then
@@ -334,50 +334,50 @@ install_fonts() {
         fi
         
         mkdir -p ${fonts_dir}/emoji
-        echo -e ${cyan}正在下载Noto Color Emoji字体...${background}
+        echo -e "${cyan}正在下载Noto Color Emoji字体...${background}"
         wget -q --show-progress ${GithubMirror}https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf -O ${fonts_dir}/emoji/NotoColorEmoji.ttf
         
         fc-cache -fv
-        echo -e ${green}表情符号字体安装完成并已刷新字体缓存${background}
+        echo -e "${green}表情符号字体安装完成并已刷新字体缓存${background}"
         pause
         ;;
     5)
-        echo -e ${yellow}正在刷新字体缓存...${background}
+        echo -e "${yellow}正在刷新字体缓存...${background}"
         fc-cache -fv
-        echo -e ${green}字体缓存刷新完成${background}
+        echo -e "${green}字体缓存刷新完成${background}"
         pause
         ;;
     0) return ;;
-    *) echo -e ${red}输入错误${background}; pause ;;
+    *) echo -e "${red}输入错误${background}"; pause ;;
     esac
 }
 
 # 系统垃圾清理函数
 clean_system() {
-    echo -e ${white}"====="${green}系统管理-清理垃圾${white}"====="${background}
-    echo -e  ${green}1.  ${cyan}常规清理 \(系统日志、Redis日志、系统缓存\)${background}
-    echo -e  ${green}0.  ${cyan}返回主菜单${background}
+    echo -e "${white}=====${green}系统管理-清理垃圾${white}=====${background}"
+    echo -e "${green}1.  ${cyan}常规清理 (系统日志、Redis日志、系统缓存)${background}"
+    echo -e "${green}0.  ${cyan}返回主菜单${background}"
     echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read num
+    echo -en "${green}请输入您的选项: ${background}";read num
 
     case ${num} in
     1)
-        echo -e ${yellow}正在清理 systemd 日志 \(保留最近100M\)...${background}
+        echo -e "${yellow}正在清理 systemd 日志 (保留最近100M)...${background}"
         journalctl --vacuum-size=100M
 
-        echo -e ${yellow}正在清理暴力登录日志...${background}
+        echo -e "${yellow}正在清理暴力登录日志...${background}"
         [ -f /var/log/btmp ] && truncate -s 0 /var/log/btmp
         [ -f /var/log/btmp.1 ] && truncate -s 0 /var/log/btmp.1
 
-        echo -e ${yellow}正在清理认证日志...${background}
+        echo -e "${yellow}正在清理认证日志...${background}"
         [ -f /var/log/auth.log ] && truncate -s 0 /var/log/auth.log
         [ -f /var/log/auth.log.1 ] && truncate -s 0 /var/log/auth.log.1
         [ -f /var/log/secure ] && truncate -s 0 /var/log/secure
 
-        echo -e ${yellow}正在清理 redis 日志...${background}
+        echo -e "${yellow}正在清理 redis 日志...${background}"
         [ -f /var/log/redis/redis-server.log ] && truncate -s 0 /var/log/redis/redis-server.log
 
-        echo -e ${yellow}正在清理包管理器缓存...${background}
+        echo -e "${yellow}正在清理包管理器缓存...${background}"
         if command -v apt >/dev/null 2>&1; then
             apt autoremove -y && apt clean
         elif command -v yum >/dev/null 2>&1; then
@@ -388,25 +388,25 @@ clean_system() {
             pacman -Scc --noconfirm
         fi
 
-        echo -e ${green}常规清理完成！${background}
+        echo -e "${green}常规清理完成！${background}"
         pause
         ;;
     0) return ;;
-    *) echo -e ${red}输入错误${background}; pause ;;
+    *) echo -e "${red}输入错误${background}"; pause ;;
     esac
 }
 
 # 一键开启 BBR 函数
 manage_bbr() {
-    echo -e ${white}"====="${green}系统管理-开启BBR${white}"====="${background}
-    echo -e ${yellow}正在检测当前BBR开启状态...${background}
+    echo -e "${white}=====${green}系统管理-开启BBR${white}=====${background}"
+    echo -e "${yellow}正在检测当前BBR开启状态...${background}"
     
     current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
     if [ "$current_cc" = "bbr" ]; then
-        echo -e ${green}检测结果：当前系统已成功开启 BBR 加速！${background}
+        echo -e "${green}检测结果：当前系统已成功开启 BBR 加速！${background}"
         lsmod | grep bbr
     else
-        echo -e ${yellow}当前系统未开启 BBR，正在为您自动配置并开启...${background}
+        echo -e "${yellow}当前系统未开启 BBR，正在为您自动配置并开启...${background}"
         
         if ! grep -q "net.core.default_qdisc" /etc/sysctl.conf; then
             echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
@@ -424,10 +424,10 @@ manage_bbr() {
         
         new_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
         if [ "$new_cc" = "bbr" ]; then
-            echo -e ${green}恭喜，BBR 开启成功！网络吞吐量已优化。${background}
+            echo -e "${green}恭喜，BBR 开启成功！网络吞吐量已优化。${background}"
             lsmod | grep bbr
         else
-            echo -e ${red}BBR 开启失败！请确认您的系统内核版本是否大于等于 4.9 。${background}
+            echo -e "${red}BBR 开启失败！请确认您的系统内核版本是否大于等于 4.9 。${background}"
         fi
     fi
     pause
@@ -508,22 +508,22 @@ manage_singbox() {
         SINGBOX_STATUS="${yellow}● 未安装${background}"
     fi
 
-    echo -e ${white}"====="${green}系统管理-Sing-box \(Hysteria2\)${white}"====="${background}
-    echo -e  ${green}1.  ${cyan}部署 服务端 \(远程节点 / 接收外网访问\)${background}
-    echo -e  ${green}2.  ${cyan}部署 客户端 \(本地设备 / 连接到服务端\)${background}
-    echo -e  ${green}3.  ${cyan}启动 Sing-box${background}
-    echo -e  ${green}4.  ${cyan}停止 Sing-box${background}
-    echo -e  ${green}5.  ${cyan}重启 Sing-box${background}
-    echo -e  ${green}6.  ${cyan}查看连接信息及使用帮助${background}
-    echo -e  ${green}7.  ${cyan}卸载 Sing-box${background}
-    echo -e  ${green}0.  ${cyan}返回主菜单${background}
+    echo -e "${white}=====${green}系统管理-Sing-box (Hysteria2)${white}=====${background}"
+    echo -e "${green}1.  ${cyan}部署 服务端 (远程节点 / 接收外网访问)${background}"
+    echo -e "${green}2.  ${cyan}部署 客户端 (本地设备 / 连接到服务端)${background}"
+    echo -e "${green}3.  ${cyan}启动 Sing-box${background}"
+    echo -e "${green}4.  ${cyan}停止 Sing-box${background}"
+    echo -e "${green}5.  ${cyan}重启 Sing-box${background}"
+    echo -e "${green}6.  ${cyan}查看连接信息及使用帮助${background}"
+    echo -e "${green}7.  ${cyan}卸载 Sing-box${background}"
+    echo -e "${green}0.  ${cyan}返回主菜单${background}"
     echo "========================="
     echo -e "  当前状态: ${SINGBOX_STATUS}"
     if [ "$STATUS_CHECK" == "true" ]; then
         echo -e "  内存占用: ${cyan}${MEM_USAGE}${background}"
     fi
     echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read num
+    echo -en "${green}请输入您的选项: ${background}";read num
 
     case ${num} in
     1)
@@ -727,7 +727,7 @@ EOF
         manage_singbox
         ;;
     0) return ;;
-    *) echo -e ${red}输入错误${background}; pause; manage_singbox ;;
+    *) echo -e "${red}输入错误${background}"; pause; manage_singbox ;;
     esac
 }
 
@@ -751,6 +751,384 @@ start_singbox_docker() {
     cat ${INFO_FILE}
     pause
     manage_singbox
+}
+
+# Hapi / Claude Code 管理辅助函数
+HAPI_HUB_TMUX_NAME="hapi_hub"
+HAPI_SELECTED_WORKSPACE=""
+HAPI_HUB_URL=""
+
+hapi_load_node_env() {
+    if [ -d "/usr/local/node/bin" ]; then
+        PATH="${PATH}:/usr/local/node/bin"
+    fi
+    if [ ! -d "${HOME}/.local/share/pnpm" ]; then
+        mkdir -p "${HOME}/.local/share/pnpm"
+    fi
+    PATH="${PATH}:${HOME}/.local/share/pnpm:/root/.local/share/pnpm"
+    PNPM_HOME="${HOME}/.local/share/pnpm"
+    export PATH PNPM_HOME
+    hash -r 2>/dev/null
+}
+
+hapi_ensure_pnpm() {
+    hapi_load_node_env
+    if command -v pnpm >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if command -v npm >/dev/null 2>&1; then
+        echo -e "${yellow}未检测到 pnpm，正在使用 npm 安装 pnpm...${background}"
+        npm install -g pnpm@latest
+        hapi_load_node_env
+    fi
+
+    if ! command -v pnpm >/dev/null 2>&1; then
+        echo -e "${red}未检测到 pnpm/npm，请先安装 Node.js 环境。${background}"
+        return 1
+    fi
+}
+
+hapi_ensure_command() {
+    hapi_load_node_env
+    if ! command -v hapi >/dev/null 2>&1; then
+        echo -e "${red}未检测到 hapi 命令，请先安装 Hapi。${background}"
+        return 1
+    fi
+}
+
+hapi_ensure_tmux() {
+    if command -v tmux >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo -e "${yellow}未检测到 tmux，正在尝试自动安装...${background}"
+    if command -v apt >/dev/null 2>&1; then
+        apt update && apt install -y tmux
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y && apt-get install -y tmux
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y tmux
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y tmux
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm --needed tmux
+    fi
+
+    if ! command -v tmux >/dev/null 2>&1; then
+        echo -e "${red}tmux 安装失败，请手动安装后重试。${background}"
+        return 1
+    fi
+}
+
+hapi_json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+hapi_add_1m_suffix() {
+    local model="$1"
+    local enable_1m="$2"
+    local lower_model
+    lower_model=$(printf '%s' "${model}" | tr '[:upper:]' '[:lower:]')
+    if [ "${enable_1m}" = "true" ] && [[ "${lower_model}" != *"[1m]"* ]]; then
+        model="${model}[1M]"
+    fi
+    printf '%s' "${model}"
+}
+
+hapi_install_claude_code() {
+    hapi_ensure_pnpm || return
+    echo -e "${yellow}正在安装 / 更新 Claude Code...${background}"
+    pnpm add -g @anthropic-ai/claude-code --allow-build
+    if command -v claude >/dev/null 2>&1; then
+        claude --version
+    fi
+}
+
+hapi_install_hapi() {
+    hapi_ensure_pnpm || return
+    echo -e "${yellow}正在安装 / 更新 Hapi...${background}"
+    pnpm add -g @twsxtd/hapi
+    if command -v hapi >/dev/null 2>&1; then
+        hapi --version
+    fi
+}
+
+hapi_config_claude() {
+    local config_dir="${HOME}/.claude"
+    local settings_file="${config_dir}/settings.json"
+    local auth_token base_url sonnet_model opus_model enable_1m
+    local sonnet_value opus_value backup_file
+    local auth_token_json base_url_json sonnet_json opus_json
+
+    if [ -f "${settings_file}" ]; then
+        echo -en "${yellow}检测到已存在 Claude Code 配置，继续将覆盖原有配置！是否继续？[y/N]: ${background}"
+        read -r overwrite
+        if [[ "${overwrite}" != "y" && "${overwrite}" != "Y" ]]; then
+            echo -e "${yellow}已取消配置。${background}"
+            return
+        fi
+        backup_file="${settings_file}.bak.$(date +%Y%m%d%H%M%S)"
+        cp -a "${settings_file}" "${backup_file}"
+        echo -e "${green}已备份原配置到: ${backup_file}${background}"
+    fi
+
+    while [ -z "${auth_token}" ]; do
+        echo -en "${cyan}请输入 ANTHROPIC_AUTH_TOKEN: ${background}"
+        read -rs auth_token
+        echo
+        if [ -z "${auth_token}" ]; then
+            echo -e "${red}ANTHROPIC_AUTH_TOKEN 不能为空。${background}"
+        fi
+    done
+
+    echo -en "${cyan}请输入 ANTHROPIC_BASE_URL (默认 https://anyrouter.top): ${background}"
+        read -r base_url
+    base_url=${base_url:-https://anyrouter.top}
+
+    while [ -z "${sonnet_model}" ]; do
+        echo -en "${cyan}请输入 SONNET_MODEL: ${background}"
+        read -r sonnet_model
+        if [ -z "${sonnet_model}" ]; then
+            echo -e "${red}SONNET_MODEL 不能为空。${background}"
+        fi
+    done
+
+    while [ -z "${opus_model}" ]; do
+        echo -en "${cyan}请输入 OPUS_MODEL: ${background}"
+        read -r opus_model
+        if [ -z "${opus_model}" ]; then
+            echo -e "${red}OPUS_MODEL 不能为空。${background}"
+        fi
+    done
+
+    echo -en "${cyan}是否开启 [1M] 上下文？[Y/n]: ${background}"
+    read -r enable_1m
+    if [[ "${enable_1m}" == "n" || "${enable_1m}" == "N" ]]; then
+        enable_1m="false"
+    else
+        enable_1m="true"
+    fi
+
+    sonnet_value=$(hapi_add_1m_suffix "${sonnet_model}" "${enable_1m}")
+    opus_value=$(hapi_add_1m_suffix "${opus_model}" "${enable_1m}")
+    auth_token_json=$(hapi_json_escape "${auth_token}")
+    base_url_json=$(hapi_json_escape "${base_url}")
+    sonnet_json=$(hapi_json_escape "${sonnet_value}")
+    opus_json=$(hapi_json_escape "${opus_value}")
+
+    mkdir -p "${config_dir}"
+    cat > "${settings_file}" << EOF
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "${auth_token_json}",
+    "ANTHROPIC_BASE_URL": "${base_url_json}",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${sonnet_json}",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "${opus_json}",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "${opus_json}",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "${sonnet_json}",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "${sonnet_json}",
+    "ANTHROPIC_MODEL": "${sonnet_json}",
+    "ANTHROPIC_REASONING_MODEL": "${opus_json}"
+  },
+  "includeCoAuthoredBy": false
+}
+EOF
+    chmod 600 "${settings_file}"
+    echo -e "${green}Claude Code 配置已写入: ${settings_file}${background}"
+}
+
+hapi_prepare_workspace() {
+    local workspace_root="$1"
+    case "${workspace_root}" in
+        "~")
+            workspace_root="${HOME}"
+            ;;
+        "~/"*)
+            workspace_root="${HOME}/${workspace_root#~/}"
+            ;;
+    esac
+
+    if [ ! -d "${workspace_root}" ]; then
+        echo -en "${yellow}目录不存在: ${workspace_root}，是否创建？[Y/n]: ${background}"
+        read -r create_workspace
+        if [[ "${create_workspace}" == "n" || "${create_workspace}" == "N" ]]; then
+            echo -e "${yellow}已取消启动 runner。${background}"
+            return 1
+        fi
+        if ! mkdir -p "${workspace_root}"; then
+            echo -e "${red}目录创建失败: ${workspace_root}${background}"
+            return 1
+        fi
+        echo -e "${green}已创建目录: ${workspace_root}${background}"
+    fi
+
+    if [ ! -d "${workspace_root}" ]; then
+        echo -e "${red}workspace-root 不是有效目录: ${workspace_root}${background}"
+        return 1
+    fi
+
+    HAPI_SELECTED_WORKSPACE="${workspace_root}"
+}
+
+hapi_select_workspace() {
+    local num custom_path
+    echo -e "${white}=====${green}选择 Hapi Runner 工作目录${white}=====${background}"
+    echo -e "${green}1.  ${cyan}${HOME}/TRSS-Yunzai${background}"
+    echo -e "${green}2.  ${cyan}${HOME}/AstrBot${background}"
+    echo -e "${green}3.  ${cyan}自定义目录${background}"
+    echo -e "${green}0.  ${cyan}取消${background}"
+    echo "========================="
+    echo -en "${green}请输入您的选项: ${background}"; read -r num
+
+    case "${num}" in
+    1) hapi_prepare_workspace "${HOME}/TRSS-Yunzai" ;;
+    2) hapi_prepare_workspace "${HOME}/AstrBot" ;;
+    3)
+        echo -en "${cyan}请输入 workspace-root 路径: ${background}"
+        read -r custom_path
+        if [ -z "${custom_path}" ]; then
+            echo -e "${red}workspace-root 不能为空。${background}"
+            return 1
+        fi
+        hapi_prepare_workspace "${custom_path}"
+        ;;
+    0) return 1 ;;
+    *) echo -e "${red}输入错误${background}"; return 1 ;;
+    esac
+}
+
+hapi_start_runner() {
+    hapi_ensure_command || return
+    echo -e "${yellow}提示：Hapi runner 是全局单实例，新启动会覆盖当前 runner 的 workspace-root。${background}"
+    hapi_select_workspace || return
+    echo -e "${yellow}正在启动 Hapi runner: ${HAPI_SELECTED_WORKSPACE}${background}"
+    hapi runner start --workspace-root "${HAPI_SELECTED_WORKSPACE}"
+}
+
+hapi_capture_hub_url() {
+    local hub_output
+    HAPI_HUB_URL=""
+    if ! tmux has-session -t "${HAPI_HUB_TMUX_NAME}" 2>/dev/null; then
+        return 1
+    fi
+    hub_output=$(tmux capture-pane -pt "${HAPI_HUB_TMUX_NAME}" -S -200 2>/dev/null)
+    HAPI_HUB_URL=$(printf '%s\n' "${hub_output}" | grep -Eo 'https://app\.hapi\.run/[^[:space:]]+' | tail -n 1)
+    [ -n "${HAPI_HUB_URL}" ]
+}
+
+hapi_show_hub_url() {
+    if hapi_capture_hub_url; then
+        echo -e "${red}重要：以下 URL 包含访问 token，不要发送给其他人！${background}"
+        echo -e "${red}${HAPI_HUB_URL}${background}"
+    else
+        echo -e "${yellow}暂未提取到 Hapi Hub URL，请稍后重试或查看 tmux 日志。${background}"
+        return 1
+    fi
+}
+
+hapi_start_hub() {
+    hapi_ensure_command || return
+    hapi_ensure_tmux || return
+
+    if tmux has-session -t "${HAPI_HUB_TMUX_NAME}" 2>/dev/null; then
+        echo -e "${green}Hapi Hub 已在后台运行。${background}"
+        if hapi_show_hub_url; then
+            return
+        fi
+        echo -e "${yellow}现有 Hapi Hub 未提取到 URL，准备重启后重试。${background}"
+        tmux kill-session -t "${HAPI_HUB_TMUX_NAME}" >/dev/null 2>&1
+    fi
+
+    local attempt wait_count
+    attempt=1
+    while [ "${attempt}" -le 3 ]; do
+        echo -e "${yellow}正在启动 Hapi Hub (第 ${attempt}/3 次)...${background}"
+        tmux kill-session -t "${HAPI_HUB_TMUX_NAME}" >/dev/null 2>&1
+        if ! tmux new-session -d -s "${HAPI_HUB_TMUX_NAME}" "export PATH=\"${PATH}\"; export PNPM_HOME=\"${PNPM_HOME}\"; hapi hub --relay"; then
+            echo -e "${red}Hapi Hub tmux 会话创建失败。${background}"
+            return 1
+        fi
+
+        wait_count=0
+        while [ "${wait_count}" -lt 20 ]; do
+            sleep 1
+            if hapi_capture_hub_url; then
+                hapi_show_hub_url
+                echo -e "${green}Hapi Hub 已在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
+                return 0
+            fi
+            wait_count=$((wait_count + 1))
+        done
+
+        echo -e "${yellow}本次未提取到 Hapi Hub URL，正在重启重试...${background}"
+        tmux kill-session -t "${HAPI_HUB_TMUX_NAME}" >/dev/null 2>&1
+        attempt=$((attempt + 1))
+    done
+
+    echo -e "${red}连续 3 次未提取到 Hapi Hub URL，请稍后使用“查看 hub URL”或检查 tmux 日志。${background}"
+}
+
+hapi_stop_all() {
+    hapi_load_node_env
+    if command -v tmux >/dev/null 2>&1 && tmux has-session -t "${HAPI_HUB_TMUX_NAME}" 2>/dev/null; then
+        tmux kill-session -t "${HAPI_HUB_TMUX_NAME}" >/dev/null 2>&1
+        echo -e "${green}已停止 Hapi Hub tmux 会话。${background}"
+    else
+        echo -e "${yellow}未检测到正在运行的 Hapi Hub tmux 会话。${background}"
+    fi
+
+    if command -v hapi >/dev/null 2>&1; then
+        echo -e "${yellow}正在执行 hapi doctor clean 清理 runner 与相关进程...${background}"
+        hapi doctor clean
+    else
+        echo -e "${yellow}未检测到 hapi 命令，跳过 runner 清理。${background}"
+    fi
+}
+
+hapi_show_versions() {
+    hapi_load_node_env
+    echo -e "${white}=====${green}Hapi / Claude Code 版本${white}=====${background}"
+    if command -v claude >/dev/null 2>&1; then
+        claude --version
+    else
+        echo -e "${yellow}未检测到 claude 命令。${background}"
+    fi
+    if command -v hapi >/dev/null 2>&1; then
+        hapi --version
+    else
+        echo -e "${yellow}未检测到 hapi 命令。${background}"
+    fi
+}
+
+manage_hapi() {
+    echo -e "${white}=====${green}系统管理-Hapi / Claude Code${white}=====${background}"
+    echo -e "${green}1.  ${cyan}安装 Claude Code${background}"
+    echo -e "${green}2.  ${cyan}配置 Claude Code${background}"
+    echo -e "${green}3.  ${cyan}安装 Hapi${background}"
+    echo -e "${green}4.  ${cyan}启动 Hapi runner${background}"
+    echo -e "${green}5.  ${cyan}启动 Hapi hub${background}"
+    echo -e "${green}6.  ${cyan}查看 hub URL${background}"
+    echo -e "${green}7.  ${cyan}查看 runner 状态${background}"
+    echo -e "${green}8.  ${cyan}停止 Hapi${background}"
+    echo -e "${green}9.  ${cyan}查看版本${background}"
+    echo -e "${green}0.  ${cyan}返回主菜单${background}"
+    echo "========================="
+    echo -en "${green}请输入您的选项: ${background}"; read -r num
+
+    case "${num}" in
+    1) hapi_install_claude_code; pause; manage_hapi ;;
+    2) hapi_config_claude; pause; manage_hapi ;;
+    3) hapi_install_hapi; pause; manage_hapi ;;
+    4) hapi_start_runner; pause; manage_hapi ;;
+    5) hapi_start_hub; pause; manage_hapi ;;
+    6) hapi_ensure_tmux && hapi_show_hub_url; pause; manage_hapi ;;
+    7) if hapi_ensure_command; then hapi runner status; fi; pause; manage_hapi ;;
+    8) hapi_stop_all; pause; manage_hapi ;;
+    9) hapi_show_versions; pause; manage_hapi ;;
+    0) return ;;
+    *) echo -e "${red}输入错误${background}"; pause; manage_hapi ;;
+    esac
 }
 
 # 自动加载 Clash 环境变量辅助函数， 修复在非交互式脚本中“未检测到 clashctl”的问题
@@ -1002,23 +1380,29 @@ manage_clash() {
 
 # 主菜单函数
 main() {
+    local system_info
+    local memory_info
+    system_info="$(uname -s) $(uname -r) $(uname -m)"
+    memory_info="$(free -h | grep Mem | awk '{print $3"/"$2" 使用"}')"
+
     echo
-    echo -e ${white}"====="${green}呆毛版-系统管理${white}"====="${background}
-    echo -e  ${green}1.  ${cyan}Hosts文件管理${background}
-    echo -e  ${green}2.  ${cyan}虚拟内存管理${background}
-    echo -e  ${green}3.  ${cyan}安装常用字体${background}
-    echo -e  ${green}4.  ${cyan}清理系统垃圾${background}
-    echo -e  ${green}5.  ${cyan}开启BBR网络加速${background}
-    echo -e  ${green}6.  ${cyan}Sing-box正向代理${background}
-    echo -e  ${green}7.  ${cyan}安装docker代理${background}
-    echo -e  ${green}8.  ${cyan}Clash CLI${background}
-    echo -e  ${green}0.  ${cyan}退出${background}
+    echo -e "${white}=====${green}呆毛版-系统管理${white}=====${background}"
+    echo -e "${green}1.  ${cyan}Hosts文件管理${background}"
+    echo -e "${green}2.  ${cyan}虚拟内存管理${background}"
+    echo -e "${green}3.  ${cyan}安装常用字体${background}"
+    echo -e "${green}4.  ${cyan}清理系统垃圾${background}"
+    echo -e "${green}5.  ${cyan}开启BBR网络加速${background}"
+    echo -e "${green}6.  ${cyan}Sing-box正向代理${background}"
+    echo -e "${green}7.  ${cyan}安装docker代理${background}"
+    echo -e "${green}8.  ${cyan}Clash CLI${background}"
+    echo -e "${green}9.  ${cyan}Hapi / Claude Code${background}"
+    echo -e "${green}0.  ${cyan}退出${background}"
     echo "========================="
-    echo -e ${green}系统信息: $(uname -s) $(uname -r) $(uname -m)${background}
-    echo -e ${green}内存状态: $(free -h | grep Mem | awk '{print $3"/"$2" 使用"}')${background}
-    echo -e ${green}QQ群: ${cyan}呆毛版-QQ群:1022982073${background}
+    echo -e "${green}系统信息: ${system_info}${background}"
+    echo -e "${green}内存状态: ${memory_info}${background}"
+    echo -e "${green}QQ群: ${cyan}呆毛版-QQ群:1022982073${background}"
     echo "========================="
-    echo -en ${green}请输入您的选项: ${background};read number
+    echo -en "${green}请输入您的选项: ${background}";read number
     echo
     case ${number} in
     1) manage_hosts ;;
@@ -1029,6 +1413,7 @@ main() {
     6) manage_singbox ;;
     7) check_docker ;;
     8) manage_clash ;;
+    9) manage_hapi ;;
     0) exit 0 ;;
     *) echo -e "\n${red}输入错误${background}"; pause ;;
     esac
