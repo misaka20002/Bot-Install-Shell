@@ -831,7 +831,7 @@ hapi_add_1m_suffix() {
     local lower_model
     lower_model=$(printf '%s' "${model}" | tr '[:upper:]' '[:lower:]')
     if [ "${enable_1m}" = "true" ] && [[ "${lower_model}" != *"[1m]"* ]]; then
-        model="${model}[1M]"
+        model="${model}[1m]"
     fi
     printf '%s' "${model}"
 }
@@ -916,7 +916,7 @@ hapi_config_claude() {
         fi
     done
 
-    echo -en "${cyan}是否开启 [1M] 上下文？[Y/n]: ${background}"
+    echo -en "${cyan}是否开启 [1m] 上下文？[Y/n]: ${background}"
     read -r enable_1m
     if [[ "${enable_1m}" == "n" || "${enable_1m}" == "N" ]]; then
         enable_1m="false"
@@ -1042,7 +1042,8 @@ hapi_start_runner() {
     local workspace_root
 
     hapi_ensure_command || return
-    echo -e "${yellow}提示：Hapi runner 是全局单实例，新设置会覆盖当前 runner 的 workspace-root。${background}"
+    echo -e "${yellow}提示1：Hapi runner 是全局单实例，新设置会覆盖当前 runner 的 workspace-root。${background}"
+    echo -e "${yellow}提示2：Hapi runner 用于从聊天窗口远程创建 session。如果不启动 Runner，你仍然可以管理已有 session，但不能方便地让 HAPI 在指定机器上新建任务。${background}"
     hapi_select_workspaces || return
 
     for workspace_root in "${HAPI_SELECTED_WORKSPACES[@]}"; do
