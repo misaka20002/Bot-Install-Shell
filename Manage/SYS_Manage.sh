@@ -827,11 +827,11 @@ hapi_json_escape() {
 
 hapi_add_1m_suffix() {
     local model="$1"
-    local enable_1m="$2"
+    local context_suffix="$2"
     local lower_model
     lower_model=$(printf '%s' "${model}" | tr '[:upper:]' '[:lower:]')
-    if [ "${enable_1m}" = "true" ] && [[ "${lower_model}" != *"[1m]"* ]]; then
-        model="${model}[1m]"
+    if [ -n "${context_suffix}" ] && [[ "${lower_model}" != *"[1m]"* ]]; then
+        model="${model}${context_suffix}"
     fi
     printf '%s' "${model}"
 }
@@ -869,9 +869,9 @@ hapi_show_claude_config() {
 hapi_config_claude() {
     local config_dir="${HOME}/.claude"
     local settings_file="${config_dir}/settings.json"
-    local auth_token base_url sonnet_model opus_model enable_1m
-    local sonnet_value opus_value backup_file
-    local auth_token_json base_url_json sonnet_json opus_json
+    local auth_token base_url haiku_model sonnet_model opus_model context_choice context_suffix enable_max_effort
+    local sonnet_value opus_value backup_file reasoning_suffix effort_line
+    local auth_token_json base_url_json haiku_json sonnet_json opus_json
 
     hapi_show_claude_config "${settings_file}" || true
 
@@ -900,6 +900,14 @@ hapi_config_claude() {
         read -r base_url
     base_url=${base_url:-https://api.deepseek.com/anthropic}
 
+    while [ -z "${haiku_model}" ]; do
+        echo -en "${cyan}请输入 HAIKU_MODEL: ${background}"
+        read -r haiku_model
+        if [ -z "${haiku_model}" ]; then
+            echo -e "${red}HAIKU_MODEL 不能为空。${background}"
+        fi
+    done
+
     while [ -z "${sonnet_model}" ]; do
         echo -en "${cyan}请输入 SONNET_MODEL: ${background}"
         read -r sonnet_model
@@ -916,18 +924,35 @@ hapi_config_claude() {
         fi
     done
 
-    echo -en "${cyan}是否开启 [1m] 上下文？[Y/n]: ${background}"
-    read -r enable_1m
-    if [[ "${enable_1m}" == "n" || "${enable_1m}" == "N" ]]; then
-        enable_1m="false"
-    else
-        enable_1m="true"
+    while true; do
+        echo -e "${cyan}请选择 1M 上下文后缀:${background}"
+        echo -e "${green}1.  ${cyan}开启并使用 [1m]${background}"
+        echo -e "${green}2.  ${cyan}开启并使用 [1M]${background}"
+        echo -e "${green}0.  ${cyan}不开启${background}"
+        echo -en "${green}请输入您的选项 (默认 1): ${background}"
+        read -r context_choice
+        case "${context_choice}" in
+        ""|1) context_suffix="[1m]"; break ;;
+        2) context_suffix="[1M]"; break ;;
+        0|n|N) context_suffix=""; break ;;
+        *) echo -e "${red}输入错误${background}" ;;
+        esac
+    done
+
+    echo -en "${cyan}是否开启最大强度思考？[y/N]: ${background}"
+    read -r enable_max_effort
+    reasoning_suffix=""
+    effort_line=""
+    if [[ "${enable_max_effort}" == "y" || "${enable_max_effort}" == "Y" ]]; then
+        reasoning_suffix=","
+        effort_line='    "CLAUDE_CODE_EFFORT_LEVEL": "max"'
     fi
 
-    sonnet_value=$(hapi_add_1m_suffix "${sonnet_model}" "${enable_1m}")
-    opus_value=$(hapi_add_1m_suffix "${opus_model}" "${enable_1m}")
+    sonnet_value=$(hapi_add_1m_suffix "${sonnet_model}" "${context_suffix}")
+    opus_value=$(hapi_add_1m_suffix "${opus_model}" "${context_suffix}")
     auth_token_json=$(hapi_json_escape "${auth_token}")
     base_url_json=$(hapi_json_escape "${base_url}")
+    haiku_json=$(hapi_json_escape "${haiku_model}")
     sonnet_json=$(hapi_json_escape "${sonnet_value}")
     opus_json=$(hapi_json_escape "${opus_value}")
 
@@ -937,13 +962,14 @@ hapi_config_claude() {
   "env": {
     "ANTHROPIC_AUTH_TOKEN": "${auth_token_json}",
     "ANTHROPIC_BASE_URL": "${base_url_json}",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${sonnet_json}",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${haiku_json}",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "${opus_json}",
     "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "${opus_json}",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "${sonnet_json}",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "${sonnet_json}",
     "ANTHROPIC_MODEL": "${sonnet_json}",
-    "ANTHROPIC_REASONING_MODEL": "${opus_json}"
+    "ANTHROPIC_REASONING_MODEL": "${opus_json}"${reasoning_suffix}
+${effort_line}
   },
   "includeCoAuthoredBy": false
 }
