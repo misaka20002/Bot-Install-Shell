@@ -896,9 +896,9 @@ hapi_config_claude() {
         fi
     done
 
-    echo -en "${cyan}请输入 ANTHROPIC_BASE_URL (默认 https://anyrouter.top): ${background}"
+    echo -en "${cyan}请输入 ANTHROPIC_BASE_URL (默认 https://api.deepseek.com/anthropic): ${background}"
         read -r base_url
-    base_url=${base_url:-https://anyrouter.top}
+    base_url=${base_url:-https://api.deepseek.com/anthropic}
 
     while [ -z "${sonnet_model}" ]; do
         echo -en "${cyan}请输入 SONNET_MODEL: ${background}"
