@@ -855,32 +855,17 @@ hapi_show_claude_config() {
     sed -E 's#("(ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)"[[:space:]]*:[[:space:]]*")[^"]*#\1******#g' "${settings_file}"
 }
 
-hapi_config_claude() {
-    local config_dir="${HOME}/.claude"
-    local settings_file="${config_dir}/settings.json"
+hapi_write_claude_settings_file() {
+    local output_file="$1"
     local auth_token base_url haiku_model sonnet_model opus_model enable_max_effort
-    local backup_file reasoning_suffix effort_line
+    local reasoning_suffix effort_line
     local auth_token_json base_url_json haiku_json sonnet_json opus_json
     local default_haiku_model="claude-haiku-4-5-20251001"
     local default_sonnet_model="claude-sonnet-4-5-20250929"
     local default_opus_model="claude-opus-4-8[1M]"
 
-    hapi_show_claude_config "${settings_file}" || true
-
-    if [ -f "${settings_file}" ]; then
-        echo -en "${yellow}检测到已存在 Claude Code 配置，继续将覆盖原有配置！是否继续？[y/N]: ${background}"
-        read -r overwrite
-        if [[ "${overwrite}" != "y" && "${overwrite}" != "Y" ]]; then
-            echo -e "${yellow}已取消配置。${background}"
-            return
-        fi
-        backup_file="${settings_file}.bak"
-        cp -a "${settings_file}" "${backup_file}"
-        echo -e "${green}已备份原配置到: ${backup_file}${background}"
-    fi
-
     while [ -z "${auth_token}" ]; do
-        echo -en "${cyan}请输入 ANTHROPIC_AUTH_TOKEN: ${background}"
+        echo -en "${cyan}请输入 ANTHROPIC_AUTH_TOKEN（已隐藏输入）: ${background}"
         read -rs auth_token
         echo
         if [ -z "${auth_token}" ]; then
@@ -922,8 +907,7 @@ hapi_config_claude() {
     sonnet_json=$(hapi_json_escape "${sonnet_model}")
     opus_json=$(hapi_json_escape "${opus_model}")
 
-    mkdir -p "${config_dir}"
-    cat > "${settings_file}" << EOF
+    cat > "${output_file}" << EOF
 {
   "env": {
     "ANTHROPIC_AUTH_TOKEN": "${auth_token_json}",
@@ -940,8 +924,217 @@ ${effort_line}
   "includeCoAuthoredBy": false
 }
 EOF
+}
+
+hapi_config_claude() {
+    local config_dir="${HOME}/.claude"
+    local settings_file="${config_dir}/settings.json"
+    local backup_file
+
+    hapi_show_claude_config "${settings_file}" || true
+
+    if [ -f "${settings_file}" ]; then
+        echo -en "${yellow}检测到已存在 Claude Code 配置，继续将覆盖原有配置！是否继续？[y/N]: ${background}"
+        read -r overwrite
+        if [[ "${overwrite}" != "y" && "${overwrite}" != "Y" ]]; then
+            echo -e "${yellow}已取消配置。${background}"
+            return
+        fi
+        backup_file="${settings_file}.bak"
+        cp -a "${settings_file}" "${backup_file}"
+        echo -e "${green}已备份原配置到: ${backup_file}${background}"
+    fi
+
+    mkdir -p "${config_dir}"
+    hapi_write_claude_settings_file "${settings_file}" || return
     chmod 600 "${settings_file}"
     echo -e "${green}Claude Code 配置已写入: ${settings_file}${background}"
+}
+
+hapi_ensure_node_json() {
+    if ! command -v node >/dev/null 2>&1; then
+        echo -e "${red}未检测到 node，无法管理 Claude 配置库。${background}"
+        return 1
+    fi
+}
+
+hapi_claude_profile_store_file() {
+    printf '%s' "${HOME}/.claude/hapi_config_profiles.json"
+}
+
+hapi_save_claude_profile_from_file() {
+    local profile_name="$1"
+    local source_file="$2"
+    local store_file
+    store_file=$(hapi_claude_profile_store_file)
+
+    hapi_ensure_node_json || return
+    mkdir -p "$(dirname "${store_file}")"
+    node -e 'const fs = require("fs"); const path = require("path"); const storeFile = process.argv[1]; const name = process.argv[2]; const sourceFile = process.argv[3]; const config = JSON.parse(fs.readFileSync(sourceFile, "utf8")); let store = { profiles: [] }; if (fs.existsSync(storeFile)) { try { store = JSON.parse(fs.readFileSync(storeFile, "utf8")); } catch {} } if (!Array.isArray(store.profiles)) store.profiles = []; const now = new Date().toISOString(); const idx = store.profiles.findIndex((item) => item && item.name === name); if (idx >= 0) { store.profiles[idx] = { ...store.profiles[idx], name, updatedAt: now, config }; } else { store.profiles.push({ name, createdAt: now, updatedAt: now, config }); } fs.mkdirSync(path.dirname(storeFile), { recursive: true }); fs.writeFileSync(storeFile, JSON.stringify(store, null, 2) + "\n");' "${store_file}" "${profile_name}" "${source_file}" || return
+    chmod 600 "${store_file}" 2>/dev/null
+    echo -e "${green}配置已保存到配置库: ${profile_name}${background}"
+}
+
+hapi_list_claude_profiles() {
+    local store_file
+    store_file=$(hapi_claude_profile_store_file)
+
+    hapi_ensure_node_json || return
+    if [ ! -f "${store_file}" ]; then
+        echo -e "${yellow}暂无已储存的 Claude Code 配置。${background}"
+        return 1
+    fi
+    node -e 'const fs = require("fs"); const storeFile = process.argv[1]; let store = { profiles: [] }; try { store = JSON.parse(fs.readFileSync(storeFile, "utf8")); } catch {} const profiles = Array.isArray(store.profiles) ? store.profiles : []; if (profiles.length === 0) process.exit(1); profiles.forEach((item, index) => { console.log(`${index + 1}. ${item.name}    更新: ${item.updatedAt || "-"}`); });' "${store_file}" || {
+        echo -e "${yellow}暂无已储存的 Claude Code 配置。${background}"
+        return 1
+    }
+}
+
+hapi_show_claude_profile_by_index() {
+    local profile_index="$1"
+    local store_file
+    store_file=$(hapi_claude_profile_store_file)
+
+    hapi_ensure_node_json || return
+    node -e 'const fs = require("fs"); const storeFile = process.argv[1]; const index = Number(process.argv[2]) - 1; const store = JSON.parse(fs.readFileSync(storeFile, "utf8")); const profiles = Array.isArray(store.profiles) ? store.profiles : []; const profile = profiles[index]; if (!profile || !profile.config) { console.error("配置序号不存在"); process.exit(1); } const config = JSON.parse(JSON.stringify(profile.config)); if (config.env) { for (const key of ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]) { if (config.env[key]) config.env[key] = "******"; } } console.log(`名称: ${profile.name}`); console.log(JSON.stringify(config, null, 2));' "${store_file}" "${profile_index}"
+}
+
+hapi_store_current_claude_config() {
+    local settings_file="${HOME}/.claude/settings.json"
+    local profile_name
+
+    if [ ! -f "${settings_file}" ]; then
+        echo -e "${yellow}当前没有 Claude Code 配置可储存: ${settings_file}${background}"
+        return 1
+    fi
+    echo -en "${cyan}请输入配置名称: ${background}"
+    read -r profile_name
+    if [ -z "${profile_name}" ]; then
+        echo -e "${red}配置名称不能为空。${background}"
+        return 1
+    fi
+    hapi_save_claude_profile_from_file "${profile_name}" "${settings_file}"
+}
+
+hapi_create_claude_profile() {
+    local profile_name tmp_file
+
+    echo -en "${cyan}请输入新配置名称: ${background}"
+    read -r profile_name
+    if [ -z "${profile_name}" ]; then
+        echo -e "${red}配置名称不能为空。${background}"
+        return 1
+    fi
+
+    tmp_file="${TMPDIR:-/tmp}/hapi_claude_settings_$$.json"
+    if ! hapi_write_claude_settings_file "${tmp_file}"; then
+        rm -f "${tmp_file}"
+        return 1
+    fi
+    if ! hapi_save_claude_profile_from_file "${profile_name}" "${tmp_file}"; then
+        rm -f "${tmp_file}"
+        return 1
+    fi
+    rm -f "${tmp_file}"
+    echo -e "${yellow}新配置已保存，但未切换当前 Claude Code 配置。${background}"
+}
+
+hapi_switch_claude_profile() {
+    local store_file settings_file config_dir backup_file num confirm
+    store_file=$(hapi_claude_profile_store_file)
+    config_dir="${HOME}/.claude"
+    settings_file="${config_dir}/settings.json"
+
+    hapi_list_claude_profiles || return
+    echo -en "${green}请输入要切换的配置序号: ${background}"
+    read -r num
+    if [[ ! "${num}" =~ ^[0-9]+$ ]] || [ "${num}" -lt 1 ]; then
+        echo -e "${red}请输入有效的序号。${background}"
+        return 1
+    fi
+
+    echo -e "${white}=====${green}即将切换到以下配置${white}=====${background}"
+    hapi_show_claude_profile_by_index "${num}" || return
+    echo -en "${yellow}确认切换到该配置吗？[y/N]: ${background}"
+    read -r confirm
+    if [[ "${confirm}" != "y" && "${confirm}" != "Y" ]]; then
+        echo -e "${yellow}已取消切换。${background}"
+        return
+    fi
+
+    mkdir -p "${config_dir}"
+    if [ -f "${settings_file}" ]; then
+        backup_file="${settings_file}.bak"
+        cp -a "${settings_file}" "${backup_file}"
+        echo -e "${green}已备份原配置到: ${backup_file}${background}"
+    fi
+    hapi_ensure_node_json || return
+    node -e 'const fs = require("fs"); const storeFile = process.argv[1]; const settingsFile = process.argv[2]; const index = Number(process.argv[3]) - 1; const store = JSON.parse(fs.readFileSync(storeFile, "utf8")); const profiles = Array.isArray(store.profiles) ? store.profiles : []; if (!profiles[index] || !profiles[index].config) { console.error("配置序号不存在"); process.exit(1); } fs.writeFileSync(settingsFile, JSON.stringify(profiles[index].config, null, 2) + "\n"); console.log(profiles[index].name);' "${store_file}" "${settings_file}" "${num}"
+    local switch_status=$?
+    if [ "${switch_status}" -ne 0 ]; then
+        echo -e "${red}切换配置失败。${background}"
+        return "${switch_status}"
+    fi
+    chmod 600 "${settings_file}"
+    echo -e "${green}Claude Code 配置已切换: ${settings_file}${background}"
+}
+
+hapi_delete_claude_profile() {
+    local store_file num confirm
+    store_file=$(hapi_claude_profile_store_file)
+
+    hapi_list_claude_profiles || return
+    echo -en "${green}请输入要删除的配置序号: ${background}"
+    read -r num
+    if [[ ! "${num}" =~ ^[0-9]+$ ]] || [ "${num}" -lt 1 ]; then
+        echo -e "${red}请输入有效的序号。${background}"
+        return 1
+    fi
+
+    echo -e "${white}=====${green}即将删除以下配置${white}=====${background}"
+    hapi_show_claude_profile_by_index "${num}" || return
+    echo -en "${yellow}确认删除该配置吗？[y/N]: ${background}"
+    read -r confirm
+    if [[ "${confirm}" != "y" && "${confirm}" != "Y" ]]; then
+        echo -e "${yellow}已取消删除。${background}"
+        return
+    fi
+
+    hapi_ensure_node_json || return
+    node -e 'const fs = require("fs"); const storeFile = process.argv[1]; const index = Number(process.argv[2]) - 1; const store = JSON.parse(fs.readFileSync(storeFile, "utf8")); const profiles = Array.isArray(store.profiles) ? store.profiles : []; if (!profiles[index]) { console.error("配置序号不存在"); process.exit(1); } const removed = profiles.splice(index, 1)[0]; store.profiles = profiles; fs.writeFileSync(storeFile, JSON.stringify(store, null, 2) + "\n"); console.log(removed.name);' "${store_file}" "${num}"
+    local delete_status=$?
+    if [ "${delete_status}" -ne 0 ]; then
+        echo -e "${red}删除配置失败。${background}"
+        return "${delete_status}"
+    fi
+    chmod 600 "${store_file}" 2>/dev/null
+    echo -e "${green}配置已删除。${background}"
+}
+
+hapi_claude_config_menu() {
+    local num
+
+    while true; do
+        echo -e "${white}=====${green}Claude Code 配置${white}=====${background}"
+        echo -e "${green}1.  ${cyan}查看/修改配置${background}"
+        echo -e "${green}2.  ${cyan}储存当前配置${background}"
+        echo -e "${green}3.  ${cyan}新建配置（不切换）${background}"
+        echo -e "${green}4.  ${cyan}切换配置${background}"
+        echo -e "${green}5.  ${cyan}删除配置${background}"
+        echo -e "${green}0.  ${cyan}返回上一级${background}"
+        echo "========================="
+        echo -en "${green}请输入您的选项: ${background}"; read -r num
+
+        case "${num}" in
+        1) hapi_config_claude; pause ;;
+        2) hapi_store_current_claude_config; pause ;;
+        3) hapi_create_claude_profile; pause ;;
+        4) hapi_switch_claude_profile; pause ;;
+        5) hapi_delete_claude_profile; pause ;;
+        0) return ;;
+        *) echo -e "${red}输入错误${background}"; pause ;;
+        esac
+    done
 }
 
 hapi_prepare_workspace() {
@@ -1506,7 +1699,7 @@ manage_hapi() {
 
     case "${num}" in
     1) hapi_install_claude_code; pause; manage_hapi ;;
-    2) hapi_config_claude; pause; manage_hapi ;;
+    2) hapi_claude_config_menu; manage_hapi ;;
     3) hapi_install_hapi; pause; manage_hapi ;;
     4) hapi_runner_workspace_menu; manage_hapi ;;
     5) hapi_config_menu; manage_hapi ;;
