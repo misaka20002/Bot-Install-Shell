@@ -1,4 +1,4 @@
-old_version="1.1.100"
+old_version="1.1.101"
 
 cd $HOME
 export red="\033[31m"
@@ -181,6 +181,7 @@ echo -e ${cyan} xdm plugin" | "${blue}插件管理脚本${background}
 echo -e ${cyan} xdm meme"   | "${blue}meme 管理脚本${background}
 echo -e ${cyan} xdm sayu"   | "${blue}早柚核心管理${background}
 echo -e ${cyan} xdm sys"    | "${blue}系统管理脚本${background}
+echo -e ${cyan} xdm cc"     | "${blue}Hapi/Claude 管理${background}
 echo -e ${green}===============================${background}
 echo -e ${cyan} xdm mz ${blue}Miao-Yunzai根目录${background}
 echo -e ${cyan} xdm tz ${blue}TRSS-Yunzai根目录${background}
@@ -211,6 +212,12 @@ sys)
 MirrorCheck
 URL="${GitMirror}/raw/master/Manage"
 bash <(curl -sL ${URL}/SYS_Manage.sh)
+exit
+;;
+cc)
+MirrorCheck
+URL="${GitMirror}/raw/master/Manage"
+bash <(curl -sL ${URL}/Hapi_Claude_Manage.sh)
 exit
 ;;
 SWPKG)
