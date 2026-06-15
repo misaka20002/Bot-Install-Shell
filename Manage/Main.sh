@@ -1,4 +1,4 @@
-old_version="1.1.101"
+old_version="1.1.102"
 
 cd $HOME
 export red="\033[31m"
@@ -801,8 +801,8 @@ function OperatingEnvironmentInstall(){
 
 Number=$(${DialogWhiptail} \
 --title "呆毛版 QQ群:1022982073" \
---menu "${BotName}管理" \
-23 35 15 \
+--menu "${BotName}管理 (可输入数字快速选择)" \
+23 38 15 \
 "1" "启动运行" \
 "2" "前台启动" \
 "3" "停止运行" \
@@ -816,6 +816,15 @@ Number=$(${DialogWhiptail} \
 "0" "返回" \
 3>&1 1>&2 2>&3)
 feedback=$?
+# 支持直接输入数字
+if [ $feedback -ne 0 ]; then
+    echo -en ${yellow}请输入选项编号 [0-10]: ${background}
+    read -t 5 Number
+    if [ -z "${Number}" ]; then
+        return
+    fi
+    feedback=0
+fi
 feedback
 case ${Number} in
     1)
@@ -908,21 +917,59 @@ function gotoBotPath(){
         fi
     fi
 }
+function MoreFunctions(){
+Number=$(${DialogWhiptail} \
+--title "呆毛版 QQ群:1022982073" \
+--menu "更多功能 (可输入数字快速选择)" \
+15 38 5 \
+"1" "Hapi/CC管理" \
+"2" "操作系统管理" \
+"0" "返回" \
+3>&1 1>&2 2>&3)
+feedback=$?
+# 支持直接输入数字
+if [ $feedback -ne 0 ]; then
+    return
+fi
+case ${Number} in
+    1)
+        MirrorCheck
+        URL="${GitMirror}/raw/master/Manage"
+        bash <(curl -sL ${URL}/Hapi_Claude_Manage.sh)
+        ;;
+    2)
+        MirrorCheck
+        URL="${GitMirror}/raw/master/Manage"
+        bash <(curl -sL ${URL}/SYS_Manage.sh)
+        ;;
+    0)
+        return
+        ;;
+esac
+}
 function master(){
 Number=$(${DialogWhiptail} \
 --title "呆毛版 QQ群:1022982073" \
---menu "💡 提示: 发送 xdm help 获取更多快捷键" \
-20 38 10 \
+--menu "💡 提示: 可输入数字快速选择 | xdm help 查看快捷键" \
+20 42 10 \
 "1" "Miao-Yunzai" \
 "2" "TRSS-Yunzai" \
 "3" "NapCat管理" \
 "4" "部署meme管理" \
 "5" "早柚核心管理" \
-"6" "操作系统管理" \
+"6" "更多功能" \
 "0" "退出" \
 3>&1 1>&2 2>&3)
 feedback=$?
-feedback
+# 支持直接输入数字
+if [ $feedback -ne 0 ]; then
+    echo -e ${cyan}提示: 你也可以直接输入数字选择菜单项${background}
+    echo -en ${yellow}请输入选项编号 [0-6]: ${background}
+    read -t 5 Number
+    if [ -z "${Number}" ]; then
+        return
+    fi
+fi
 case ${Number} in
     1)
         export BotName="Miao-Yunzai"
@@ -954,9 +1001,7 @@ case ${Number} in
         bash <(curl -sL ${URL}/Sayu_Bot.sh)
         ;;
     6)
-        MirrorCheck
-        URL="${GitMirror}/raw/master/Manage"
-        bash <(curl -sL ${URL}/SYS_Manage.sh)
+        MoreFunctions
         ;;
     0)
         exit 0
