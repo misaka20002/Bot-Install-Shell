@@ -179,27 +179,60 @@ hapi_show_claude_config() {
     sed -E 's#("(ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)"[[:space:]]*:[[:space:]]*")[^"]*#\1******#g' "${settings_file}"
 }
 
+hapi_claude_current_value() {
+    local field="$1"
+    local settings_file="${2:-${HOME}/.claude/settings.json}"
+
+    hapi_ensure_node_json >/dev/null || return
+    CLAUDE_SETTINGS_FILE="${settings_file}" CLAUDE_FIELD="${field}" node <<'NODE'
+const fs = require("fs");
+const settingsFile = process.env.CLAUDE_SETTINGS_FILE;
+const field = process.env.CLAUDE_FIELD;
+
+if (!settingsFile || !field || !fs.existsSync(settingsFile)) process.exit(0);
+
+try {
+  const raw = fs.readFileSync(settingsFile, "utf8");
+  const config = raw.trim() ? JSON.parse(raw) : {};
+  const env = config && typeof config === "object" && config.env && typeof config.env === "object" ? config.env : {};
+  if (env[field] !== undefined && env[field] !== null) process.stdout.write(String(env[field]));
+} catch {
+  process.exit(0);
+}
+NODE
+}
+
 hapi_write_claude_settings_file() {
     local output_file="$1"
+    local default_auth_token="$2"
+    local default_base_url="${3:-https://api.deepseek.com/anthropic}"
+    local default_haiku_model="${4:-claude-haiku-4-5-20251001}"
+    local default_sonnet_model="${5:-claude-sonnet-4-5-20250929}"
+    local default_opus_model="${6:-claude-opus-4-8[1M]}"
+    local default_max_effort="$7"
     local auth_token base_url haiku_model sonnet_model opus_model enable_max_effort
     local reasoning_suffix effort_line
     local auth_token_json base_url_json haiku_json sonnet_json opus_json
-    local default_haiku_model="claude-haiku-4-5-20251001"
-    local default_sonnet_model="claude-sonnet-4-5-20250929"
-    local default_opus_model="claude-opus-4-8[1M]"
 
     while [ -z "${auth_token}" ]; do
-        echo -en "${cyan}请输入 ANTHROPIC_AUTH_TOKEN（已隐藏输入）: ${background}"
+        if [ -n "${default_auth_token}" ]; then
+            echo -en "${cyan}请输入 ANTHROPIC_AUTH_TOKEN（已隐藏输入，回车保留当前值）: ${background}"
+        else
+            echo -en "${cyan}请输入 ANTHROPIC_AUTH_TOKEN（已隐藏输入）: ${background}"
+        fi
         read -rs auth_token
         echo
+        if [ -z "${auth_token}" ] && [ -n "${default_auth_token}" ]; then
+            auth_token="${default_auth_token}"
+        fi
         if [ -z "${auth_token}" ]; then
             echo -e "${red}ANTHROPIC_AUTH_TOKEN 不能为空。${background}"
         fi
     done
 
-    echo -en "${cyan}请输入 ANTHROPIC_BASE_URL (默认 https://api.deepseek.com/anthropic): ${background}"
+    echo -en "${cyan}请输入 ANTHROPIC_BASE_URL (默认 ${default_base_url}): ${background}"
     read -r base_url
-    base_url=${base_url:-https://api.deepseek.com/anthropic}
+    base_url=${base_url:-${default_base_url}}
 
     echo -e "${yellow}如需开启 [1m] 或 [1M] 上下文，请自行在模型名后添加。${background}"
     echo -e "${yellow}示例: claude-opus-4-8[1M] 或 claude-opus-4-8[1m]${background}"
@@ -216,11 +249,18 @@ hapi_write_claude_settings_file() {
     read -r opus_model
     opus_model=${opus_model:-${default_opus_model}}
 
-    echo -en "${cyan}是否开启最大强度思考？[y/N]: ${background}"
+    if [[ "${default_max_effort}" == "max" || "${default_max_effort}" == "y" || "${default_max_effort}" == "Y" ]]; then
+        echo -en "${cyan}是否开启最大强度思考？[Y/n]: ${background}"
+    else
+        echo -en "${cyan}是否开启最大强度思考？[y/N]: ${background}"
+    fi
     read -r enable_max_effort
+    if [ -z "${enable_max_effort}" ]; then
+        enable_max_effort="${default_max_effort}"
+    fi
     reasoning_suffix=""
     effort_line=""
-    if [[ "${enable_max_effort}" == "y" || "${enable_max_effort}" == "Y" ]]; then
+    if [[ "${enable_max_effort}" == "max" || "${enable_max_effort}" == "y" || "${enable_max_effort}" == "Y" ]]; then
         reasoning_suffix=","
         effort_line='    "CLAUDE_CODE_EFFORT_LEVEL": "max"'
     fi
@@ -254,6 +294,7 @@ hapi_config_claude() {
     local config_dir="${HOME}/.claude"
     local settings_file="${config_dir}/settings.json"
     local backup_file
+    local current_auth_token current_base_url current_haiku_model current_sonnet_model current_opus_model current_max_effort
 
     hapi_show_claude_config "${settings_file}" || true
 
@@ -269,8 +310,40 @@ hapi_config_claude() {
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
 
+    current_auth_token=$(hapi_claude_current_value "ANTHROPIC_AUTH_TOKEN" "${settings_file}")
+    if [ -z "${current_auth_token}" ]; then
+        current_auth_token=$(hapi_claude_current_value "ANTHROPIC_API_KEY" "${settings_file}")
+    fi
+    if [ -z "${current_auth_token}" ]; then
+        current_auth_token=$(hapi_claude_current_value "CLAUDE_CODE_OAUTH_TOKEN" "${settings_file}")
+    fi
+    current_base_url=$(hapi_claude_current_value "ANTHROPIC_BASE_URL" "${settings_file}")
+    current_haiku_model=$(hapi_claude_current_value "ANTHROPIC_DEFAULT_HAIKU_MODEL" "${settings_file}")
+    current_sonnet_model=$(hapi_claude_current_value "ANTHROPIC_DEFAULT_SONNET_MODEL" "${settings_file}")
+    if [ -z "${current_sonnet_model}" ]; then
+        current_sonnet_model=$(hapi_claude_current_value "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME" "${settings_file}")
+    fi
+    if [ -z "${current_sonnet_model}" ]; then
+        current_sonnet_model=$(hapi_claude_current_value "ANTHROPIC_MODEL" "${settings_file}")
+    fi
+    current_opus_model=$(hapi_claude_current_value "ANTHROPIC_DEFAULT_OPUS_MODEL" "${settings_file}")
+    if [ -z "${current_opus_model}" ]; then
+        current_opus_model=$(hapi_claude_current_value "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME" "${settings_file}")
+    fi
+    if [ -z "${current_opus_model}" ]; then
+        current_opus_model=$(hapi_claude_current_value "ANTHROPIC_REASONING_MODEL" "${settings_file}")
+    fi
+    current_max_effort=$(hapi_claude_current_value "CLAUDE_CODE_EFFORT_LEVEL" "${settings_file}")
+
     mkdir -p "${config_dir}"
-    hapi_write_claude_settings_file "${settings_file}" || return
+    hapi_write_claude_settings_file \
+        "${settings_file}" \
+        "${current_auth_token}" \
+        "${current_base_url}" \
+        "${current_haiku_model}" \
+        "${current_sonnet_model}" \
+        "${current_opus_model}" \
+        "${current_max_effort}" || return
     chmod 600 "${settings_file}"
     echo -e "${green}Claude Code 配置已写入: ${settings_file}${background}"
 }
@@ -982,7 +1055,11 @@ NODE
 }
 
 hapi_config_codex() {
+    local config_dir="${HOME}/.codex"
+    local auth_file="${config_dir}/auth.json"
+    local config_file="${config_dir}/config.toml"
     local current_api_key current_base_url current_model api_key base_url model
+    local auth_backup_file config_backup_file overwrite
     local default_base_url="https://api.openai.com/v1"
     local default_model="gpt-5.5"
 
@@ -991,6 +1068,25 @@ hapi_config_codex() {
         echo -e "${red}检测到 Codex 配置格式异常，已中止修改。${background}"
         return 1
     }
+
+    if [ -f "${auth_file}" ] || [ -f "${config_file}" ]; then
+        echo -en "${yellow}检测到已存在 Codex 配置，继续将覆盖原有配置！是否继续？[y/N]: ${background}"
+        read -r overwrite
+        if [[ "${overwrite}" != "y" && "${overwrite}" != "Y" ]]; then
+            echo -e "${yellow}已取消配置。${background}"
+            return
+        fi
+        if [ -f "${auth_file}" ]; then
+            auth_backup_file="${auth_file}.bak"
+            cp -a "${auth_file}" "${auth_backup_file}"
+            echo -e "${green}已备份原配置到: ${auth_backup_file}${background}"
+        fi
+        if [ -f "${config_file}" ]; then
+            config_backup_file="${config_file}.bak"
+            cp -a "${config_file}" "${config_backup_file}"
+            echo -e "${green}已备份原配置到: ${config_backup_file}${background}"
+        fi
+    fi
 
     current_api_key=$(hapi_codex_current_value "OPENAI_API_KEY")
     current_base_url=$(hapi_codex_current_value "base_url")
