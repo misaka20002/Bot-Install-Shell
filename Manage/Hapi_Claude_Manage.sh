@@ -1070,7 +1070,7 @@ hapi_config_codex() {
     }
 
     if [ -f "${auth_file}" ] || [ -f "${config_file}" ]; then
-        echo -en "${yellow}检测到已存在 Codex 配置，继续将覆盖原有配置！是否继续？[y/N]: ${background}"
+        echo -en "${yellow}检测到已存在 Codex 配置，将更新 auth.json，并修改 config.toml 中的 model/base_url 等字段；其他配置会尽量保留。是否继续？[y/N]: ${background}"
         read -r overwrite
         if [[ "${overwrite}" != "y" && "${overwrite}" != "Y" ]]; then
             echo -e "${yellow}已取消配置。${background}"
@@ -1114,6 +1114,134 @@ hapi_config_codex() {
     model=${model:-${current_model}}
 
     hapi_write_codex_current_config "${api_key}" "${base_url}" "${model}"
+}
+
+hapi_toggle_codex_recommended_values() {
+    local config_dir="${HOME}/.codex"
+    local config_file="${config_dir}/config.toml"
+    local confirm toggle_status
+
+    echo -e "${white}=====${green}Codex 推荐值${white}=====${background}"
+    echo -e "${yellow}将作用于 config.toml 顶部全局配置段，和 model = \"...\" 放在同一段。${background}"
+    echo "store = false"
+    echo "stream = true"
+    echo 'include = [ "reasoning.encrypted_content" ]'
+    echo 'api_protocol = "responses"'
+    echo "========================="
+
+    echo -en "${green}请选择操作：[1] 新增/更新 [2] 移除 [0] 取消: ${background}"
+    read -r confirm
+    case "${confirm}" in
+    1)
+        confirm="add"
+        ;;
+    2)
+        confirm="remove"
+        ;;
+    0)
+        echo -e "${yellow}已取消。${background}"
+        return
+        ;;
+    *)
+        echo -e "${red}输入错误${background}"
+        return 1
+        ;;
+    esac
+
+    hapi_ensure_node_json || return
+    hapi_validate_codex_files || {
+        echo -e "${red}检测到 Codex 配置格式异常，已中止修改。${background}"
+        return 1
+    }
+    mkdir -p "${config_dir}"
+    if [ -f "${config_file}" ]; then
+        cp -a "${config_file}" "${config_file}.bak"
+        echo -e "${green}已备份原配置到: ${config_file}.bak${background}"
+    fi
+
+    CODEX_CONFIG_FILE="${config_file}" CODEX_RECOMMENDED_ACTION="${confirm}" node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const configFile = process.env.CODEX_CONFIG_FILE;
+const action = process.env.CODEX_RECOMMENDED_ACTION;
+const recommended = [
+  "store = false",
+  "stream = true",
+  'include = [ "reasoning.encrypted_content" ]',
+  'api_protocol = "responses"',
+];
+const recommendedKeys = new Set(["store", "stream", "include", "api_protocol"]);
+
+function parseSectionHeader(line) {
+  const match = line.trim().match(/^\[\[?\s*([^\[\]]+?)\s*\]?\]\s*(?:#.*)?$/);
+  return match ? match[1].trim() : null;
+}
+
+function keyOf(line) {
+  const match = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=/);
+  return match ? match[1] : "";
+}
+
+function firstSectionIndex(lines) {
+  for (let i = 0; i < lines.length; i += 1) {
+    if (parseSectionHeader(lines[i]) !== null) return i;
+  }
+  return lines.length;
+}
+
+function normalizeTrailingBlank(lines) {
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+}
+
+function removeTopLevelRecommended(lines) {
+  const end = firstSectionIndex(lines);
+  for (let i = end - 1; i >= 0; i -= 1) {
+    if (recommendedKeys.has(keyOf(lines[i]))) lines.splice(i, 1);
+  }
+}
+
+function topLevelInsertIndex(lines) {
+  const end = firstSectionIndex(lines);
+  for (let i = 0; i < end; i += 1) {
+    if (keyOf(lines[i]) === "model") return i + 1;
+  }
+  return end;
+}
+
+function toggleRecommended(text) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  normalizeTrailingBlank(lines);
+  removeTopLevelRecommended(lines);
+
+  if (action === "add") {
+    lines.splice(topLevelInsertIndex(lines), 0, ...recommended);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+try {
+  const rawConfig = fs.existsSync(configFile) ? fs.readFileSync(configFile, "utf8") : "";
+  const nextConfig = toggleRecommended(rawConfig);
+  fs.mkdirSync(path.dirname(configFile), { recursive: true });
+  fs.writeFileSync(configFile, nextConfig);
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+NODE
+    toggle_status=$?
+    if [ "${toggle_status}" -ne 0 ]; then
+        echo -e "${red}Codex 推荐值切换失败。${background}"
+        return "${toggle_status}"
+    fi
+    chmod 600 "${config_file}" 2>/dev/null
+    if [ "${confirm}" = "add" ]; then
+        echo -e "${green}Codex 推荐值已新增/更新。${background}"
+    else
+        echo -e "${green}Codex 推荐值已移除。${background}"
+    fi
 }
 
 hapi_save_codex_profile_from_files() {
@@ -1510,6 +1638,7 @@ hapi_codex_config_menu() {
         echo -e "${green}3.  ${cyan}新建配置（不切换）${background}"
         echo -e "${green}4.  ${cyan}切换配置${background}"
         echo -e "${green}5.  ${cyan}删除配置${background}"
+        echo -e "${green}6.  ${cyan}切换新增推荐值${background}"
         echo -e "${green}0.  ${cyan}返回上一级${background}"
         echo "========================="
         echo -en "${green}请输入您的选项: ${background}"; read -r num
@@ -1520,6 +1649,7 @@ hapi_codex_config_menu() {
         3) hapi_create_codex_profile; pause ;;
         4) hapi_switch_codex_profile; pause ;;
         5) hapi_delete_codex_profile; pause ;;
+        6) hapi_toggle_codex_recommended_values; pause ;;
         0) return ;;
         *) echo -e "${red}输入错误${background}"; pause ;;
         esac
