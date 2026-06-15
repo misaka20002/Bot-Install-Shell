@@ -290,6 +290,82 @@ ${effort_line}
 EOF
 }
 
+hapi_prompt_add_extra_env() {
+    local settings_file="${1:-${HOME}/.claude/settings.json}"
+    local confirm backup_file
+
+    echo -e "${white}=====${green}Claude Code 额外参数${white}=====${background}"
+    echo -e "${yellow}以下参数可优化 Claude Code 的性能和行为：${background}"
+    echo -e "${cyan}env 环境变量：${background}"
+    echo -e "  ${cyan}API_TIMEOUT_MS: 600000${background}"
+    echo -e "  ${cyan}BASH_DEFAULT_TIMEOUT_MS: 600000${background}"
+    echo -e "  ${cyan}BASH_MAX_TIMEOUT_MS: 600000${background}"
+    echo -e "  ${cyan}CLAUDE_API_TIMEOUT: 600000${background}"
+    echo -e "  ${cyan}CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: 97${background}"
+    echo -e "  ${cyan}CLAUDE_CODE_ATTRIBUTION_HEADER: 0${background}"
+    echo -e "  ${cyan}CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1${background}"
+    echo -e "  ${cyan}CLAUDE_CODE_PROXY_RESOLVES_HOSTS: 1${background}"
+    echo -e "  ${cyan}DISABLE_INSTALLATION_CHECKS: 1${background}"
+    echo -e "  ${cyan}MCP_TIMEOUT: 50000${background}"
+    echo -e "  ${cyan}MCP_TOOL_TIMEOUT: 1800000${background}"
+    echo "========================="
+    echo -en "${green}是否添加这些额外参数？[y/N]: ${background}"
+    read -r confirm
+
+    if [[ "${confirm}" != "y" && "${confirm}" != "Y" ]]; then
+        echo -e "${yellow}已跳过添加额外参数。${background}"
+        return 0
+    fi
+
+    if [ ! -f "${settings_file}" ]; then
+        echo -e "${red}配置文件不存在: ${settings_file}${background}"
+        return 1
+    fi
+
+    hapi_ensure_node_json || return
+    backup_file="${settings_file}.bak"
+    cp -a "${settings_file}" "${backup_file}"
+    echo -e "${green}已备份原配置到: ${backup_file}${background}"
+
+    CLAUDE_SETTINGS_FILE="${settings_file}" node <<'NODE'
+const fs = require("fs");
+const settingsFile = process.env.CLAUDE_SETTINGS_FILE;
+
+try {
+  const raw = fs.readFileSync(settingsFile, "utf8");
+  const config = raw.trim() ? JSON.parse(raw) : {};
+
+  if (!config.env || typeof config.env !== "object") {
+    config.env = {};
+  }
+
+  config.env.API_TIMEOUT_MS = "600000";
+  config.env.BASH_DEFAULT_TIMEOUT_MS = "600000";
+  config.env.BASH_MAX_TIMEOUT_MS = "600000";
+  config.env.CLAUDE_API_TIMEOUT = "600000";
+  config.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = "97";
+  config.env.CLAUDE_CODE_ATTRIBUTION_HEADER = "0";
+  config.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
+  config.env.CLAUDE_CODE_PROXY_RESOLVES_HOSTS = "1";
+  config.env.DISABLE_INSTALLATION_CHECKS = "1";
+  config.env.MCP_TIMEOUT = "50000";
+  config.env.MCP_TOOL_TIMEOUT = "1800000";
+
+  fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2) + "\n");
+} catch (error) {
+  console.error("添加额外参数失败: " + error.message);
+  process.exit(1);
+}
+NODE
+    local status=$?
+    if [ "${status}" -eq 0 ]; then
+        echo -e "${green}Claude Code 额外参数已添加: ${settings_file}${background}"
+    else
+        echo -e "${red}添加额外参数失败。${background}"
+        return "${status}"
+    fi
+}
+
 hapi_config_claude() {
     local config_dir="${HOME}/.claude"
     local settings_file="${config_dir}/settings.json"
@@ -346,6 +422,8 @@ hapi_config_claude() {
         "${current_max_effort}" || return
     chmod 600 "${settings_file}"
     echo -e "${green}Claude Code 配置已写入: ${settings_file}${background}"
+
+    hapi_prompt_add_extra_env "${settings_file}"
 }
 
 hapi_ensure_node_json() {
@@ -474,6 +552,8 @@ hapi_switch_claude_profile() {
     fi
     chmod 600 "${settings_file}"
     echo -e "${green}Claude Code 配置已切换: ${settings_file}${background}"
+
+    hapi_prompt_add_extra_env "${settings_file}"
 }
 
 hapi_delete_claude_profile() {
