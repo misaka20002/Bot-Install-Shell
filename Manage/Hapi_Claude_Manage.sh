@@ -106,19 +106,45 @@ hapi_json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
+hapi_report_install_failure() {
+    local install_status="$1"
+    local package_label="$2"
+
+    if [ "${install_status}" -eq 137 ]; then
+        echo -e "${red}${package_label} 安装/更新失败：安装进程被系统终止（Killed），通常是内存不足或 Swap 不足导致。${background}"
+        echo -e "${yellow}建议关闭占用内存的程序，或增加 Swap 后重新执行安装。${background}"
+    else
+        echo -e "${red}${package_label} 安装/更新失败，退出码：${install_status}。请检查上方输出。${background}"
+    fi
+}
+
 hapi_install_claude_code() {
+    local install_status
+
     hapi_ensure_pnpm || return
     echo -e "${yellow}正在安装/更新 Claude Code...${background}"
     pnpm add -g @anthropic-ai/claude-code --allow-build=@anthropic-ai/claude-code
+    install_status=$?
+    if [ "${install_status}" -ne 0 ]; then
+        hapi_report_install_failure "${install_status}" "Claude Code"
+        return "${install_status}"
+    fi
     if command -v claude >/dev/null 2>&1; then
         claude --version
     fi
 }
 
 hapi_install_codex() {
+    local install_status
+
     hapi_ensure_pnpm || return
     echo -e "${yellow}正在安装/更新 Codex...${background}"
     pnpm add -g @openai/codex@latest
+    install_status=$?
+    if [ "${install_status}" -ne 0 ]; then
+        hapi_report_install_failure "${install_status}" "Codex"
+        return "${install_status}"
+    fi
     hapi_load_node_env
     if command -v codex >/dev/null 2>&1; then
         codex --version
@@ -126,9 +152,16 @@ hapi_install_codex() {
 }
 
 hapi_install_hapi() {
+    local install_status
+
     hapi_ensure_pnpm || return
     echo -e "${yellow}正在安装/更新 Hapi...${background}"
     pnpm add -g @twsxtd/hapi
+    install_status=$?
+    if [ "${install_status}" -ne 0 ]; then
+        hapi_report_install_failure "${install_status}" "Hapi"
+        return "${install_status}"
+    fi
     if command -v hapi >/dev/null 2>&1; then
         hapi --version
     fi
@@ -1835,7 +1868,12 @@ hapi_hub_menu() {
 
 hapi_show_versions() {
     hapi_load_node_env
-    echo -e "${white}=====${green}Hapi / Claude Code 版本${white}=====${background}"
+    echo -e "${white}=====${green}Hapi / Claude Code / Codex 版本${white}=====${background}"
+    if command -v codex >/dev/null 2>&1; then
+        codex --version
+    else
+        echo -e "${yellow}未检测到 codex 命令。${background}"
+    fi
     if command -v claude >/dev/null 2>&1; then
         claude --version
     else
@@ -1854,27 +1892,27 @@ hapi_uninstall() {
 
     hapi_show_versions
     echo -e "${white}=====${green}选择卸载目标${white}=====${background}"
-    echo -e "${green}1.  ${cyan}卸载 Claude Code${background}"
-    echo -e "${green}2.  ${cyan}卸载 Hapi${background}"
-    echo -e "${green}3.  ${cyan}卸载 Claude Code 和 Hapi${background}"
+    echo -e "${green}1.  ${cyan}卸载 Codex${background}"
+    echo -e "${green}2.  ${cyan}卸载 Claude Code${background}"
+    echo -e "${green}3.  ${cyan}卸载 Hapi${background}"
     echo -e "${green}0.  ${cyan}取消${background}"
     echo "========================="
     echo -en "${green}请输入您的选项: ${background}"; read -r num
 
     case "${num}" in
     1)
+        target_label="Codex"
+        uninstall_packages=("@openai/codex")
+        stop_hapi="false"
+        ;;
+    2)
         target_label="Claude Code"
         uninstall_packages=("@anthropic-ai/claude-code")
         stop_hapi="false"
         ;;
-    2)
+    3)
         target_label="Hapi"
         uninstall_packages=("@twsxtd/hapi")
-        stop_hapi="true"
-        ;;
-    3)
-        target_label="Claude Code 和 Hapi"
-        uninstall_packages=("@anthropic-ai/claude-code" "@twsxtd/hapi")
         stop_hapi="true"
         ;;
     0)
@@ -1887,7 +1925,7 @@ hapi_uninstall() {
         ;;
     esac
 
-    echo -e "${yellow}卸载将移除全局安装的 ${target_label}，不会删除 ~/.claude 或 ~/.hapi 配置目录。${background}"
+    echo -e "${yellow}卸载将移除全局安装的 ${target_label}，不会删除 ~/.codex、~/.claude 或 ~/.hapi 配置目录。${background}"
     echo -en "${yellow}确定要卸载 ${target_label} 吗？[y/N]: ${background}"
     read -r confirm
     if [[ "${confirm}" != "y" && "${confirm}" != "Y" ]]; then
@@ -1943,19 +1981,28 @@ hapi_config_menu() {
 }
 
 manage_hapi() {
-    echo -e "${white}=====${green}Hapi / Claude Code / Codex 管理${white}=====${background}"
+    echo -e "${white}========================================${background}"
+    echo -e "${white}  ${green}Hapi / Claude Code / Codex 管理${background}"
+    echo -e "${white}========================================${background}"
+    echo -e "${yellow}-- Codex --${background}"
     echo -e "${green}1.  ${cyan}安装/更新 Codex${background}"
     echo -e "${green}2.  ${cyan}配置 Codex${background}"
+    echo -e "${white}----------------------------------------${background}"
+    echo -e "${yellow}-- Claude Code --${background}"
     echo -e "${green}3.  ${cyan}安装/更新 Claude Code${background}"
     echo -e "${green}4.  ${cyan}配置 Claude Code${background}"
+    echo -e "${white}----------------------------------------${background}"
+    echo -e "${yellow}-- Hapi --${background}"
     echo -e "${green}5.  ${cyan}安装/更新 Hapi${background}"
     echo -e "${green}6.  ${cyan}设置/运行 Hapi runner 工作目录${background}"
     echo -e "${green}7.  ${cyan}设置 Hapi CLI${background}"
     echo -e "${green}8.  ${cyan}运行 Hapi hub${background}"
     echo -e "${green}9.  ${cyan}停止 Hapi${background}"
+    echo -e "${white}----------------------------------------${background}"
+    echo -e "${yellow}-- 其他 --${background}"
     echo -e "${green}10. ${cyan}卸载${background}"
     echo -e "${green}0.  ${cyan}退出${background}"
-    echo "========================="
+    echo -e "${white}========================================${background}"
     echo -en "${green}请输入您的选项: ${background}"; read -r num
 
     case "${num}" in
