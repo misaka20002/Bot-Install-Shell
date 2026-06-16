@@ -127,14 +127,14 @@ manage_swap() {
             pause
             return
         fi
-        
+
         available_space=$(df -BG --output=avail / | tail -n 1 | tr -d 'G' | tr -d ' ')
         if [ ${swap_size} -gt ${available_space} ]; then
             echo -e "${red}磁盘空间不足，可用空间: ${available_space}GB${background}"
             pause
             return
         fi
-        
+
         if [ ${swap_size} -gt 64 ]; then
             echo -e "${yellow}警告: 创建过大的swap分区可能导致系统不稳定${background}"
             echo -en "${cyan}确定要创建${swap_size}GB的swap分区吗？[y/n]: ${background}";read confirm
@@ -145,23 +145,34 @@ manage_swap() {
             fi
         fi
 
-        swap_file="/swapfile"
-        if [ -f "${swap_file}" ]; then
-            echo -e "${yellow}已存在swap文件${background}"
-            echo -en "${cyan}是否删除现有swap文件并创建新的? [y/n]: ${background}";read confirm
+        # 检测所有现有的 swap 文件
+        existing_swaps=$(swapon --show=NAME --noheadings | grep -E '^/' | grep -v 'partition')
+        if [ -n "${existing_swaps}" ]; then
+            echo -e "${yellow}检测到以下现有的swap文件:${background}"
+            swapon --show
+            echo
+            echo -en "${cyan}是否删除所有现有swap文件并创建新的? [y/n]: ${background}";read confirm
             if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
-                if swapon --show | grep -q "/swapfile"; then
-                    swapoff /swapfile
-                    sed -i '/\/swapfile/d' /etc/fstab
-                fi
-                rm -f /swapfile
-                echo -e "${green}已删除原有swap文件${background}"
+                # 遍历删除所有 swap 文件
+                while IFS= read -r swap_path; do
+                    if [ -f "${swap_path}" ]; then
+                        echo -e "${yellow}正在停用并删除: ${swap_path}${background}"
+                        swapoff "${swap_path}" 2>/dev/null
+                        # 从 fstab 中删除该条目（转义路径中的特殊字符）
+                        escaped_path=$(echo "${swap_path}" | sed 's/[\/&]/\\&/g')
+                        sed -i "/${escaped_path}/d" /etc/fstab
+                        rm -f "${swap_path}"
+                    fi
+                done <<< "${existing_swaps}"
+                echo -e "${green}已删除所有原有swap文件${background}"
             else
                 echo -e "${yellow}已取消操作${background}"
                 pause
                 return
             fi
         fi
+
+        swap_file="/swapfile"
         
         echo -e "${yellow}正在创建${swap_size}GB的swap文件，请稍候...${background}"
         
@@ -230,13 +241,37 @@ manage_swap() {
         pause
         ;;
     4)
-        if swapon --show | grep -q "/swapfile"; then
-            swapoff /swapfile
-            sed -i '/\/swapfile/d' /etc/fstab
-            rm -f /swapfile
-            echo -e "${green}swap分区已删除${background}"
+        # 获取所有文件类型的 swap（排除分区）
+        existing_swaps=$(swapon --show=NAME --noheadings | grep -E '^/' | grep -v 'partition')
+
+        if [ -z "${existing_swaps}" ]; then
+            echo -e "${yellow}未找到活动的swap文件${background}"
+            pause
+            return
+        fi
+
+        echo -e "${yellow}检测到以下swap文件:${background}"
+        swapon --show
+        echo
+        echo -en "${cyan}确定要删除所有swap文件吗? [y/n]: ${background}";read confirm
+
+        if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+            # 遍历删除所有 swap 文件
+            while IFS= read -r swap_path; do
+                if [ -f "${swap_path}" ]; then
+                    echo -e "${yellow}正在停用并删除: ${swap_path}${background}"
+                    swapoff "${swap_path}" 2>/dev/null
+                    # 从 fstab 中删除该条目（转义路径中的特殊字符）
+                    escaped_path=$(echo "${swap_path}" | sed 's/[\/&]/\\&/g')
+                    sed -i "/${escaped_path}/d" /etc/fstab
+                    rm -f "${swap_path}"
+                    echo -e "${green}已删除: ${swap_path}${background}"
+                fi
+            done <<< "${existing_swaps}"
+            echo
+            echo -e "${green}所有swap文件已删除${background}"
         else
-            echo -e "${yellow}未找到活动的swap分区${background}"
+            echo -e "${yellow}已取消删除操作${background}"
         fi
         pause
         ;;
