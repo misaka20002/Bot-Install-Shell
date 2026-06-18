@@ -1,4 +1,4 @@
-old_version="1.1.103"
+old_version="1.1.105"
 
 cd $HOME
 
@@ -1044,7 +1044,7 @@ CHOICE=$(${DialogWhiptail} --colors --clear \
 --title "呆毛版主菜单" \
 --ok-label "选择" \
 --cancel-label "退出" \
---menu "\n请选择操作 (可按字母快捷键):\n" \
+--menu "呆毛版 QQ群:1022982073 | 快捷命令: xdm help\n 请选择操作 (可按字母快捷键):\n" \
 18 60 6 \
 "${MENU_ITEMS[@]}" \
 3>&1 1>&2 2>&3)
