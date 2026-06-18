@@ -117,6 +117,26 @@ hapi_ensure_tmux() {
     fi
 }
 
+hapi_print_tmux_log() {
+    local session_name="$1"
+    local service_label="$2"
+    local pane_output
+
+    if ! command -v tmux >/dev/null 2>&1 || ! tmux has-session -t "${session_name}" 2>/dev/null; then
+        echo -e "${yellow}${service_label} tmux 会话不存在，无法捕获日志。${background}"
+        return 1
+    fi
+
+    pane_output=$(tmux capture-pane -pt "${session_name}" -S -200 2>/dev/null)
+    echo -e "${white}=====${yellow}${service_label} tmux 最近日志${white}=====${background}"
+    if [ -n "${pane_output}" ]; then
+        printf '%s\n' "${pane_output}"
+    else
+        echo -e "${yellow}tmux pane 暂无输出。${background}"
+    fi
+    echo -e "${white}========================================${background}"
+}
+
 hapi_json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
@@ -1901,6 +1921,9 @@ hapi_capture_hub_url() {
     fi
     hub_output=$(tmux capture-pane -pt "${HAPI_HUB_TMUX_NAME}" -S -200 2>/dev/null)
     HAPI_HUB_URL=$(printf '%s\n' "${hub_output}" | grep -Eo 'https://app\.hapi\.run/[^[:space:]]*' | tail -n 1)
+    if [ -z "${HAPI_HUB_URL}" ]; then
+        HAPI_HUB_URL=$(printf '%s\n' "${hub_output}" | grep -Eo 'https://[0-9A-Za-z._-]+\.relay\.hapi\.run[^[:space:]]*' | tail -n 1)
+    fi
     if [[ "${HAPI_HUB_URL}" == *"token=" ]]; then
         cli_token=$(hapi_read_setting "cliApiToken" "")
         if [ -n "${cli_token}" ]; then
@@ -1954,12 +1977,18 @@ hapi_start_hub() {
             wait_count=$((wait_count + 1))
         done
 
-        echo -e "${yellow}本次未提取到 Hapi Hub URL，正在重启重试...${background}"
+        if [ "${attempt}" -lt 3 ]; then
+            echo -e "${yellow}本次未提取到 Hapi Hub URL，正在重启重试...${background}"
+        else
+            echo -e "${yellow}最后一次仍未提取到 Hapi Hub URL，下面输出本次 tmux 日志。${background}"
+            hapi_print_tmux_log "${HAPI_HUB_TMUX_NAME}" "Hapi Hub"
+        fi
         tmux kill-session -t "${HAPI_HUB_TMUX_NAME}" >/dev/null 2>&1
         attempt=$((attempt + 1))
     done
 
-    echo -e "${red}连续 3 次未提取到 Hapi Hub URL，请稍后重新选择"启动/查看 Hapi hub URL"或检查 tmux 日志。${background}"
+    echo -e "${red}连续 3 次未提取到 Hapi Hub URL，已在上方输出最后一次启动的 tmux 日志。${background}"
+    return 1
 }
 
 hapi_stop_all() {
@@ -2421,12 +2450,17 @@ hapi_opencode_web_start() {
             wait_count=$((wait_count + 1))
         done
 
-        echo -e "${yellow}本次未提取到 opencode web URL，正在重启重试...${background}"
+        if [ "${attempt}" -lt 3 ]; then
+            echo -e "${yellow}本次未提取到 opencode web URL，正在重启重试...${background}"
+        else
+            echo -e "${yellow}最后一次仍未提取到 opencode web URL，下面输出本次 tmux 日志。${background}"
+            hapi_print_tmux_log "${HAPI_OPENCODE_WEB_TMUX_NAME}" "opencode web"
+        fi
         tmux kill-session -t "${HAPI_OPENCODE_WEB_TMUX_NAME}" >/dev/null 2>&1
         attempt=$((attempt + 1))
     done
 
-    echo -e "${red}连续 3 次未提取到 opencode web URL，请稍后重试或检查 tmux 日志。${background}"
+    echo -e "${red}连续 3 次未提取到 opencode web URL，已在上方输出最后一次启动的 tmux 日志。${background}"
     return 1
 }
 
