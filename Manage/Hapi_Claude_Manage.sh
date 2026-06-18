@@ -39,7 +39,7 @@ HAPI_HUB_TMUX_NAME="hapi_hub"
 HAPI_SELECTED_WORKSPACES=()
 HAPI_HUB_URL=""
 
-# opencode 手机网页控制 (web UI / headless) 相关变量
+# opencode 网页控制台 (WebUI / headless) 相关变量
 HAPI_OPENCODE_WEB_TMUX_NAME="opencode_web"
 HAPI_OPENCODE_WEB_URL=""
 HAPI_OPENCODE_WEB_PHONE_URL=""
@@ -135,6 +135,22 @@ hapi_print_tmux_log() {
         echo -e "${yellow}tmux pane 暂无输出。${background}"
     fi
     echo -e "${white}========================================${background}"
+}
+
+hapi_generate_secure_password() {
+    local generated
+
+    if command -v openssl >/dev/null 2>&1; then
+        generated=$(openssl rand -base64 24 2>/dev/null | tr -d '\n')
+    fi
+    if [ -z "${generated}" ] && [ -r /dev/urandom ]; then
+        generated=$(LC_ALL=C tr -dc 'A-Za-z0-9_@%+=:,.~-' < /dev/urandom | head -c 32)
+    fi
+
+    if [ -z "${generated}" ]; then
+        return 1
+    fi
+    printf '%s' "${generated}"
 }
 
 hapi_json_escape() {
@@ -2233,67 +2249,6 @@ hapi_hub_menu() {
     done
 }
 
-hapi_opencode_config_dir() {
-    printf '%s' "${HOME}/.config/opencode"
-}
-
-hapi_show_opencode_config() {
-    local config_file="$(hapi_opencode_config_dir)/opencode.json"
-
-    echo -e "${white}=====${green}当前 opencode 配置${white}=====${background}"
-    echo -e "${yellow}配置文件: ${config_file}${background}"
-    if [ -f "${config_file}" ]; then
-        sed -E 's#("(api[_-]?key|apikey|token|secret)"[[:space:]]*:[[:space:]]*")[^"]*#\1******#gi' "${config_file}"
-    else
-        echo -e "${yellow}未找到配置文件，可运行 opencode 或 opencode auth login 后自动生成。${background}"
-    fi
-}
-
-hapi_opencode_auth_login() {
-    hapi_ensure_opencode || return
-    echo -e "${yellow}即将运行 opencode auth login 进行模型提供商认证（交互式 TUI）。${background}"
-    echo -e "${yellow}按提示选择提供商（如 Anthropic / OpenAI / 自定义等）并填入 API Key。${background}"
-    pause
-    opencode auth login
-}
-
-hapi_opencode_auth_list() {
-    hapi_ensure_opencode || return
-    echo -e "${white}=====${green}opencode 已登录的提供商${white}=====${background}"
-    opencode auth list
-}
-
-hapi_opencode_logout() {
-    hapi_ensure_opencode || return
-    echo -e "${yellow}即将运行 opencode auth logout 注销某个提供商（交互式）。${background}"
-    opencode auth logout
-}
-
-hapi_opencode_config_menu() {
-    local num
-
-    while true; do
-        echo -e "${white}=====${green}opencode 配置${white}=====${background}"
-        echo -e "${yellow}如果要自定义模型提供商，推荐使用 opencode webui。${background}"
-        echo -e "${green}1.  ${cyan}查看当前配置${background}"
-        echo -e "${green}2.  ${cyan}登录/配置模型提供商 (auth login)${background}"
-        echo -e "${green}3.  ${cyan}查看已登录提供商 (auth list)${background}"
-        echo -e "${green}4.  ${cyan}注销提供商 (auth logout)${background}"
-        echo -e "${green}0.  ${cyan}返回上一级${background}"
-        echo "========================="
-        echo -en "${green}请输入您的选项: ${background}"; read -r num
-
-        case "${num}" in
-        1) hapi_show_opencode_config; pause ;;
-        2) hapi_opencode_auth_login; pause ;;
-        3) hapi_opencode_auth_list; pause ;;
-        4) hapi_opencode_logout; pause ;;
-        0) return ;;
-        *) echo -e "${red}输入错误${background}"; pause ;;
-        esac
-    done
-}
-
 hapi_detect_lan_ip() {
     local ip
     ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]\+\).*/\1/p' | head -n 1)
@@ -2366,10 +2321,10 @@ hapi_show_opencode_web_url() {
     fi
 
     if [ -n "${HAPI_OPENCODE_WEB_AUTH}" ]; then
-        echo -e "${red}已启用 HTTP Basic Auth，访问时的用户名/密码：${HAPI_OPENCODE_WEB_AUTH}${background}"
+        echo -e "${red}已启用 HTTP Basic Auth，访问时的用户名/密码: ${HAPI_OPENCODE_WEB_AUTH}${background}"
         echo -e "${red}重要：以上凭据是敏感信息，不要发送给其他人！${background}"
     else
-        echo -e "${yellow}提示：当前未设置访问密码，0.0.0.0 监听会暴露给局域网/公网，建议重启时设置密码。${background}"
+        echo -e "${yellow}HTTP Basic Auth 为必填；当前脚本未记录本次启动的用户名/密码。${background}"
     fi
     echo -e "${yellow}提示：请在 Chromium 内核的浏览器（Chrome / Edge 等）打开，否则可能报错。${background}"
 }
@@ -2391,7 +2346,7 @@ hapi_opencode_web_start() {
     fi
 
     local port hostname password username remote
-    echo -e "${white}=====${green}启动 opencode 手机网页控制${white}=====${background}"
+    echo -e "${white}=====${green}启动 opencode 网页控制台${white}=====${background}"
     echo -en "${cyan}请输入监听端口 (默认 50851): ${background}"
     read -r port
     port=${port:-50851}
@@ -2408,25 +2363,27 @@ hapi_opencode_web_start() {
         hostname="0.0.0.0"
     fi
 
-    echo -e "${yellow}监听 0.0.0.0 会把网页控制暴露到局域网，强烈建议设置访问密码。${background}"
-    echo -en "${cyan}请输入访问密码（HTTP Basic Auth，回车则不设置）: ${background}"
+    echo -en "${cyan}请输入访问密码（已隐藏输入，回车则随机密码）: ${background}"
     read -rs password
     echo
-    username=""
-    if [ -n "${password}" ]; then
-        echo -en "${cyan}请输入访问用户名 (默认 opencode): ${background}"
-        read -r username
-        username=${username:-opencode}
-        HAPI_OPENCODE_WEB_AUTH="${username} / ${password}"
-    else
-        HAPI_OPENCODE_WEB_AUTH=""
+    if [ -z "${password}" ]; then
+        password=$(hapi_generate_secure_password)
+        if [ -z "${password}" ]; then
+            echo -e "${red}随机访问密码生成失败，请手动输入访问密码后重试。${background}"
+            return 1
+        fi
+        echo -e "${green}已生成随机访问密码，启动成功后会显示用户名/密码。${background}"
     fi
+    echo -en "${cyan}请输入访问用户名 (默认 opencode): ${background}"
+    read -r username
+    username=${username:-opencode}
+    HAPI_OPENCODE_WEB_AUTH="${username} / ${password}"
 
-    local launch_cmd
+    local launch_cmd password_shell username_shell
+    printf -v password_shell '%q' "${password}"
+    printf -v username_shell '%q' "${username}"
     launch_cmd="export PATH=\"${PATH}\"; export PNPM_HOME=\"${PNPM_HOME}\";"
-    if [ -n "${password}" ]; then
-        launch_cmd="${launch_cmd} export OPENCODE_SERVER_PASSWORD=\"${password}\"; export OPENCODE_SERVER_USERNAME=\"${username}\";"
-    fi
+    launch_cmd="${launch_cmd} export OPENCODE_SERVER_PASSWORD=${password_shell}; export OPENCODE_SERVER_USERNAME=${username_shell};"
     launch_cmd="${launch_cmd} opencode web --port ${port} --hostname ${hostname}"
 
     local attempt wait_count
@@ -2506,9 +2463,9 @@ hapi_opencode_web_menu() {
     local num
 
     while true; do
-        echo -e "${white}=====${green}opencode 手机网页控制 (远程 WebUI)${white}=====${background}"
+        echo -e "${white}=====${green}opencode 网页控制台 (WebUI)${white}=====${background}"
         echo -e "${yellow}通过 opencode web 启动 headless 服务并附带网页界面，可在手机浏览器远程控制。${background}"
-        echo -e "${green}1.  ${cyan}启动/查看 手机网页控制 URL${background}"
+        echo -e "${green}1.  ${cyan}启动/查看 网页控制台 URL${background}"
         echo -e "${green}2.  ${cyan}重启 opencode web${background}"
         echo -e "${green}3.  ${cyan}打开当前的 tmux${background}"
         echo -e "${green}4.  ${cyan}停止 opencode web${background}"
@@ -2666,18 +2623,17 @@ manage_hapi() {
     echo -e "${white}----------------------------------------${background}"
     echo -e "${yellow}-- opencode --${background}"
     echo -e "${green}5.  ${cyan}安装/更新 opencode${background}"
-    echo -e "${green}6.  ${cyan}配置 opencode${background}"
-    echo -e "${green}7.  ${cyan}opencode 手机网页控制 (远程 WebUI)${background}"
+    echo -e "${green}6.  ${cyan}opencode 网页控制台 (WebUI)${background}"
     echo -e "${white}----------------------------------------${background}"
     echo -e "${yellow}-- Hapi --${background}"
-    echo -e "${green}8.  ${cyan}安装/更新 Hapi${background}"
-    echo -e "${green}9.  ${cyan}设置/运行 Hapi runner 工作目录${background}"
-    echo -e "${green}10. ${cyan}设置 Hapi CLI${background}"
-    echo -e "${green}11. ${cyan}运行 Hapi hub${background}"
-    echo -e "${green}12. ${cyan}停止 Hapi${background}"
+    echo -e "${green}7.  ${cyan}安装/更新 Hapi${background}"
+    echo -e "${green}8.  ${cyan}设置/运行 Hapi runner 工作目录${background}"
+    echo -e "${green}9.  ${cyan}设置 Hapi CLI${background}"
+    echo -e "${green}10. ${cyan}运行 Hapi hub${background}"
+    echo -e "${green}11. ${cyan}停止 Hapi${background}"
     echo -e "${white}----------------------------------------${background}"
     echo -e "${yellow}-- 其他 --${background}"
-    echo -e "${green}13. ${cyan}卸载${background}"
+    echo -e "${green}12. ${cyan}卸载${background}"
     echo -e "${green}0.  ${cyan}退出${background}"
     echo -e "${white}========================================${background}"
     echo -en "${green}请输入您的选项: ${background}"; read -r num
@@ -2688,14 +2644,13 @@ manage_hapi() {
     3) hapi_install_claude_code; pause; manage_hapi ;;
     4) hapi_claude_config_menu; manage_hapi ;;
     5) hapi_install_opencode; pause; manage_hapi ;;
-    6) hapi_opencode_config_menu; manage_hapi ;;
-    7) hapi_opencode_web_menu; manage_hapi ;;
-    8) hapi_install_hapi; pause; manage_hapi ;;
-    9) hapi_runner_workspace_menu; manage_hapi ;;
-    10) hapi_config_menu; manage_hapi ;;
-    11) hapi_hub_menu; manage_hapi ;;
-    12) hapi_stop_all; pause; manage_hapi ;;
-    13) hapi_uninstall; pause; manage_hapi ;;
+    6) hapi_opencode_web_menu; manage_hapi ;;
+    7) hapi_install_hapi; pause; manage_hapi ;;
+    8) hapi_runner_workspace_menu; manage_hapi ;;
+    9) hapi_config_menu; manage_hapi ;;
+    10) hapi_hub_menu; manage_hapi ;;
+    11) hapi_stop_all; pause; manage_hapi ;;
+    12) hapi_uninstall; pause; manage_hapi ;;
     0) exit 0 ;;
     *) echo -e "${red}输入错误${background}"; pause; manage_hapi ;;
     esac
