@@ -121,6 +121,7 @@ bash <(curl -sL https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/
 - [xiaofei-plugin-misaka-fork](https://github.com/misaka20002/xiaofei-plugin)
 - [paimonnai-plugin](https://github.com/misaka20002/paimonnai-plugin)
 - [sf插件](https://github.com/AIGC-Yunzai/siliconflow-plugin)
+- [Hapi插件](https://github.com/AIGC-Yunzai/hapi_connector-plugin)
 
 ## LICENSE
 
