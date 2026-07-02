@@ -275,12 +275,13 @@ hapi_write_claude_settings_file() {
     local default_auth_token="$2"
     local default_base_url="${3:-https://api.deepseek.com/anthropic}"
     local default_haiku_model="${4:-claude-haiku-4-5-20251001}"
-    local default_sonnet_model="${5:-claude-sonnet-4-5-20250929}"
+    local default_sonnet_model="${5:-claude-sonnet-4-5-20250929[1M]}"
     local default_opus_model="${6:-claude-opus-4-8[1M]}"
-    local default_max_effort="$7"
-    local auth_token base_url haiku_model sonnet_model opus_model enable_max_effort
+    local default_fable_model="${7:-claude-fable-5[1M]}"
+    local default_max_effort="$8"
+    local auth_token base_url haiku_model sonnet_model opus_model fable_model enable_max_effort
     local reasoning_suffix effort_line
-    local auth_token_json base_url_json haiku_json sonnet_json opus_json
+    local auth_token_json base_url_json haiku_json sonnet_json sonnet_name_json opus_json opus_name_json fable_json fable_name_json
 
     while [ -z "${auth_token}" ]; do
         if [ -n "${default_auth_token}" ]; then
@@ -304,6 +305,7 @@ hapi_write_claude_settings_file() {
 
     echo -e "${yellow}如需开启 [1m] 或 [1M] 上下文，请自行在模型名后添加。${background}"
     echo -e "${yellow}示例: claude-opus-4-8[1M] 或 claude-opus-4-8[1m]${background}"
+    echo -e "${yellow}对应的 *_MODEL_NAME 字段会自动生成（去掉 [1M]/[1m] 后缀）。${background}"
 
     echo -en "${cyan}请输入 HAIKU_MODEL (默认 ${default_haiku_model}): ${background}"
     read -r haiku_model
@@ -316,6 +318,10 @@ hapi_write_claude_settings_file() {
     echo -en "${cyan}请输入 OPUS_MODEL (默认 ${default_opus_model}): ${background}"
     read -r opus_model
     opus_model=${opus_model:-${default_opus_model}}
+
+    echo -en "${cyan}请输入 FABLE_MODEL (默认 ${default_fable_model}): ${background}"
+    read -r fable_model
+    fable_model=${fable_model:-${default_fable_model}}
 
     if [[ "${default_max_effort}" == "max" || "${default_max_effort}" == "y" || "${default_max_effort}" == "Y" ]]; then
         echo -en "${cyan}是否开启最大强度思考？[Y/n]: ${background}"
@@ -337,19 +343,25 @@ hapi_write_claude_settings_file() {
     base_url_json=$(hapi_json_escape "${base_url}")
     haiku_json=$(hapi_json_escape "${haiku_model}")
     sonnet_json=$(hapi_json_escape "${sonnet_model}")
+    sonnet_name_json=$(hapi_json_escape "${sonnet_model%%\[*}")
     opus_json=$(hapi_json_escape "${opus_model}")
+    opus_name_json=$(hapi_json_escape "${opus_model%%\[*}")
+    fable_json=$(hapi_json_escape "${fable_model}")
+    fable_name_json=$(hapi_json_escape "${fable_model%%\[*}")
 
     cat > "${output_file}" << EOF
 {
   "env": {
     "ANTHROPIC_AUTH_TOKEN": "${auth_token_json}",
     "ANTHROPIC_BASE_URL": "${base_url_json}",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "${fable_json}",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "${fable_name_json}",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${haiku_json}",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "${opus_json}",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "${opus_json}",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "${opus_name_json}",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "${sonnet_json}",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "${sonnet_json}",
-    "ANTHROPIC_MODEL": "${sonnet_json}",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "${sonnet_name_json}",
+    "ANTHROPIC_MODEL": "${sonnet_name_json}",
     "ANTHROPIC_REASONING_MODEL": "${opus_json}"${reasoning_suffix}
 ${effort_line}
   },
@@ -438,7 +450,7 @@ hapi_config_claude() {
     local config_dir="${HOME}/.claude"
     local settings_file="${config_dir}/settings.json"
     local backup_file
-    local current_auth_token current_base_url current_haiku_model current_sonnet_model current_opus_model current_max_effort
+    local current_auth_token current_base_url current_haiku_model current_sonnet_model current_opus_model current_fable_model current_max_effort
 
     hapi_show_claude_config "${settings_file}" || true
 
@@ -477,6 +489,10 @@ hapi_config_claude() {
     if [ -z "${current_opus_model}" ]; then
         current_opus_model=$(hapi_claude_current_value "ANTHROPIC_REASONING_MODEL" "${settings_file}")
     fi
+    current_fable_model=$(hapi_claude_current_value "ANTHROPIC_DEFAULT_FABLE_MODEL" "${settings_file}")
+    if [ -z "${current_fable_model}" ]; then
+        current_fable_model=$(hapi_claude_current_value "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME" "${settings_file}")
+    fi
     current_max_effort=$(hapi_claude_current_value "CLAUDE_CODE_EFFORT_LEVEL" "${settings_file}")
 
     mkdir -p "${config_dir}"
@@ -487,6 +503,7 @@ hapi_config_claude() {
         "${current_haiku_model}" \
         "${current_sonnet_model}" \
         "${current_opus_model}" \
+        "${current_fable_model}" \
         "${current_max_effort}" || return
     chmod 600 "${settings_file}"
     echo -e "${green}Claude Code 配置已写入: ${settings_file}${background}"
