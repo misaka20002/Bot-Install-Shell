@@ -2194,25 +2194,47 @@ hapi_show_astrbot_plugin_config() {
     listen_port=$(hapi_read_setting "listenPort" "3006")
     token=$(hapi_read_setting "cliApiToken" "")
 
-    echo -e "${white}=====${green}AstrBot 插件配置${white}=====${background}"
-    echo -e "${yellow}当前 Hapi listenHost: ${listen_host}${background}"
-    echo -e "${yellow}当前 Hapi listenPort: ${listen_port}${background}"
-    echo -e "${green}在 AstrBot 管理面板的插件配置页填写以下必填字段:${background}"
-    echo -e "${cyan}hapi_endpoint:${background}"
-    echo -e "  同一宿主机（非 Docker）: http://localhost:${listen_port}"
-    echo -e "  AstrBot/TRSS Docker（Linux 宿主机默认）: http://172.17.0.1:${listen_port}"
-    echo -e "  AstrBot/TRSS Docker（Windows/macOS 宿主机）: http://host.docker.internal:${listen_port}"
-    echo -e "  同一内网 / Tailscale: http://<HAPI机器IP>:${listen_port}"
-    echo -e "  公共中继 / 自建隧道: 使用 Hub URL 或你的域名"
-    echo -e "${cyan}access_token:${background}"
-    if [ -n "${token}" ]; then
-        echo -e "  ${red}${token}${background}"
-    else
-        echo -e "  ${yellow}未读取到 cliApiToken，请先启动 Hapi Hub 生成 ~/.hapi/settings.json。${background}"
-    fi
+    echo -e ""
+    echo -e "${white}=========================================${background}"
+    echo -e "${white}||   ${green}hapi_connector 插件配置帮助${white}   ||${background}"
+    echo -e "${white}=========================================${background}"
+    echo -e ""
 
-    echo -e "${yellow}如果 AstrBot 是 Docker 启动，本脚本所在 Linux 宿主机通常填写: http://172.17.0.1:${listen_port}${background}"
-    echo -e "${yellow}Docker 场景必须先让 Hapi 监听所有网卡，即 listenHost -> 0.0.0.0。${background}"
+    echo -e "${white}【${green}一、当前 Hapi Hub 状态${white}】${background}"
+    echo -e "  ${yellow}1. listenHost : ${cyan}${listen_host}${background}"
+    echo -e "  ${yellow}2. listenPort : ${cyan}${listen_port}${background}"
+    echo -e ""
+
+    echo -e "${white}【${green}hapi_connector 插件配置页必填字段${white}】${background}"
+    echo -e ""
+
+    echo -e "  ${yellow}1. ${cyan}hapi_endpoint${yellow}（请根据 hapi_connector 插件 与 AstrBot/TRSS 的环境选择其一）：${background}"
+    echo -e "     ${cyan}(1)${background} 同一宿主机（非 Docker）"
+    echo -e "         ${green}http://localhost:${listen_port}${background}"
+    echo -e "     ${cyan}(2)${background} AstrBot/TRSS Docker（Linux 宿主机默认）"
+    echo -e "         ${green}http://172.17.0.1:${listen_port}${background}"
+    echo -e "     ${cyan}(3)${background} AstrBot/TRSS Docker（Windows / macOS 宿主机）"
+    echo -e "         ${green}http://host.docker.internal:${listen_port}${background}"
+    echo -e "     ${cyan}(4)${background} 同一内网 / Tailscale"
+    echo -e "         ${green}http://<HAPI机器IP>:${listen_port}${background}"
+    echo -e "     ${cyan}(5)${background} 公共中继 / 自建隧道"
+    echo -e "         ${green}使用 Hub URL 或你的域名${background}"
+    echo -e ""
+
+    echo -e "  ${yellow}2. ${cyan}access_token${background}："
+    if [ -n "${token}" ]; then
+        echo -e "     ${red}${token}${background}"
+    else
+        echo -e "     ${yellow}未读取到 cliApiToken，请先启动 Hapi Hub 生成 ~/.hapi/settings.json。${background}"
+    fi
+    echo -e ""
+
+    echo -e "${white}【${green}三、新手必读${white}】${background}"
+    echo -e "  ${yellow}1.${background} 如果 AstrBot/TRSS Docker 是 Docker 启动，本脚本所在 Linux 宿主机通常填写:"
+    echo -e "     ${green}http://172.17.0.1:${listen_port}${background}"
+    echo -e "  ${yellow}2.${background} Docker 场景必须先让 Hapi 监听所有网卡，即 listenHost -> 0.0.0.0。"
+    echo -e ""
+
     hapi_check_listen_host
 }
 
