@@ -1235,7 +1235,7 @@ hapi_config_codex() {
     }
 
     if [ -f "${auth_file}" ] || [ -f "${config_file}" ]; then
-        echo -en "${yellow}检测到已存在 Codex 配置，将更新 auth.json，并修改 config.toml 中的 model/base_url 等字段；其他配置会尽量保留。是否继续？[y/N]: ${background}"
+        echo -en "${yellow}检测到已存在 Codex 配置，是否仅修改 key/model/base_url 等字段（其他配置会保留），是否继续修改？[y/N]: ${background}"
         read -r overwrite
         if [[ "${overwrite}" != "y" && "${overwrite}" != "Y" ]]; then
             echo -e "${yellow}已取消配置。${background}"
