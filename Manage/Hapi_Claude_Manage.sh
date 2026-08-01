@@ -38,6 +38,8 @@ pause() {
 HAPI_HUB_TMUX_NAME="hapi_hub"
 HAPI_SELECTED_WORKSPACES=()
 HAPI_HUB_URL=""
+# Hapi 的 tunwg 首次分配隧道地址最多会等待 30 秒；这里留出少量余量。
+HAPI_HUB_URL_WAIT_SECONDS="${HAPI_HUB_URL_WAIT_SECONDS:-40}"
 
 # opencode 网页控制台 (WebUI / headless) 相关变量
 HAPI_OPENCODE_WEB_TMUX_NAME="opencode_web"
@@ -45,6 +47,8 @@ HAPI_OPENCODE_WEB_URL=""
 HAPI_OPENCODE_WEB_PHONE_URL=""
 HAPI_OPENCODE_WEB_PUBLIC_URL=""
 HAPI_OPENCODE_WEB_AUTH=""
+HAPI_OPENCODE_WEB_USERNAME=""
+HAPI_OPENCODE_WEB_PASSWORD=""
 
 hapi_load_node_env() {
     if [ -d "/usr/local/node/bin" ]; then
@@ -455,7 +459,7 @@ hapi_config_claude() {
     hapi_show_claude_config "${settings_file}" || true
 
     if [ -f "${settings_file}" ]; then
-        echo -en "${yellow}检测到已存在 Claude Code 配置，继续将覆盖原有配置！是否继续？[y/N]: ${background}"
+        echo -en "${yellow}检测到已存在 Claude Code 配置，继续修改将覆盖原有配置！是否继续？[y/N]: ${background}"
         read -r overwrite
         if [[ "${overwrite}" != "y" && "${overwrite}" != "Y" ]]; then
             echo -e "${yellow}已取消配置。${background}"
@@ -1966,62 +1970,115 @@ hapi_capture_hub_url() {
     [ -n "${HAPI_HUB_URL}" ]
 }
 
+hapi_show_hub_access_fallback() {
+    local access_mode="$1"
+    local cli_token listen_host listen_port public_ip lan_ip direct_url
+
+    cli_token=$(hapi_read_setting "cliApiToken" "")
+    listen_host=$(hapi_read_setting "listenHost" "127.0.0.1")
+    listen_port=$(hapi_read_setting "listenPort" "3006")
+
+    if [ "${access_mode}" = "no-relay" ]; then
+        echo -e "${yellow}当前 Hapi Hub 未使用公共 relay，以下为服务器直连信息。${background}"
+    else
+        echo -e "${yellow}尚未收到公共中继分配的 URL，Hub 会继续在 tmux 中运行。${background}"
+    fi
+    echo -e "${yellow}正在尝试生成服务器直连信息...${background}"
+
+    if [ "${listen_host}" != "127.0.0.1" ] && [ "${listen_host}" != "localhost" ] && [ "${listen_host}" != "::1" ]; then
+        public_ip=$(hapi_detect_public_ip)
+        if [ -n "${public_ip}" ]; then
+            direct_url="http://${public_ip}:${listen_port}"
+            echo -e "${red}服务器公网 Hub 地址（需放行防火墙/安全组 TCP ${listen_port} 端口）：${background}"
+            echo -e "${red}${direct_url}${background}"
+        else
+            lan_ip=$(hapi_detect_lan_ip)
+            if [ -n "${lan_ip}" ]; then
+                echo -e "${yellow}未获取到服务器公网 IP；局域网 Hub 地址：${background}"
+                echo -e "${yellow}http://${lan_ip}:${listen_port}${background}"
+            fi
+        fi
+    else
+        echo -e "${yellow}当前 listenHost 为 ${listen_host}，仅能本机访问。将其设为 0.0.0.0 并重启 Hub 后，才能使用公网 IP:${listen_port}。${background}"
+    fi
+
+    if [ -n "${cli_token}" ]; then
+        echo -e "${red}登录 token（敏感信息，请勿分享）：${background}"
+        echo -e "${red}${cli_token}${background}"
+    else
+        echo -e "${yellow}未读取到 cliApiToken；请查看 ${HOME}/.hapi/settings.json。${background}"
+    fi
+
+}
+
 hapi_show_hub_url() {
     if hapi_capture_hub_url; then
         echo -e "${red}重要：以下 URL 包含访问 token，不要发送给其他人！${background}"
         echo -e "${red}${HAPI_HUB_URL}${background}"
     else
-        echo -e "${yellow}暂未提取到 Hapi Hub URL，请稍后重试或查看 tmux 日志。${background}"
-        return 1
+        hapi_show_hub_access_fallback
     fi
 }
 
 hapi_start_hub() {
+    local hub_mode="${1:-relay}"
+    local hub_command hub_label wait_limit
+
     hapi_ensure_command || return
     hapi_ensure_tmux || return
 
-    if tmux has-session -t "${HAPI_HUB_TMUX_NAME}" 2>/dev/null; then
-        echo -e "${green}Hapi Hub 已在后台运行。${background}"
-        if hapi_show_hub_url; then
-            return
-        fi
-        echo -e "${yellow}现有 Hapi Hub 未提取到 URL，准备重启后重试。${background}"
-        tmux kill-session -t "${HAPI_HUB_TMUX_NAME}" >/dev/null 2>&1
+    if [ "${hub_mode}" = "no-relay" ]; then
+        hub_command="hapi hub --no-relay"
+        hub_label="Hapi Hub（不使用 relay）"
+        wait_limit=10
+    else
+        hub_command="hapi hub --relay"
+        hub_label="Hapi Hub"
+        wait_limit="${HAPI_HUB_URL_WAIT_SECONDS}"
     fi
 
-    local attempt wait_count
-    attempt=1
-    while [ "${attempt}" -le 3 ]; do
-        echo -e "${yellow}正在启动 Hapi Hub (第 ${attempt}/3 次)...${background}"
-        tmux kill-session -t "${HAPI_HUB_TMUX_NAME}" >/dev/null 2>&1
-        if ! tmux new-session -d -s "${HAPI_HUB_TMUX_NAME}" "export PATH=\"${PATH}\"; export PNPM_HOME=\"${PNPM_HOME}\"; hapi hub --relay"; then
-            echo -e "${red}Hapi Hub tmux 会话创建失败。${background}"
-            return 1
+    if tmux has-session -t "${HAPI_HUB_TMUX_NAME}" 2>/dev/null; then
+        echo -e "${green}${hub_label} 已在后台运行。${background}"
+        if [ "${hub_mode}" = "no-relay" ]; then
+            hapi_show_hub_access_fallback "no-relay"
+        else
+            hapi_show_hub_url
         fi
+        return
+    fi
 
-        wait_count=0
-        while [ "${wait_count}" -lt 20 ]; do
-            sleep 1
-            if hapi_capture_hub_url; then
-                hapi_show_hub_url
-                echo -e "${green}Hapi Hub 已在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
+    local wait_count
+    echo -e "${yellow}正在启动 ${hub_label}...${background}"
+    if ! tmux new-session -d -s "${HAPI_HUB_TMUX_NAME}" "export PATH=\"${PATH}\"; export PNPM_HOME=\"${PNPM_HOME}\"; ${hub_command}"; then
+        echo -e "${red}Hapi Hub tmux 会话创建失败。${background}"
+        return 1
+    fi
+
+    wait_count=0
+    while [ "${wait_count}" -lt "${wait_limit}" ]; do
+        sleep 1
+        if [ "${hub_mode}" = "no-relay" ]; then
+            if tmux capture-pane -pt "${HAPI_HUB_TMUX_NAME}" -S -50 2>/dev/null | grep -qE '\[Web\] Hub listening on|\[Web\] hub listening on'; then
+                hapi_show_hub_access_fallback "no-relay"
+                echo -e "${green}${hub_label} 已在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
                 return 0
             fi
-            wait_count=$((wait_count + 1))
-        done
-
-        if [ "${attempt}" -lt 3 ]; then
-            echo -e "${yellow}本次未提取到 Hapi Hub URL，正在重启重试...${background}"
-        else
-            echo -e "${yellow}最后一次仍未提取到 Hapi Hub URL，下面输出本次 tmux 日志。${background}"
-            hapi_print_tmux_log "${HAPI_HUB_TMUX_NAME}" "Hapi Hub"
+        elif hapi_capture_hub_url; then
+            hapi_show_hub_url
+            echo -e "${green}Hapi Hub 已在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
+            return 0
         fi
-        tmux kill-session -t "${HAPI_HUB_TMUX_NAME}" >/dev/null 2>&1
-        attempt=$((attempt + 1))
+        wait_count=$((wait_count + 1))
     done
 
-    echo -e "${red}连续 3 次未提取到 Hapi Hub URL，已在上方输出最后一次启动的 tmux 日志。${background}"
-    return 1
+    if [ "${hub_mode}" = "no-relay" ]; then
+        echo -e "${yellow}等待 ${wait_limit} 秒后仍未确认 Hub 就绪，下面输出 tmux 日志与直连信息。${background}"
+    else
+        echo -e "${yellow}等待 ${wait_limit} 秒后仍未收到中继 URL，下面输出 tmux 日志并给出直连兜底信息。${background}"
+    fi
+    hapi_print_tmux_log "${HAPI_HUB_TMUX_NAME}" "Hapi Hub"
+    hapi_show_hub_access_fallback "${hub_mode}"
+    echo -e "${green}${hub_label} 已保留在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
 }
 
 hapi_stop_all() {
@@ -2254,6 +2311,8 @@ hapi_attach_tmux() {
 }
 
 hapi_restart_hub() {
+    local hub_mode="${1:-relay}"
+
     hapi_ensure_command || return
     hapi_ensure_tmux || return
 
@@ -2263,7 +2322,7 @@ hapi_restart_hub() {
     else
         echo -e "${yellow}未检测到正在运行的 Hapi Hub tmux 会话，将直接启动。${background}"
     fi
-    hapi_start_hub
+    hapi_start_hub "${hub_mode}"
 }
 
 hapi_hub_menu() {
@@ -2271,16 +2330,16 @@ hapi_hub_menu() {
 
     while true; do
         echo -e "${white}=====${green}Hapi hub${white}=====${background}"
-        echo -e "${green}1.  ${cyan}启动/查看 Hapi hub URL${background}"
-        echo -e "${green}2.  ${cyan}重启 Hapi hub${background}"
+        echo -e "${green}1.  ${cyan}启动/重启 Hapi hub（获取中继 URL）${background}"
+        echo -e "${green}2.  ${cyan}启动/重启 Hapi hub（不使用中继）${background}"
         echo -e "${green}3.  ${cyan}打开当前的 tmux${background}"
         echo -e "${green}0.  ${cyan}返回上一级${background}"
         echo "========================="
         echo -en "${green}请输入您的选项: ${background}"; read -r num
 
         case "${num}" in
-        1) hapi_start_hub; pause ;;
-        2) hapi_restart_hub; pause ;;
+        1) hapi_restart_hub; pause ;;
+        2) hapi_restart_hub "no-relay"; pause ;;
         3) hapi_attach_tmux; pause ;;
         0) return ;;
         *) echo -e "${red}输入错误${background}"; pause ;;
@@ -2336,11 +2395,13 @@ hapi_show_opencode_web_url() {
         return 1
     fi
 
-    local public_ip port listen_host
-    echo -e "${green}本机监听地址: ${HAPI_OPENCODE_WEB_URL}${background}"
+    local public_ip port listen_host auth_username auth_password
+    echo -e ""
+    echo -e "${white}==========${green} opencode Web 访问地址 ${white}==========${background}"
+    echo -e "${cyan}本机监听地址${white}：${green}${HAPI_OPENCODE_WEB_URL}${background}"
     if [ -n "${HAPI_OPENCODE_WEB_PHONE_URL}" ]; then
-        echo -e "${red}重要：手机/远程网页控制 URL（需与本机在同一局域网，或通过 Tailscale/隧道访问）：${background}"
-        echo -e "${red}${HAPI_OPENCODE_WEB_PHONE_URL}${background}"
+        echo -e "${cyan}局域网访问地址${white}：${green}${HAPI_OPENCODE_WEB_PHONE_URL}${background}"
+        echo -e "${yellow}  手机需与本机在同一局域网，或通过 Tailscale / 隧道访问。${background}"
     else
         echo -e "${yellow}未能自动探测局域网 IP，请用本机的局域网/公网 IP 替换上方地址中的 host 部分。${background}"
     fi
@@ -2352,20 +2413,25 @@ hapi_show_opencode_web_url() {
         public_ip=$(hapi_detect_public_ip)
         if [ -n "${public_ip}" ] && [ -n "${port}" ]; then
             HAPI_OPENCODE_WEB_PUBLIC_URL="http://${public_ip}:${port}"
-            echo -e "${red}公网网页控制 URL（需放行防火墙/安全组 ${port} 端口）：${background}"
-            echo -e "${red}${HAPI_OPENCODE_WEB_PUBLIC_URL}${background}"
+            echo -e "${cyan}公网访问地址${white}：${red}${HAPI_OPENCODE_WEB_PUBLIC_URL}${background}"
+            echo -e "${yellow}  请确认已放行防火墙/安全组 TCP ${port} 端口。${background}"
         else
             echo -e "${yellow}未能获取公网 IP，请手动用公网 IP 替换地址中的 host 部分。${background}"
         fi
     fi
 
     if [ -n "${HAPI_OPENCODE_WEB_AUTH}" ]; then
-        echo -e "${red}已启用 HTTP Basic Auth，访问时的用户名/密码: ${HAPI_OPENCODE_WEB_AUTH}${background}"
-        echo -e "${red}重要：以上凭据是敏感信息，不要发送给其他人！${background}"
+        auth_username=${HAPI_OPENCODE_WEB_USERNAME:-${HAPI_OPENCODE_WEB_AUTH%% / *}}
+        auth_password=${HAPI_OPENCODE_WEB_PASSWORD:-${HAPI_OPENCODE_WEB_AUTH#* / }}
+        echo -e "${white}==========${red} HTTP Basic Auth（敏感） ${white}==========${background}"
+        echo -e "${cyan}用户名${white}：${red}${auth_username}${background}"
+        echo -e "${cyan}密  码${white}：${red}${auth_password}${background}"
+        echo -e "${yellow}请勿将以上凭据发送给其他人。${background}"
     else
         echo -e "${yellow}HTTP Basic Auth 为必填；当前脚本未记录本次启动的用户名/密码。${background}"
     fi
-    echo -e "${yellow}提示：请在 Chromium 内核的浏览器（Chrome / Edge 等）打开，否则可能报错。${background}"
+    echo -e "${white}=============================================${background}"
+    echo -e "${yellow}提示：请在 Chromium 内核浏览器（Chrome / Edge 等）打开，否则可能报错。${background}"
 }
 
 hapi_opencode_web_start() {
@@ -2417,6 +2483,8 @@ hapi_opencode_web_start() {
     read -r username
     username=${username:-opencode}
     HAPI_OPENCODE_WEB_AUTH="${username} / ${password}"
+    HAPI_OPENCODE_WEB_USERNAME="${username}"
+    HAPI_OPENCODE_WEB_PASSWORD="${password}"
 
     local launch_cmd password_shell username_shell
     printf -v password_shell '%q' "${password}"
@@ -2492,6 +2560,8 @@ hapi_opencode_web_stop() {
     if command -v tmux >/dev/null 2>&1 && tmux has-session -t "${HAPI_OPENCODE_WEB_TMUX_NAME}" 2>/dev/null; then
         tmux kill-session -t "${HAPI_OPENCODE_WEB_TMUX_NAME}" >/dev/null 2>&1
         HAPI_OPENCODE_WEB_AUTH=""
+        HAPI_OPENCODE_WEB_USERNAME=""
+        HAPI_OPENCODE_WEB_PASSWORD=""
         echo -e "${green}已停止 opencode web tmux 会话。${background}"
     else
         echo -e "${yellow}未检测到正在运行的 opencode web tmux 会话。${background}"

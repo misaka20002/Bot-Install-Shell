@@ -565,7 +565,7 @@ manage_singbox() {
         check_docker
         
         if [ -f "${CONF_FILE}" ]; then
-            echo -en "${yellow}检测到已存在配置文件，继续将覆盖原有配置！是否继续？[y/N]: ${background}"
+            echo -en "${yellow}检测到已存在配置文件，继续修改将覆盖原有配置！是否继续？[y/N]: ${background}"
             read overwrite
             if [[ "$overwrite" != "y" && "$overwrite" != "Y" ]]; then
                 manage_singbox
@@ -635,7 +635,7 @@ EOF
         check_docker
 
         if [ -f "${CONF_FILE}" ]; then
-            echo -en "${yellow}检测到已存在配置文件，继续将覆盖原有配置！是否继续？[y/N]: ${background}"
+            echo -en "${yellow}检测到已存在配置文件，继续修改将覆盖原有配置！是否继续？[y/N]: ${background}"
             read overwrite
             if [[ "$overwrite" != "y" && "$overwrite" != "Y" ]]; then
                 manage_singbox
