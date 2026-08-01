@@ -1981,7 +1981,9 @@ hapi_show_hub_access_fallback() {
     if [ "${access_mode}" = "no-relay" ]; then
         echo -e "${yellow}当前 Hapi Hub 未使用公共 relay，以下为服务器直连信息。${background}"
     else
-        echo -e "${yellow}尚未收到公共中继分配的 URL，Hub 会继续在 tmux 中运行。${background}"
+        echo -e "${yellow}尚未收到公共中继分配的 URL，Hub 会继续在 tmux 中运行；${background}"
+        echo -e "${yellow}可能是 Hapi 中继服务器故障，请重启为不使用中继模式。${background}"
+        echo -e "${white}====================${background}"
     fi
     echo -e "${yellow}正在尝试生成服务器直连信息...${background}"
 
@@ -2047,29 +2049,40 @@ hapi_start_hub() {
         return
     fi
 
-    local wait_count
-    echo -e "${yellow}正在启动 ${hub_label}...${background}"
+    local wait_count spinner_index spinner_chars spinner_char
+    spinner_chars="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    wait_count=0
+    spinner_index=0
+    echo -en "${yellow}正在启动 ${hub_label}  " 2>/dev/null || echo -e "${yellow}正在启动 ${hub_label}...${background}"
     if ! tmux new-session -d -s "${HAPI_HUB_TMUX_NAME}" "export PATH=\"${PATH}\"; export PNPM_HOME=\"${PNPM_HOME}\"; ${hub_command}"; then
         echo -e "${red}Hapi Hub tmux 会话创建失败。${background}"
         return 1
     fi
 
-    wait_count=0
     while [ "${wait_count}" -lt "${wait_limit}" ]; do
+        spinner_char=$(printf '%s' "${spinner_chars}" | cut -c $((spinner_index % ${#spinner_chars} + 1)))
+        printf "${cyan}%s${background}\r" "${spinner_char}" >&2
         sleep 1
         if [ "${hub_mode}" = "no-relay" ]; then
             if tmux capture-pane -pt "${HAPI_HUB_TMUX_NAME}" -S -50 2>/dev/null | grep -qE '\[Web\] Hub listening on|\[Web\] hub listening on'; then
+                printf "${green}%s 已就绪${background}\r" "${hub_label}"
+                echo ""
                 hapi_show_hub_access_fallback "no-relay"
                 echo -e "${green}${hub_label} 已在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
                 return 0
             fi
         elif hapi_capture_hub_url; then
+            printf "${green}%s 已就绪${background}\r" "${hub_label}"
+            echo ""
             hapi_show_hub_url
             echo -e "${green}Hapi Hub 已在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
             return 0
         fi
         wait_count=$((wait_count + 1))
+        spinner_index=$((spinner_index + 1))
     done
+    printf "${yellow}等待超时${background}\r"
+    echo ""
 
     if [ "${hub_mode}" = "no-relay" ]; then
         echo -e "${yellow}等待 ${wait_limit} 秒后仍未确认 Hub 就绪，下面输出 tmux 日志与直连信息。${background}"
