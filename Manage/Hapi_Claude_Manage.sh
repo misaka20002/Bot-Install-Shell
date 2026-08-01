@@ -1914,11 +1914,14 @@ hapi_select_workspaces() {
 
 hapi_start_runner() {
     local runner_args=()
-    local workspace_root
+    local workspace_root listen_port hub_api_url running_runner_api_url
 
     hapi_ensure_command || return
+    listen_port=$(hapi_read_setting "listenPort" "3006")
+    hub_api_url="${HAPI_API_URL:-http://localhost:${listen_port}}"
     echo -e "${yellow}提示1：Hapi runner 是全局单实例，新设置会覆盖当前 runner 的 workspace-root。${background}"
     echo -e "${yellow}提示2：Hapi runner 用于从聊天窗口远程创建 session。如果不启动 Runner，你仍然可以管理已有 session，但不能方便地让 HAPI 在指定机器上新建任务。${background}"
+    echo -e "${yellow}Runner 将连接本机 Hapi Hub: ${hub_api_url}${background}"
     hapi_select_workspaces || return
 
     for workspace_root in "${HAPI_SELECTED_WORKSPACES[@]}"; do
@@ -1927,7 +1930,22 @@ hapi_start_runner() {
 
     echo -e "${yellow}正在设置/运行 Hapi 工作目录:${background}"
     printf '  - %s\n' "${HAPI_SELECTED_WORKSPACES[@]}"
-    hapi runner start "${runner_args[@]}"
+
+    # Hapi Runner 的 Hub 地址由 HAPI_API_URL 决定，默认值固定为
+    # http://localhost:3006，并不会随 settings.json 的 listenPort 自动更新。
+    # 若端口已变更，先停止仍连接旧地址的单实例 Runner，再以当前端口启动。
+    running_runner_api_url=$(hapi runner status 2>/dev/null | sed -nE 's/^[[:space:]]*"startedWithApiUrl"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -n 1)
+    if [ -n "${running_runner_api_url}" ] && [ "${running_runner_api_url}" != "${hub_api_url}" ]; then
+        echo -e "${yellow}检测到现有 Runner 连接 ${running_runner_api_url}，正在切换到 ${hub_api_url}...${background}"
+        if ! hapi runner stop; then
+            echo -e "${red}停止现有 Hapi runner 失败，未启动新的 Runner。${background}"
+            return 1
+        fi
+    fi
+
+    if HAPI_API_URL="${hub_api_url}" hapi runner start "${runner_args[@]}"; then
+        echo -e "${green}Hapi Runner 已按 listenPort ${listen_port} 启动，Hub 地址: ${hub_api_url}${background}"
+    fi
 }
 
 hapi_runner_workspace_menu() {
@@ -2154,6 +2172,7 @@ hapi_set_listen_config() {
     echo -e "${white}=====${green}设置 Hapi listenHost / listenPort${white}=====${background}"
     echo -e "${yellow}当前 listenHost: ${current_host}${background}"
     echo -e "${yellow}当前 listenPort: ${current_port}${background}"
+    echo -e "${red}注意：修改 listenPort 后需要 停止 Hapi 并重启"
     echo -en "${cyan}请输入 listenHost (默认 ${current_host}，Docker/局域网建议 0.0.0.0): ${background}"
     read -r listen_host
     listen_host=${listen_host:-${current_host}}
