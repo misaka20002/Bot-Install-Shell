@@ -1992,17 +1992,19 @@ hapi_show_hub_access_fallback() {
     local access_mode="$1"
     local cli_token listen_host listen_port public_ip lan_ip direct_url
 
-    cli_token=$(hapi_read_setting "cliApiToken" "")
-    listen_host=$(hapi_read_setting "listenHost" "127.0.0.1")
-    listen_port=$(hapi_read_setting "listenPort" "3006")
-
     if [ "${access_mode}" = "no-relay" ]; then
         echo -e "${yellow}当前 Hapi Hub 未使用公共 relay，以下为服务器直连信息。${background}"
     else
+        echo -e "${white}========================================${background}"
         echo -e "${yellow}尚未收到公共中继分配的 URL，Hub 会继续在 tmux 中运行；${background}"
         echo -e "${yellow}可能是 Hapi 中继服务器故障，请重启为不使用中继模式。${background}"
-        echo -e "${white}====================${background}"
+        echo -e "${white}========================================${background}"
+        return 0
     fi
+
+    cli_token=$(hapi_read_setting "cliApiToken" "")
+    listen_host=$(hapi_read_setting "listenHost" "127.0.0.1")
+    listen_port=$(hapi_read_setting "listenPort" "3006")
     echo -e "${yellow}正在尝试生成服务器直连信息...${background}"
 
     if [ "${listen_host}" != "127.0.0.1" ] && [ "${listen_host}" != "localhost" ] && [ "${listen_host}" != "::1" ]; then
@@ -2036,8 +2038,41 @@ hapi_show_hub_url() {
         echo -e "${red}重要：以下 URL 包含访问 token，不要发送给其他人！${background}"
         echo -e "${red}${HAPI_HUB_URL}${background}"
     else
-        hapi_show_hub_access_fallback
+        hapi_print_tmux_log "${HAPI_HUB_TMUX_NAME}" "Hapi Hub"
+        hapi_show_hub_access_fallback "relay"
     fi
+}
+
+hapi_spinner_start() {
+    local spinner_message="$1"
+
+    hapi_spinner_stop
+    HAPI_SPINNER_PID=""
+    # 非交互输出（例如重定向到日志）不写入光标控制序列。
+    [ -t 1 ] || return
+
+    printf '\033[?25l'
+    (
+        local spinner_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+        local spinner_index
+        trap 'exit 0' TERM INT
+        while true; do
+            for ((spinner_index = 0; spinner_index < ${#spinner_chars}; spinner_index++)); do
+                printf '\r\033[K\033[36m%s\033[0m \033[33m%s\033[0m' \
+                    "${spinner_chars:spinner_index:1}" "${spinner_message}"
+                sleep 0.1
+            done
+        done
+    ) &
+    HAPI_SPINNER_PID=$!
+}
+
+hapi_spinner_stop() {
+    [ -n "${HAPI_SPINNER_PID:-}" ] || return
+    kill "${HAPI_SPINNER_PID}" >/dev/null 2>&1
+    wait "${HAPI_SPINNER_PID}" 2>/dev/null || true
+    printf '\033[?25h\r\033[K'
+    HAPI_SPINNER_PID=""
 }
 
 hapi_start_hub() {
@@ -2064,52 +2099,50 @@ hapi_start_hub() {
         else
             hapi_show_hub_url
         fi
-        return
+        return $?
     fi
 
-    local wait_count spinner_index spinner_chars spinner_char
-    spinner_chars="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    local wait_count
     wait_count=0
-    spinner_index=0
-    echo -en "${yellow}正在启动 ${hub_label}  " 2>/dev/null || echo -e "${yellow}正在启动 ${hub_label}...${background}"
+    echo -e "${yellow}正在启动 ${hub_label}...${background}"
     if ! tmux new-session -d -s "${HAPI_HUB_TMUX_NAME}" "export PATH=\"${PATH}\"; export PNPM_HOME=\"${PNPM_HOME}\"; ${hub_command}"; then
         echo -e "${red}Hapi Hub tmux 会话创建失败。${background}"
         return 1
     fi
 
+    hapi_spinner_start "正在等待 ${hub_label} 就绪"
     while [ "${wait_count}" -lt "${wait_limit}" ]; do
-        spinner_char=$(printf '%s' "${spinner_chars}" | cut -c $((spinner_index % ${#spinner_chars} + 1)))
-        printf "${cyan}%s${background}\r" "${spinner_char}" >&2
         sleep 1
         if [ "${hub_mode}" = "no-relay" ]; then
             if tmux capture-pane -pt "${HAPI_HUB_TMUX_NAME}" -S -50 2>/dev/null | grep -qE '\[Web\] Hub listening on|\[Web\] hub listening on'; then
-                printf "${green}%s 已就绪${background}\r" "${hub_label}"
-                echo ""
+                hapi_spinner_stop
                 hapi_show_hub_access_fallback "no-relay"
                 echo -e "${green}${hub_label} 已在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
                 return 0
             fi
         elif hapi_capture_hub_url; then
-            printf "${green}%s 已就绪${background}\r" "${hub_label}"
-            echo ""
-            hapi_show_hub_url
-            echo -e "${green}Hapi Hub 已在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
-            return 0
+            hapi_spinner_stop
+            if hapi_show_hub_url; then
+                echo -e "${green}Hapi Hub 已在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
+                return 0
+            fi
+            return 1
         fi
         wait_count=$((wait_count + 1))
-        spinner_index=$((spinner_index + 1))
     done
-    printf "${yellow}等待超时${background}\r"
-    echo ""
+    hapi_spinner_stop
 
     if [ "${hub_mode}" = "no-relay" ]; then
         echo -e "${yellow}等待 ${wait_limit} 秒后仍未确认 Hub 就绪，下面输出 tmux 日志与直连信息。${background}"
+        hapi_print_tmux_log "${HAPI_HUB_TMUX_NAME}" "Hapi Hub"
+        hapi_show_hub_access_fallback "no-relay"
+        echo -e "${green}${hub_label} 已保留在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
     else
-        echo -e "${yellow}等待 ${wait_limit} 秒后仍未收到中继 URL，下面输出 tmux 日志并给出直连兜底信息。${background}"
+        echo -e "${yellow}等待 ${wait_limit} 秒后仍未收到中继 URL，下面输出 tmux 日志。${background}"
+        hapi_print_tmux_log "${HAPI_HUB_TMUX_NAME}" "Hapi Hub"
+        hapi_show_hub_access_fallback "relay"
+        echo -e "${green}${hub_label} 已保留在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
     fi
-    hapi_print_tmux_log "${HAPI_HUB_TMUX_NAME}" "Hapi Hub"
-    hapi_show_hub_access_fallback "${hub_mode}"
-    echo -e "${green}${hub_label} 已保留在 tmux 会话 ${HAPI_HUB_TMUX_NAME} 中后台运行。${background}"
 }
 
 hapi_stop_all() {
