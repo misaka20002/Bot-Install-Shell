@@ -2252,6 +2252,7 @@ configure_music_sign() {
         "https://ss.xingzhige.com/music_card/card"
         "https://oiapi.net/api/QQMusicJSONArk"
         "https://api.injahow.cn/meting/"
+        "http://106.55.0.102:10087/"
     )
     DEFAULT_MUSIC_SIGN_URL="${PRESET_URLS[0]}"
     PRESET_COUNT=${#PRESET_URLS[@]}
