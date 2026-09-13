@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # 更新版本号后 sh 会自动更新本地 sh 脚本（改动脚本后必须递增，旧安装才会自动拉取新版本）
-SCRIPT_VERSION="1.0.30"
+SCRIPT_VERSION="1.0.31"
 
 # 失败路径必须能被上层察觉：pipeline 的退出码默认只取最后一个命令（tee 恒为 0）
 # 脚本不使用 set -e，错误恢复仍由各函数显式判断并用返回值向上传播
@@ -2536,7 +2536,12 @@ configure_baidu_translate(){
 
 main(){
 # 如果是首次通过curl执行，确保先保存脚本到系统目录
-if [[ "$0" == *"/dev/fd/"* || "$0" == "bash" ]]; then
+# 一个会话内只试一次：用户在 toggle 关闭自动更新后会把系统脚本删掉，这里每屏重绘都会
+# 再 download_script 下回来，造成数秒空档——空档里用户多按的回车会被下面的 read number
+# 吃成空输入，落到 *) 输入错误（现已改 return，不再退出但会多刷一屏）。标记置位后本次会话不再重复下载，
+# 系统脚本存不存在都不影响本次从内存运行（注释本就是「失败只提示，不影响本次使用」）
+if [[ "$0" == *"/dev/fd/"* || "$0" == "bash" ]] && [ "${SCRIPT_SAVE_TRIED:-0}" != "1" ]; then
+  SCRIPT_SAVE_TRIED=1
   # 首次执行先把自己保存到系统目录；失败只提示，不影响本次使用（cron 创建路径另有严格检查）
   if ! ensure_script_saved; then
     echo -e ${yellow}系统脚本暂未保存成功，自动更新功能需稍后重试${background}
@@ -2615,7 +2620,7 @@ case ${number} in
 14) echo; reinstall_pip_dependencies ;;
 15) echo; configure_baidu_translate ;;
 0) exit ;;
-*) echo; echo -e ${red}输入错误${background}; exit ;;
+*) echo; echo -e ${red}输入错误${background}; return ;;
 esac
 }
 
