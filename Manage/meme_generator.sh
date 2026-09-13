@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # 更新版本号后 sh 会自动更新本地 sh 脚本（改动脚本后必须递增，旧安装才会自动拉取新版本）
-SCRIPT_VERSION="1.0.29"
+SCRIPT_VERSION="1.0.30"
 
 # 失败路径必须能被上层察觉：pipeline 的退出码默认只取最后一个命令（tee 恒为 0）
 # 脚本不使用 set -e，错误恢复仍由各函数显式判断并用返回值向上传播
@@ -84,6 +84,11 @@ MAIN_REPO_BRANCH="main"
 # 前台模式守护循环的 PID / 停止标志（让「停止」能真正停掉前台重启循环）
 FOREGROUND_PID_FILE="${HOME}/.config/meme_generator/foreground.pid"
 FOREGROUND_STOP_FLAG="${HOME}/.config/meme_generator/foreground.stop"
+
+# 公网 IP 缓存：由后台任务一次性写入；主菜单重绘只读这个文件，绝不每次都发请求
+PUBLIC_IP_CACHE="${HOME}/.config/meme_generator/public_ip.cache"
+PUBLIC_IP_TTL=21600   # 缓存有效期（秒，6 小时）；过期后由下一次进入脚本时的后台任务刷新
+PUBLIC_IP=""          # 当前进程展示用的公网 IP（load_public_ip_cache 填充）
 
 # 辅助函数：生成 meme_dirs 配置字符串，仅包含本地实际已存在的额外仓库
 # （原 get_default_meme_dirs 已删除：它会无条件写入全部 6 个路径，
@@ -242,6 +247,60 @@ config_get server port "${config}"
 
 function meme_host(){
 config_get server host "${config}"
+}
+
+# ================= 公网 IP（后台获取 + 本地缓存） =================
+# 需求：对外展示 http://<公网IP>:<port>；但绝不允许「每进一次主菜单就 POST 一次」。
+# 分工：refresh_public_ip_bg 只在 init_public_ip（脚本启动一次）发现缓存缺失/过期时后台触发；
+#       load_public_ip_cache 只读缓存文件（零网络），菜单每次重绘都调它，后台写完下一屏就能看到。
+# is_valid_ipv4：校验「点分四段、每段 0-255」。探测响应可能是错误页/HTML/CDN 文案，
+#                不校验就会把垃圾当 IP 存进缓存并展示给用户（写缓存前、读缓存后都过这一关）。
+is_valid_ipv4(){
+local ip="$1"
+[[ "${ip}" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+local seg
+for seg in "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"; do
+    if [ "${seg}" -gt 255 ] 2>/dev/null; then return 1; fi
+done
+return 0
+}
+
+# 只读缓存 → 填充 PUBLIC_IP；缓存缺失/为空/损坏/TTL 过期都返回 1（调用方据此决定是否后台补获取）
+load_public_ip_cache(){
+PUBLIC_IP=""
+[ -s "${PUBLIC_IP_CACHE}" ] || return 1
+local ts="" ip=""
+read -r ts ip < "${PUBLIC_IP_CACHE}" 2>/dev/null || return 1
+case "${ts}" in ''|*[!0-9]*) return 1 ;; esac
+is_valid_ipv4 "${ip}" || return 1
+if [ "$(( $(date +%s) - ts ))" -ge "${PUBLIC_IP_TTL}" ]; then return 1; fi
+PUBLIC_IP="${ip}"
+return 0
+}
+
+# 后台获取（不阻塞菜单）：主方式 POST ip.3322.net（国内服务器可达、POST 直接回纯 IP），
+# 失败退回 GET api.ipify.org（海外服务器更稳）。只有校验通过的 IPv4 才原子写入缓存；
+# 并发重入时最多多打一次请求、mv 原子覆盖，无一致性问题，不做加锁。
+refresh_public_ip_bg(){
+(
+    mkdir -p "${PUBLIC_IP_CACHE%/*}" 2>/dev/null
+    ip=$(curl -s -X POST --connect-timeout 3 --max-time 8 https://ip.3322.net 2>/dev/null | tr -d '[:space:]')
+    if ! is_valid_ipv4 "${ip}"; then
+        ip=$(curl -s --connect-timeout 3 --max-time 8 https://api.ipify.org 2>/dev/null | tr -d '[:space:]')
+    fi
+    if is_valid_ipv4 "${ip}"; then
+        ip_tmp="${PUBLIC_IP_CACHE}.tmp.$$"
+        if printf '%s %s\n' "$(date +%s)" "${ip}" > "${ip_tmp}"; then
+            mv -f "${ip_tmp}" "${PUBLIC_IP_CACHE}" || rm -f "${ip_tmp}"
+        fi
+    fi
+) >/dev/null 2>&1 &
+}
+
+# 交互入口（mainbak 前）调用一次；auto_update（cron）路径刻意不调——定时任务不需要它，也不该多发请求
+init_public_ip(){
+if load_public_ip_cache; then return 0; fi
+refresh_public_ip_bg
 }
 
 # 读取 [meme] meme_dirs 的方括号内容（不含 [ ]）
@@ -2493,7 +2552,7 @@ case "${cron_state}" in
 *) auto_update_condition="${red}[未启动]" ;;
 esac
 
-local Port="" ShowHost=""
+local Port="" ShowHost="" IsWildcardHost=0
 # 三态：别把「修复模式的半成品」显示成「未启动」——那会误导用户去点启动，而启动必然失败
 if is_meme_install_complete; then
     Port=$(meme_port)
@@ -2528,8 +2587,12 @@ echo -e ${green}meme自动更新服务: ${auto_update_condition}${background}
 if [ "${condition}" = "${green}[运行中]" ]; then
     ShowHost=$(meme_host)
     # 0.0.0.0 是监听通配地址，不能当作客户端访问地址展示；用 127.0.0.1 提示本机访问
-    if [ -z "${ShowHost}" ] || [ "${ShowHost}" = "0.0.0.0" ]; then ShowHost="127.0.0.1"; fi
+    if [ -z "${ShowHost}" ] || [ "${ShowHost}" = "0.0.0.0" ]; then ShowHost="127.0.0.1"; IsWildcardHost=1; fi
     echo -e ${green}MEME api: ${cyan}http://${ShowHost}:${Port}${background}
+    # 只有通配监听时对外才有公网访问地址；这里只读本地缓存（后台任务负责写入），不发任何网络请求
+    if [ "${IsWildcardHost}" = "1" ] && load_public_ip_cache; then
+        echo -e ${green}MEME 公网: ${cyan}http://${PUBLIC_IP}:${Port}${background}
+    fi
 fi
 echo -e ${green}QQ群:${cyan}呆毛版-QQ群:1022982073${background}
 echo "========================="
@@ -2568,5 +2631,7 @@ if [ "$1" = "auto_update" ]; then
   auto_update_meme_generator
   exit $?
 else
+  # 交互入口补一次公网 IP：缓存有效就零网络请求；缺失/过期才后台获取（绝不阻塞菜单）
+  init_public_ip
   mainbak
 fi

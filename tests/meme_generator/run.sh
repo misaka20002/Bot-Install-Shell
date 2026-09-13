@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 回归测试：Manage/meme_generator.sh
 #
-#   bash tests/meme_generator/run.sh                      # 默认：A~F 断言（**跳过 G 组真实 git 测试**）
+#   bash tests/meme_generator/run.sh                      # 默认：A~F + H 断言（**跳过 G 组真实 git 测试**）
 #   bash tests/meme_generator/run.sh --only A,B           # 只跑指定分组（排障 / 日常最常用）
 #   bash tests/meme_generator/run.sh --log /tmp/x.log     # 指定进度日志（默认自动生成）
 #   bash tests/meme_generator/run.sh --with-git           # 只有确实改了 git_clone / git_update 时才用
@@ -298,10 +298,11 @@ for f in is_meme_process_running is_meme_install_complete install_meme_generator
          register_foreground_watchdog Foreground_Start git_update git_clone \
          foreground_pid_alive is_meme_repo_installed \
          read_current_crontab meme_cron_present append_meme_cron remove_meme_cron \
-         toggle_auto_update setup_auto_update download_script ensure_script_saved; do
+         toggle_auto_update setup_auto_update download_script ensure_script_saved \
+         is_valid_ipv4 load_public_ip_cache refresh_public_ip_bg init_public_ip; do
   declare -f "${f}" > /dev/null || MISSING="${MISSING} ${f}"
 done
-for v in install_path config FOREGROUND_PID_FILE FOREGROUND_STOP_FLAG MAIN_REPO_NAME; do
+for v in install_path config FOREGROUND_PID_FILE FOREGROUND_STOP_FLAG MAIN_REPO_NAME PUBLIC_IP_CACHE PUBLIC_IP_TTL; do
   eval "val=\${${v}:-}"
   [ -n "${val}" ] || MISSING="${MISSING} \$${v}"
 done
@@ -828,6 +829,95 @@ if group_on G; then
   fi
 fi
 
+# ---------- H 公网 IP：后台获取 + 本地缓存（curl 全程桩掉，不联网） ----------
+if group_on H; then
+  mkdir -p "${HOME}/.config/meme_generator"   # --only H 时其它组不会建这个目录
+  head_ "H1) is_valid_ipv4：合法放行；超段/缺段/多段/字母/HTML/空白/空串全部拒绝"
+  if is_valid_ipv4 "1.2.3.4" && is_valid_ipv4 "0.0.0.0" && is_valid_ipv4 "255.255.255.255"; then
+    ok "合法 IPv4 放行"
+  else
+    no "合法 IPv4 被误拒"
+  fi
+  bad_cnt=0
+  for b in "256.1.1.1" "1.2.3" "1.2.3.4.5" "abc" "1.2.3.4 " "<html>1.2.3.4</html>" ""; do
+    if is_valid_ipv4 "${b}"; then bad_cnt=$((bad_cnt + 1)); fi
+  done
+  if [ "${bad_cnt}" -eq 0 ]; then
+    ok "非法输入全部拒绝"
+  else
+    no "${bad_cnt} 个非法输入被放行"
+  fi
+
+  head_ "H2) load_public_ip_cache：只读文件零网络；缺失/损坏/过期都必须拒绝且清空 PUBLIC_IP"
+  rm -f "${PUBLIC_IP_CACHE}"
+  if load_public_ip_cache; then no "缓存不存在却返回成功"; else ok "缓存不存在时如实返回失败"; fi
+  if [ -z "${PUBLIC_IP}" ]; then ok "读取失败后 PUBLIC_IP 保持为空"; else no "读取失败却残留 PUBLIC_IP=${PUBLIC_IP}"; fi
+  printf 'hello world\n' > "${PUBLIC_IP_CACHE}"
+  if load_public_ip_cache; then no "损坏内容被当成 IP 采用了"; else ok "损坏内容被拒绝"; fi
+  printf '%s %s\n' "$(date +%s)" "203.0.113.7" > "${PUBLIC_IP_CACHE}"
+  if load_public_ip_cache && [ "${PUBLIC_IP}" = "203.0.113.7" ]; then
+    ok "新鲜缓存读出 IP 存入变量"
+  else
+    no "新鲜缓存未读出（PUBLIC_IP=${PUBLIC_IP}）"
+  fi
+  printf '%s %s\n' "$(( $(date +%s) - PUBLIC_IP_TTL - 10 ))" "203.0.113.7" > "${PUBLIC_IP_CACHE}"
+  PUBLIC_IP="stale-marker"
+  if load_public_ip_cache; then no "过期缓存仍被采用"; else ok "过期缓存被拒绝"; fi
+  if [ -z "${PUBLIC_IP}" ]; then ok "拒绝过期缓存时 PUBLIC_IP 被清空"; else no "拒绝后仍残留 PUBLIC_IP=${PUBLIC_IP}"; fi
+
+  head_ "H3) refresh_public_ip_bg：合法响应写入缓存；非法响应（错误页）绝不写缓存"
+  rm -f "${PUBLIC_IP_CACHE}"
+  ( curl(){ printf '198.51.100.23\n'; }; refresh_public_ip_bg ) > /dev/null 2>&1 </dev/null
+  wait_n=0
+  while [ ! -s "${PUBLIC_IP_CACHE}" ] && [ "${wait_n}" -lt 50 ]; do sleep 0.1; wait_n=$((wait_n + 1)); done
+  if [ "$(awk '{print $2}' "${PUBLIC_IP_CACHE}" 2>/dev/null)" = "198.51.100.23" ]; then
+    ok "后台获取把合法响应写入缓存"
+  else
+    no "后台获取未写入缓存或内容错误：$(cat "${PUBLIC_IP_CACHE}" 2>/dev/null)"
+  fi
+  rm -f "${PUBLIC_IP_CACHE}"
+  ( curl(){ printf '<html>error</html>\n'; }; refresh_public_ip_bg ) > /dev/null 2>&1 </dev/null
+  wait_n=0
+  while [ ! -s "${PUBLIC_IP_CACHE}" ] && [ "${wait_n}" -lt 20 ]; do sleep 0.1; wait_n=$((wait_n + 1)); done
+  if [ ! -s "${PUBLIC_IP_CACHE}" ]; then
+    ok "非法响应不写缓存（否则错误页会被当 IP 展示）"
+  else
+    no "非法响应被写进缓存：$(cat "${PUBLIC_IP_CACHE}")"
+  fi
+
+  head_ "H4) init_public_ip：缓存新鲜 → 绝不触发后台获取（「不要每次都 POST」的保证）"
+  printf '%s %s\n' "$(date +%s)" "203.0.113.99" > "${PUBLIC_IP_CACHE}"
+  rm -f "${WORK_DIR}/pubip_refresh_marker" "${WORK_DIR}/pubip_var_marker"
+  (
+    refresh_public_ip_bg(){ : > "${WORK_DIR}/pubip_refresh_marker"; }
+    init_public_ip
+    [ "${PUBLIC_IP}" = "203.0.113.99" ] && : > "${WORK_DIR}/pubip_var_marker"
+  ) > /dev/null 2>&1 </dev/null
+  if [ ! -f "${WORK_DIR}/pubip_refresh_marker" ]; then
+    ok "缓存新鲜 → 没有触发后台获取"
+  else
+    no "缓存新鲜却触发了后台获取（会造成反复请求）"
+  fi
+  if [ -f "${WORK_DIR}/pubip_var_marker" ]; then
+    ok "init 后 PUBLIC_IP 已填充"
+  else
+    no "init 后 PUBLIC_IP 未填充"
+  fi
+
+  head_ "H5) init_public_ip：缓存缺失 → 触发一次后台获取（每次脚本启动至多补一发）"
+  rm -f "${PUBLIC_IP_CACHE}" "${WORK_DIR}/pubip_refresh_marker"
+  (
+    refresh_public_ip_bg(){ : > "${WORK_DIR}/pubip_refresh_marker"; }
+    init_public_ip
+  ) > /dev/null 2>&1 </dev/null
+  if [ -f "${WORK_DIR}/pubip_refresh_marker" ]; then
+    ok "无缓存 → 触发了后台获取"
+  else
+    no "无缓存却没触发后台获取（公网地址永远显示不出来）"
+  fi
+  rm -f "${PUBLIC_IP_CACHE}" "${WORK_DIR}/pubip_refresh_marker" "${WORK_DIR}/pubip_var_marker"
+fi
+
 done_
 [ "${FAIL}" -eq 0 ]
 TESTS
@@ -935,7 +1025,7 @@ else
 
     # 自检①：分组隔离必须真的生效。否则"别的组里某条 NOT OK"也能把本变异判成 caught（假 caught）。
     leaked=""
-    for g in A B C D E F G; do
+    for g in A B C D E F G H; do
       case ",${groups}," in *",${g},"*) continue ;; esac
       printf '%s\n' "${out}" | grep -qE "^${g}[0-9]?\)" && leaked="${leaked} ${g}"
     done

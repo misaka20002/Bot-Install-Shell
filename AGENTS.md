@@ -125,7 +125,7 @@ mainbak
 bash -n Manage/xxx.sh
 
 # 2) 行为回归：跑仓库内的测试（tests/<脚本名>/run.sh），它从脚本里抽出函数体、再造数据跑断言（不需要 root、不联网）
-#     bash tests/meme_generator/run.sh              # 默认：A~F 断言（**G 组已默认跳过**）
+#     bash tests/meme_generator/run.sh              # 默认：A~F + H 断言（**G 组已默认跳过**）
 #     bash tests/meme_generator/run.sh --only A,B   # 只跑指定分组（日常最常用）
 #     bash tests/meme_generator/run.sh --with-git   # 只有确实改了 git_clone / git_update 才用（G 组已停跑，见下）
 #     --log FILE 指定进度日志（默认自动生成）；每条断言即时 append，超时/被杀也能看出停在哪
@@ -135,7 +135,7 @@ bash -n Manage/xxx.sh
 #      · **不再跑变异验证**（`--mutate`）。参数保留（代码没删），但**不要跑、也不要再提议**。
 #      随之而来的唯一代价：新断言的"有效性"不再由变异自动证明，所以**新断言必须手工拿反例自证**
 #      （临时改坏对应生产代码 → 跑一次确认变红 → 改回），否则就是"看起来对"的断言。
-#    当前 meme_generator.sh 的断言覆盖（run.sh 里按 A~G 分组，--only 可单独跑；**G 组已默认停跑/未维护**）：
+#    当前 meme_generator.sh 的断言覆盖（run.sh 里按 A~H 分组，--only 可单独跑；**G 组已默认停跑/未维护**）：
 #      A 运行判据      is_meme_process_running 把前台 watchdog 算作"运行中"（覆盖 sleep 2 间隙）
 #      B 前台身份      PID 身份 fail-closed；register_foreground_watchdog 取不到 boot_id 必须失败且不落地文件；
 #                      Foreground_Start 准备阶段失败时不登记身份（用标记文件测**登记时机**，不是测文件残留）；
@@ -162,6 +162,11 @@ bash -n Manage/xxx.sh
 #                      F9 `setup_auto_update` **关闭分支**失败时必须**如实返回非零**（读取失败 / 删不掉各一条），
 #                      并带一条正向对照（正常关闭必须返回 0）。为什么必须直接断言返回码、端到端抓不到：
 #                      它的调用点 `Tmux_Start` 那个分支最后一条语句是 `echo`，返回值在那一层被吃掉
+#      H 公网 IP       is_valid_ipv4 拒绝超段/缺段/多段/HTML/空白等垃圾输入；load_public_ip_cache 只读缓存
+#                      文件（零网络），缺失/损坏/TTL 过期一律拒绝且清空 PUBLIC_IP；refresh_public_ip_bg 只有
+#                      合法 IPv4 才原子写缓存（错误页绝不落盘，POST ip.3322.net → GET api.ipify.org 兜底）；
+#                      init_public_ip 缓存新鲜时绝不触发后台获取（「不要每次进主菜单都 POST」的保证）、
+#                      缓存缺失/过期才补一发（curl 桩掉，不联网）。2026-09-13 新增，三条变异反例已自证
 #      G Git 边界      ⛔ **默认不跑（未维护）**：只有确实改了 git 相关代码时才 `--with-git` 跑一次。内容是——
 #                      git_clone 目录所有权（已存在非空目录必须被拒绝且不删文件）；
 #                      git_update 面对**真正的非快进改写**（上游 reset 回 A、再造 C、强推）仍能对齐远端 HEAD；
