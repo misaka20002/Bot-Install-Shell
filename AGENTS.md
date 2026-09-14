@@ -101,7 +101,7 @@ mainbak
 
 ### 编辑与 EOL 约定
 
-- **按文件保持它原有的 EOL**：不要无意归一化。当前 `Manage/meme_generator.sh` 的基线是**全 CRLF**；`Manage/Hapi_Claude_Manage.sh` 是已知历史例外（混行）。
+- **按文件保持它原有的 EOL**：不要无意归一化。当前 `Manage/meme_generator.sh`、`Manage/SYS_Manage.sh` 的基线是**全 CRLF**（后者 2026-09-14 实测 1128 CRLF / 0 LF，改完要复核没被整体归一）；`Manage/Hapi_Claude_Manage.sh` 是已知历史例外（混行）。
   `tests/**/*.sh` 反过来必须是 **LF**：CRLF 会让 `bash tests/...` 直接报 `\r` 相关错误（`$'\r': command not found`）。
   曾经用一个 `.gitattributes`（`tests/**/*.sh text eol=lf`）钉住这件事；**如果那个文件不在仓库里，就要在提交前手动确认
   `tests/` 下的脚本仍是 LF**（`git add` 时 `core.autocrlf=true` 会把 CRLF 转成 LF 存进对象库，但 **Windows 上重新 checkout
@@ -474,3 +474,5 @@ git diff --stat && git diff --check
 - 主菜单允许直接进入「尚未安装」的功能项（如按 5 更新）：每个入口函数都要自己加「是否已安装」guard，不要依赖菜单显示。
 - tmux 会话使用独立 socket（`tmux -L <name>`）；清理时要连 `kill-server` 和 `/tmp/tmux-$(id -u)/<name>` 一起处理，否则会留下坏 socket。
 - `git_clone` / `git_update` 失败后可能留下半成品目录（有目录无 `.git`）——**只能清理由本轮操作创建的目录**；已存在的目录不得按"半成品"推断后删除。
+- **`SYS_Manage.sh` 的「安装常用字体」各发行版包名不同，别照抄**：CJK 是 `fonts-noto-cjk`（apt）/ `google-noto-sans-cjk-fonts`（yum、dnf）/ `noto-fonts-cjk`（pacman）；emoji 是 `fonts-noto-color-emoji`（apt）/ `noto-fonts-emoji`（pacman）。RPM 系**改过名**：EL9 及更早是 `google-noto-emoji-color-fonts`，EL10 起是 `google-noto-color-emoji-fonts`，要写成 `dnf install A || dnf install B` 两条命令试——写进一条里时只要有一个包不存在，dnf 会 `Unable to find a match` 让**整条事务失败**。⚠️ **`google-noto-emoji-fonts` 是黑白 emoji**，装错包不报错但表情仍是方块。装完必须按 `fc-list :lang=zh` / `fc-list | grep -i emoji` 复核：字体装失败是**静默**的，只有 fc-list 能戳破（2026-09-14：`chatgpt-plugin` 的列表图在服务器上整片中文变方块，根因就是宿主没装 CJK 字体）。
+- `Linux/Bot-Install-*.sh` 那批系统安装脚本只装文泉驿（CentOS 走 `groupinstall fonts`），**没有 Noto 系列**——需要 CJK/emoji 覆盖时记得同步这四处。

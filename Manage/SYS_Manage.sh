@@ -329,7 +329,25 @@ install_fonts() {
             pacman -Sy --noconfirm wqy-microhei wqy-zenhei
         fi
         
+        # Noto CJK（思源黑体上游，中日韩全覆盖）。与上面的 GitHub 直下互为备份：
+        # 国内服务器走 ghfast 镜像仍可能失败，而 apt/yum 用的是国内镜像源
+        echo -e "${cyan}正在安装Noto CJK字体包...${background}"
+        if command -v apt >/dev/null 2>&1; then
+            apt install -y fonts-noto-cjk
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y google-noto-sans-cjk-fonts
+        elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y google-noto-sans-cjk-fonts
+        elif command -v pacman >/dev/null 2>&1; then
+            pacman -Sy --noconfirm noto-fonts-cjk
+        fi
+        
         fc-cache -fv
+        echo -e "${cyan}已注册的中文字体:${background}"
+        fc-list :lang=zh family | sort -u
+        if ! fc-list :lang=zh | grep -q .; then
+            echo -e "${yellow}警告：未检测到任何中文字体，上面的安装步骤可能都失败了，渲染中文会显示成方块${background}"
+        fi
         echo -e "${green}中文字体安装完成并已刷新字体缓存${background}"
         pause
         ;;
@@ -366,13 +384,36 @@ install_fonts() {
             apt update && apt install -y wget fontconfig
         elif command -v yum >/dev/null 2>&1; then
             yum install -y wget fontconfig
+        elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y wget fontconfig
+        elif command -v pacman >/dev/null 2>&1; then
+            pacman -Sy --noconfirm wget fontconfig
         fi
         
         mkdir -p ${fonts_dir}/emoji
-        echo -e "${cyan}正在下载Noto Color Emoji字体...${background}"
-        wget -q --show-progress ${GithubMirror}https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf -O ${fonts_dir}/emoji/NotoColorEmoji.ttf
+        echo -e "${cyan}正在安装Noto Color Emoji字体包...${background}"
+        if command -v apt >/dev/null 2>&1; then
+            apt install -y fonts-noto-color-emoji
+        elif command -v yum >/dev/null 2>&1; then
+            # EL9 及更早叫 google-noto-emoji-color-fonts，EL10 起改名为 google-noto-color-emoji-fonts。
+            # 两个包名要分两条命令试：写在一条里时只要有一个不存在，整条事务都会失败
+            yum install -y google-noto-color-emoji-fonts || yum install -y google-noto-emoji-color-fonts
+        elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y google-noto-color-emoji-fonts || dnf install -y google-noto-emoji-color-fonts
+        elif command -v pacman >/dev/null 2>&1; then
+            pacman -Sy --noconfirm noto-fonts-emoji
+        fi
+        
+        # 包管理器装不上（源里没有这个包）时退回直接下载字体文件
+        fc-cache -f >/dev/null 2>&1
+        if ! fc-list | grep -qi "Noto Color Emoji"; then
+            echo -e "${cyan}包管理器未提供，正在下载Noto Color Emoji字体...${background}"
+            wget -q --show-progress ${GithubMirror}https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf -O ${fonts_dir}/emoji/NotoColorEmoji.ttf
+        fi
         
         fc-cache -fv
+        echo -e "${cyan}已注册的表情字体:${background}"
+        fc-list | grep -i "emoji" || echo -e "${yellow}未检测到表情字体，请检查上面的安装日志${background}"
         echo -e "${green}表情符号字体安装完成并已刷新字体缓存${background}"
         pause
         ;;
