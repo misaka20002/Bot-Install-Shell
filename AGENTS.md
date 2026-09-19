@@ -19,7 +19,8 @@
 | `install.sh` | 引导安装器：装依赖 → 下载 `Manage/Main.sh` → 校验后装为 `/usr/local/bin/xdm` |
 | `Manage/Main.sh` | xdm 主菜单（TUI），分发到下面各功能脚本，并负责自身更新 |
 | `Manage/meme_generator.sh` | meme 表情包生成器管理（本仓库当前最复杂的脚本，见下文专属约定） |
-| `Manage/*.sh` | 其余功能脚本：`Hapi_Claude_Manage.sh`、`SYS_Manage.sh`、`NapCat.sh`、`Sayu_Bot.sh`、`Lagrange_OneBot.sh`、`BOT-*.sh`、`BOT_INSTALL.sh`、`GitBot.sh`、`QSignServer.sh`、`OtherFunctions.sh` |
+| `Manage/Hapi_Claude_Manage.sh` | Hapi / Claude Code / Codex / opencode 管理（含 Codex `auth.json` 编辑器，见下文专属约定） |
+| `Manage/*.sh` | 其余功能脚本：`SYS_Manage.sh`、`NapCat.sh`、`Sayu_Bot.sh`、`Lagrange_OneBot.sh`、`BOT-*.sh`、`BOT_INSTALL.sh`、`GitBot.sh`、`QSignServer.sh`、`OtherFunctions.sh` |
 | `Linux/Bot-Install-*.sh` | 各发行版的系统级引导脚本 |
 | `Manage/用户协议.txt` | 安装前需用户同意的协议 |
 | `Markdown/`、`img/` | 使用文档与截图 |
@@ -101,16 +102,20 @@ mainbak
 
 ### 编辑与 EOL 约定
 
-- **按文件保持它原有的 EOL**：不要无意归一化。当前 `Manage/meme_generator.sh`、`Manage/SYS_Manage.sh` 的基线是**全 CRLF**（后者 2026-09-14 实测 1128 CRLF / 0 LF，改完要复核没被整体归一）；`Manage/Hapi_Claude_Manage.sh` 是已知历史例外（混行）。
+- **按文件保持它原有的 EOL**：不要无意归一化。2026-09-19 实测基线：
+  `Manage/meme_generator.sh`（2642 行 / 2642 CRLF）、`Manage/SYS_Manage.sh`（1128 / 1128）、`Manage/Main.sh`（1107 / 1107）、
+  `Manage/NapCat.sh`（3281 / 3281）都是**全 CRLF**；`Manage/Hapi_Claude_Manage.sh` 现在是**全 LF**（3575 行 / 0 CRLF）。
+  ⚠️ `Hapi_Claude_Manage.sh` 原先记录为"已知历史例外（混行）"，**该状态已不存在**：2026-09-19 实测工作区副本已是全 LF。
+  仓库里（对象库）本来就是纯 LF（`git show HEAD:Manage/Hapi_Claude_Manage.sh` 实测 0 CRLF），
+  所以 `git diff` 不会出现整文件假 diff；目标平台是 Linux，全 LF 是**正确状态，不要"修回"CRLF**。
+  CRLF 的那几个文件改完仍要复核没被整体归一（判据见下）。
   `tests/**/*.sh` 反过来必须是 **LF**：CRLF 会让 `bash tests/...` 直接报 `\r` 相关错误（`$'\r': command not found`）。
-  曾经用一个 `.gitattributes`（`tests/**/*.sh text eol=lf`）钉住这件事；**如果那个文件不在仓库里，就要在提交前手动确认
-  `tests/` 下的脚本仍是 LF**（`git add` 时 `core.autocrlf=true` 会把 CRLF 转成 LF 存进对象库，但 **Windows 上重新 checkout
-  会变回 CRLF**，届时测试就跑不起来；Linux 目标环境 checkout 得到的是 LF，不受影响）。
-  **现状（2026-09-13）：仓库里没有 `.gitattributes`**，而 `tests/meme_generator/run.sh` 已被跟踪（对象库里是纯 LF）。
-  所以 `git add` 时 git 会警告 `LF will be replaced by CRLF the next time Git touches it` —— 一旦你在 Windows 上
-  `git checkout` / `git restore` / 换工作区，`run.sh` 会变回 CRLF 且测试直接跑不起来。
-  两种处理：① 补一个 `.gitattributes` 写 `tests/**/*.sh text eol=lf`（推荐，一劳永逸）；② 每次 checkout 后用
-  `node -e` 把 `tests/` 下的脚本归一成 LF（见下）。Linux 上不受影响。
+  **已由 `.gitattributes` 钉住（2026-09-19 实测：仓库根该文件存在，内容只有一行 `tests/**/*.sh text eol=lf`）**：
+  `git check-attr text eol -- tests/meme_generator/run.sh` 返回 `text: set` / `eol: lf`。
+  （历史：曾有一段时间仓库里没有这个文件，于是 Windows 上重新 checkout 后 `run.sh` 会变回 CRLF、测试直接报
+  `$'\r': command not found`。现在这条已修好——判断时以 `git check-attr` 为准，别再手抄"有没有 .gitattributes"。）
+  注意它**只覆盖 `tests/**/*.sh`**：`Manage/*.sh` 没有 `text`/`eol` 属性，走 `core.autocrlf=true`（本机实测为 `true`），
+  即**对象库里是 LF、Windows 工作区 checkout 出来是 CRLF**，所以 `git diff` 的警告是正常的，不是"你改坏了行尾"。
 - 编辑时优先**定点替换**，不要整文件重写（会产生全量 diff 假象）。改完确认同文件没有出现新的混行：
   ```sh
   node -e "const s=require('fs').readFileSync(process.argv[1],'utf8');const nl=(s.match(/\n/g)||[]).length,crlf=(s.match(/\r\n/g)||[]).length;console.log(crlf===nl?'全 CRLF':(crlf===0?'全 LF':'混行!'));" Manage/xxx.sh
@@ -347,6 +352,11 @@ git diff --stat && git diff --check
 - **分组运行必须自带 fixture**：`--only D` 时 C 组不会跑，D 依赖的 `.git` / venv / config 必须由 D 自己建立；
   否则被测函数会在第一道守卫（`is_meme_repo_installed`）处**静默 return**，看起来像是"莫名其妙跳过了"。
 - 在本机（Windows）验证时：`bash` / `sed` / `wc` 等命令可能不在 PATH（精简 shim），可用绝对路径的 `bash.exe -n` 做语法检查，用 `node -e` 做文件与字符串检查。
+- **MSYS 的路径转换规则（2026-09-19 实测）**：MSYS 会转换**命令行参数**里的类 POSIX 路径，但**不转换环境变量**。
+  Windows 原生 `node` 把 `/tmp/x` 解析成"当前盘符根 + `tmp\x`"（如 `E:\tmp\x`），与 Bash 眼里的 `/tmp` **不是同一位置**。
+  所以：给 node 传路径一律用 `C:/Users/...` 这种带盘符的前向斜杠形式（不要用 `/tmp/...`，否则读写会落到另一个目录）；
+  而往 `PATH` 里追加目录必须用 POSIX 形式（`/c/Users/...`），写成 Windows 形式不生效、会 `command not found`
+  —— "假编辑器 / 假 vim 放进 PATH 却没被找到"就是踩了这个。
 - ⚠️ **本机 `rm` 是宿主包装的"回收站版"，在 Windows 形式路径上会 fail-closed 地"删不掉"**（2026-09-13 实测）：
   `type rm` 显示它是经 `BASH_ENV` 注入的**函数**（`${CODEBUDDY_SAFE_DELETE_BIN_DIR}/rm`）；当路径写成
   `C:\Users\...\Temp/xxx` 这种 Windows 形式时，它 CanonicalizePath 失败，stderr 打出
@@ -464,8 +474,116 @@ git diff --stat && git diff --check
 - `meme_port()` / `meme_host()` 只读 `[server]` 段；`meme_dirs_value()` 返回去掉外层 `[]` 的列表，`remove_dir_from_list()` 负责增删单项。
 - 端口必须校验范围 **1..65535**（只判「纯数字」会放过 0 / 65536 / 999999）。
 
+## `Manage/Hapi_Claude_Manage.sh` 专属约定
+
+管理 Hapi / Claude Code / Codex / opencode（入口 `manage_hapi` → `hapi_codex_config_menu` 等）。通用规则同上，这里只记它独有的。
+
+### 参考实现：cc-switch（不在本仓库）
+
+- Codex / Claude 的配置语义一律以本地参考实现为准：`E:\myrepo\参考\cc-switch`（**只在开发机上，不随仓库分发**）。
+  引用行为时写清文件名 + 函数名，别写"我记得"。本轮结论对应 `src-tauri/src/codex_config.rs` 的
+  `codex_auth_resolved_mode` / `codex_auth_has_openai_account_material` / `CODEX_RESERVED_MODEL_PROVIDER_IDS`，
+  以及 `src-tauri/src/config.rs` 的 `atomic_write_private`。
+- 审查（人 / 模型）给出的结论**先拿去和参考实现求证**，冲突时以参考代码为准（用户三次强调"审查模型给出的不一定对"）。
+  推论：别把自己对某个 helper 的读法当成"被管理程序的生产行为"——helper 的容错 ≠ Codex 真的能加载这个文件。
+
+### Codex `auth.json` 语义
+
+- **模式优先级**（脚本里的 `resolveAuthMode`，对齐 `codex_auth_resolved_mode`）：`auth_mode` 非 null 时优先
+  （**空字符串也算存在**）；否则按 `personal_access_token` → `bedrock_api_key` → `bedrock_access_keys` →
+  `OPENAI_API_KEY`（同样"非 null 即算"）判定，最后**回退 `chatgpt`**。
+  两条推论都必须满足：
+  1. **官方登录态下绝不要把 `OPENAI_API_KEY` 写成 `""`**——空串会把隐式模式抢成 `apikey`，等于毁掉官方登录。
+     用户没填 Key 时要"原样不动"（保持 `null`，或让该字段继续缺失）。
+  2. **"字段存在"与"凭据可用"是两套规则，不能合并**：模式优先级用"非 null 即存在"；
+     凭据可用性用"非空白字符串 / 非空容器"（`credentialIsUsable`，对齐 `value_present`）。
+- **两级校验（2026-09-19 起）**：`hapi_check_codex_auth_file <file> [official|loadable]`
+  - 两级**共同**的硬错误（= "Codex 能不能加载 + 有没有可用凭据"）：
+    JSON 解析失败 / 顶层非对象 / 空文件；`last_refresh` 类型错或**真日历越界**；`auth_mode` 类型错、取值不认识、
+    或为 `headers`（Codex 无法从 auth.json 加载该模式）；`tokens.id_token` 不是合法 JWT；
+    `account_id` / `OPENAI_API_KEY` 出现但类型不是字符串；**chatgpt 模式下 `tokens` 三个字段
+    （`id_token`/`access_token`/`refresh_token`）必须存在且是字符串**（Codex 的 TokenData 里它们都是必需字段，
+    缺一个会让整份 auth.json 反序列化失败，只有 `account_id` 是 `Option`）；**非 ChatGPT 模式各自必须有可用凭据**：
+    `personal_access_token` / `bedrock_api_key` 非空白字符串，`agent_identity` / `bedrock_access_keys` 非空
+    （对象或非空白字符串），`OPENAI_API_KEY`（apikey）非空白字符串。
+  - `official`（默认，菜单 7 写官方 auth.json 用）额外要求：模式解析为 `chatgpt`/`chatgptAuthTokens`，且三个 token
+    **都非空**（缺一个或有一个空串即硬错误）。
+  - `loadable`（配置库写入 / 切换用）比 official 宽：chatgpt 模式只要求"至少一个 token 非空"（字段存在与类型仍然查），
+    用来堵配置库旁路，同时不误杀 apikey / PAT / Bedrock 配置。
+  - 只警告：`tokens.account_id` 缺失、`last_refresh` 缺失、额外字段、loadable 下的空 token 字段、非目标登录模式。
+  - **没有"强制写入"逃生口**（2026-09-19 用户明确要求按 Codex 有效登录语义处理）。
+  - ⚠️ 教训：曾经 loadable 只在 chatgpt 的 `.some()` 与 apikey 分支真正阻断，PAT / agentIdentity / Bedrock / headers
+    仅 `warnings.push()`，于是 `{"auth_mode":"personalAccessToken","personal_access_token":""}` 这类"没凭据"的文件
+    也能通过 loadable（2026-09-19 被审查抓到）。**新增模式分支时必须同时接上凭据检查**。
+- **`last_refresh` 必须做真 RFC3339（格式 + 日历 / 时钟 / 时区范围）**：只写正则会放行 `2026-99-99T99:99:99Z`（实测确认）。
+  实测边界：`2028-02-29` 合法、`2026-02-29` 非法（非闰年）、`+23:59` 合法、`+99:99` 与 `24:00` 非法、`:60` 按 RFC3339 闰秒放行。
+- **`tokens.id_token` 按 Codex 的 JWT envelope 严格要求**：恰好三段、**三段都非空**、每段都必须是严格
+  `base64url-no-pad`、header / payload 反序列化后必须是 plain object（数组不算）。
+  ⚠️ Node 的 base64 解码很宽容（会忽略 `$` 这类非法字符、容忍缺填充），所以必须做「字符集 + 长度 + 往返编码一致」校验。
+  实测被拦下的例子：`.e30.`、`a.e30$.b`、payload 为 `[]`、只有两段、带 `=` 填充、标准 base64 的 `+`/`/`。
+  不校验签名（Codex 自己也只是解 envelope 与 claims）；header 缺 `alg` 只警告（cc-switch 提取账号身份需要它）。
+- **配置库不是旁路**：菜单 2（储存当前配置）与菜单 4（切换配置）都先跑 `loadable` 级校验，
+  不通过就中止且**不改动 `~/.codex`**；菜单 3（新建配置）要求 `OPENAI_API_KEY` 非空
+  （空 Key 会写出 `{OPENAI_API_KEY: ""}`，隐式模式被判成 apikey 却没有凭据）。
+- **config.toml 路由**：
+  - `model_provider` 缺省 = **内置 openai provider**（官方登录的正常状态）；此时不要凭空写 `model_provider` / `[model_providers.*]`。
+  - **保留 id 不得建表**：`amazon-bedrock` / `amazon-bedrock-runtime` / `openai` / `ollama` / `lmstudio`
+    （`CODEX_RESERVED_MODEL_PROVIDER_IDS`）。给它们写 `[model_providers.<id>]` 会让 **Codex 拒绝加载整份 config.toml**
+    （`validate_reserved_model_provider_ids`，大小写敏感）。
+  - 空 Key 不得清空已有的 `experimental_bearer_token`（只有确实填了新 Key 才覆盖）。
+
+### 凭据文件与临时文件
+
+- `auth.json` / `config.toml` / Codex 配置库 / `~/.claude/settings.json` / claude 配置库 / `cliApiToken`：**创建时就 0600**，
+  不要只靠"写完再 chmod"（中间有可读窗口）。Node 侧 `fs.writeFileSync(file, data, { mode: 0o600 })` +
+  `try { fs.chmodSync(file, 0o600) } catch {}`；shell 侧 heredoc 前置 `(umask 077; : > "${output_file}")` 占位。
+- **备份也要收紧权限**：所有 `cp -a <凭据文件> <备份>` 之后都要跟一句 `chmod 600 "<备份>"`。
+  `cp -a` 会保留源文件 mode，所以旧版本留下的 / 人工放进去的 0644 文件会在一次新版本运行后变成
+  「正式文件 0600、备份 0644」——等于真正的 token 反而留在 `.bak` 里。2026-09-19 已覆盖全部 14 个 `cp -a` 站点
+  （claude settings、codex auth/config、含 `cliApiToken` 的 hapi settings）；只含 listenHost/port 的纯配置不在此列但一并收紧。
+- 敏感临时文件：`mktemp` 生成不可预测路径（**不要** `${TMPDIR}/xxx_$$.json`），并挂 `hapi_install_sensitive_tmp_traps`
+  （`hapi_cleanup_sensitive_tmp` 统一处理 `HAPI_CODEX_AUTH_TMP` / `HAPI_CLAUDE_SETTINGS_TMP`）。
+  **故意不挂 INT**：vim 里 Ctrl+C 是退出插入模式的常用操作，挂上会在 vim 退出后连带删掉用户刚保存的内容。
+
+### 编辑器流程（Codex 菜单 7「写入/编辑官方 auth.json」）
+
+- 编辑器探测顺序：`HAPI_EDITOR` → `VISUAL` → `EDITOR` → 自动探测 `vim vi nano emacs`；**配置的编辑器不可用要回退**，不要硬用。
+- vim 系加 `-c 'set paste' -c 'set nobackup nowritebackup noswapfile noundofile viminfo='`
+  （paste 防自动缩进破坏 JSON；其余防 token 落进 `~/.vim/undo`、`.swp`、`~`、viminfo）。
+  `vi` 不一定是 vim：`hapi_editor_is_vim_like` 先探测（`--version` 里含 vim）再决定加不加 `-c`。
+- **编辑器退出码非 0 必须拦住**（默认中止、清理临时文件），否则 existing 模式下"编辑失败但旧内容仍然合法"会被静默写回。
+
+### 本脚本的验证方式
+
+- 每次改完最低要求：`bash -n Manage/Hapi_Claude_Manage.sh`。
+- 行为回归：`bash tests/Hapi_Claude_Manage/run.sh`（失败非零退出；`--only A,C` 只跑指定组，`--log FILE` 指定进度日志）。
+  分组：**A** `last_refresh` 真 RFC3339 ／ **B** `id_token` 严格 JWT envelope ／ **C** `auth_mode` 解析 + official/loadable 两级校验 ／
+  **D** 写入器路由保护 ／ **E** 菜单 7 编辑器流程（含 SIGTERM 清理）／ **F** 配置库旁路卡点 ／ **G** 凭据 0600 与预览脱敏 ／ **H** 兼容性。
+  实测（2026-09-19，本机 Windows/MSYS）：**定向分组** `--only C` = 39 断言全绿、`--only E,F` = 35 断言全绿；A 组 ≈15s、C 组 ≈25s、E 组 ≈2min、E+F ≈3min（进程创建极慢，别指望秒级）。
+  全量套件上一次实测是 **pass=128 fail=0**，本轮给 C 组补了 loadable 漏口的断言后**没有重跑全量**（用户明确要求别跑），要报全量数字必须自己跑一遍再写。
+  该套件的新断言按仓库约定用**手工反例自证**过一次：移除 `isValidRfc3339` 的日历天数判据后，A 组立刻报 2 条 `NOT OK`（`a_bad_feb31` / `a_bad_feb29_nonleap`），还原后恢复全绿。
+- ⚠️ **本套件的路径必须用盘符形式（`C:/…` / `E:/…`）**：MSYS 会转换**命令行参数**里的类 POSIX 路径，但
+  **不转换环境变量**，而 Windows 原生 node 会把 `/tmp/x` 解析成"当前盘符根 + `tmp\x`"（如 `E:\tmp\x`），
+  与 bash 眼里的 `/tmp` **不是同一位置**。后果很隐蔽：夹具/配置被写到另一个目录 → **正向用例整片变红、反向用例反而假绿**。
+  `run.sh` 用 `cygpath -m` 统一成盘符形式（实测 `mkdir`/`cp`/`rm`/`mktemp`/`chmod`/原生 node 都认），
+  只有 `PATH` 例外——里面必须放 `cygpath -u` 的 POSIX 形式，否则 bash 找不到假编辑器。
+- 两处防"假绿"的保险：① `auth_check` 在夹具缺失时返回专用码 **3**（否则"期望 rc=1"的断言会因为文件不存在而假绿）；
+  ② 夹具数量 < 30 直接 `exit 2`（夹具没生成时整套反向断言都会假绿）。
+- 交互式菜单（`read` 驱动）的自动化办法：`run.sh` 用 awk 按**内容锚点**抽取（`^# 按任意键继续函数` → `^# 主循环函数`，
+  颜色变量单独抽、守卫块与 `mainloop` 都丢掉），再用 `printf '1\n\ny\nn\n' | 函数名` 按顺序喂每个 `read`
+  （`pause` / 确认提示也各吃一行），用假编辑器（把预置夹具 `cp` 到 `${@: -1}` 的目标路径）模拟"用户在 vim 里粘贴并保存"。
+  ⚠️ 假编辑器/假 vim 是**子进程**，它要读的变量（`FAKE_EDITOR_SOURCE` / `FAKE_EDITOR_STATUS` / `FAKE_EDITOR_LOG`）
+  **必须 `export`**，否则赋值只在父 shell 可见、分支永远不触发（踩过：编辑器失败分支"怎么都不生效"）。
+- 断言注意：① 断言"临时目录已清理"前先确认该目录只放被测系统的产物，夹具自己的文件会被算成残留；
+  ② `ls | grep` 这类计数断言要**锚定整名**（`^auth\.json$`）——`auth.json.bak` 会被 `auth.json` 匹配到（踩过）；
+  ③ 不要用 JWT 前缀之类的子串做计数断言（同结构的 token 共用 header，计数会翻倍）。
+
 ## 常见坑
 
+- **内联 heredoc 里带运算符的 `${...}` 会被外层 shell 先展开**（2026-09-19 实测）：`cat > f <<'EOF'` 里写 `${endIndex - startIndex}`，
+  即使引号包住了定界符也会报 `Bad substitution: endIndex`（普通 `${var}` 不受影响）。
+  含 `${...}` 算术/表达式或反引号的脚本**先用 Write 工具落盘再执行**；往大文件里插入大段内容时，用「唯一标记 + 小段 node 脚本替换」
+  （校验标记唯一 → 替换 → `bash -n` 复检），比手写超长 old_string 稳。
 - `if git clone … | tee -a log` 后面**忘了 `then`**（或误跟另一个 `if`）会让整个脚本语法错误。真实事故：改到一半留下 `if … | tee` 紧跟 `if [ "${PIPESTATUS[0]}" -eq 0 ]; then …`，`bash -n` 报 `syntax error near unexpected token 'else'`。**改完务必 `bash -n`**。
 - **一行多段 sed 极易写错**：`sed "s|, \"$p\"|; s|\"$p\", ||g; s|\"$p\"||g"` 是畸形的（第一个 `s` 的替换段变成 `; s`，其余被当成 flag），GNU sed 直接报 ``unknown option to `s'``。真实事故：`toggle_single_repo` 的「禁用单个仓库」因此从来没生效。多段替换改用专门的 bash 函数（`remove_dir_from_list`），不要硬写 sed。
 - **`awk -v` 传值会解释转义序列**（`\t`、`\\`）；要传**字面值**请用 `ENVIRON`。写 TOML 字符串时同理：不用 `config_set_string` 就会产出非法 TOML。

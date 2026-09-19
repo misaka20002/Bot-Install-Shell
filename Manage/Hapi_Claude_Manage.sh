@@ -353,6 +353,11 @@ hapi_write_claude_settings_file() {
     fable_json=$(hapi_json_escape "${fable_model}")
     fable_name_json=$(hapi_json_escape "${fable_model%%\[*}")
 
+    # 该文件含 ANTHROPIC_AUTH_TOKEN：先以 0600 建好（umask 077）再覆盖写入，
+    # 避免出现「先 0644 再 chmod」的可读窗口。
+    (umask 077; : > "${output_file}") || return 1
+    chmod 600 "${output_file}" 2>/dev/null
+
     cat > "${output_file}" << EOF
 {
   "env": {
@@ -409,6 +414,7 @@ hapi_prompt_add_extra_env() {
     hapi_ensure_node_json || return
     backup_file="${settings_file}.bak"
     cp -a "${settings_file}" "${backup_file}"
+    chmod 600 "${backup_file}" 2>/dev/null
     echo -e "${green}已备份原配置到: ${backup_file}${background}"
 
     CLAUDE_SETTINGS_FILE="${settings_file}" node <<'NODE'
@@ -435,7 +441,8 @@ try {
   config.env.MCP_TIMEOUT = "50000";
   config.env.MCP_TOOL_TIMEOUT = "1800000";
 
-  fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2) + "\n");
+  fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+  try { fs.chmodSync(settingsFile, 0o600); } catch {}
 } catch (error) {
   console.error("添加额外参数失败: " + error.message);
   process.exit(1);
@@ -467,6 +474,7 @@ hapi_config_claude() {
         fi
         backup_file="${settings_file}.bak"
         cp -a "${settings_file}" "${backup_file}"
+        chmod 600 "${backup_file}" 2>/dev/null
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
 
@@ -534,7 +542,7 @@ hapi_save_claude_profile_from_file() {
 
     hapi_ensure_node_json || return
     mkdir -p "$(dirname "${store_file}")"
-    node -e 'const fs = require("fs"); const path = require("path"); const storeFile = process.argv[1]; const name = process.argv[2]; const sourceFile = process.argv[3]; const config = JSON.parse(fs.readFileSync(sourceFile, "utf8")); let store = { profiles: [] }; if (fs.existsSync(storeFile)) { try { store = JSON.parse(fs.readFileSync(storeFile, "utf8")); } catch {} } if (!Array.isArray(store.profiles)) store.profiles = []; const now = new Date().toISOString(); const idx = store.profiles.findIndex((item) => item && item.name === name); if (idx >= 0) { store.profiles[idx] = { ...store.profiles[idx], name, updatedAt: now, config }; } else { store.profiles.push({ name, createdAt: now, updatedAt: now, config }); } fs.mkdirSync(path.dirname(storeFile), { recursive: true }); fs.writeFileSync(storeFile, JSON.stringify(store, null, 2) + "\n");' "${store_file}" "${profile_name}" "${source_file}" || return
+    node -e 'const fs = require("fs"); const path = require("path"); const storeFile = process.argv[1]; const name = process.argv[2]; const sourceFile = process.argv[3]; const config = JSON.parse(fs.readFileSync(sourceFile, "utf8")); let store = { profiles: [] }; if (fs.existsSync(storeFile)) { try { store = JSON.parse(fs.readFileSync(storeFile, "utf8")); } catch {} } if (!Array.isArray(store.profiles)) store.profiles = []; const now = new Date().toISOString(); const idx = store.profiles.findIndex((item) => item && item.name === name); if (idx >= 0) { store.profiles[idx] = { ...store.profiles[idx], name, updatedAt: now, config }; } else { store.profiles.push({ name, createdAt: now, updatedAt: now, config }); } fs.mkdirSync(path.dirname(storeFile), { recursive: true }); fs.writeFileSync(storeFile, JSON.stringify(store, null, 2) + "\n", { mode: 0o600 }); try { fs.chmodSync(storeFile, 0o600); } catch {}' "${store_file}" "${profile_name}" "${source_file}" || return
     chmod 600 "${store_file}" 2>/dev/null
     echo -e "${green}配置已保存到配置库: ${profile_name}${background}"
 }
@@ -590,16 +598,23 @@ hapi_create_claude_profile() {
         return 1
     fi
 
-    tmp_file="${TMPDIR:-/tmp}/hapi_claude_settings_$$.json"
+    tmp_file=$(mktemp "${TMPDIR:-/tmp}/hapi_claude_settings.XXXXXX") || {
+        echo -e "${red}临时文件创建失败，请确认系统有可用的 mktemp。${background}"
+        return 1
+    }
+    chmod 600 "${tmp_file}" 2>/dev/null
+    HAPI_CLAUDE_SETTINGS_TMP="${tmp_file}"
+    hapi_install_sensitive_tmp_traps
+
     if ! hapi_write_claude_settings_file "${tmp_file}"; then
-        rm -f "${tmp_file}"
+        hapi_cleanup_sensitive_tmp
         return 1
     fi
     if ! hapi_save_claude_profile_from_file "${profile_name}" "${tmp_file}"; then
-        rm -f "${tmp_file}"
+        hapi_cleanup_sensitive_tmp
         return 1
     fi
-    rm -f "${tmp_file}"
+    hapi_cleanup_sensitive_tmp
     echo -e "${yellow}新配置已保存，但未切换当前 Claude Code 配置。${background}"
 }
 
@@ -630,10 +645,11 @@ hapi_switch_claude_profile() {
     if [ -f "${settings_file}" ]; then
         backup_file="${settings_file}.bak"
         cp -a "${settings_file}" "${backup_file}"
+        chmod 600 "${backup_file}" 2>/dev/null
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
     hapi_ensure_node_json || return
-    node -e 'const fs = require("fs"); const storeFile = process.argv[1]; const settingsFile = process.argv[2]; const index = Number(process.argv[3]) - 1; const store = JSON.parse(fs.readFileSync(storeFile, "utf8")); const profiles = Array.isArray(store.profiles) ? store.profiles : []; if (!profiles[index] || !profiles[index].config) { console.error("配置序号不存在"); process.exit(1); } fs.writeFileSync(settingsFile, JSON.stringify(profiles[index].config, null, 2) + "\n"); console.log(profiles[index].name);' "${store_file}" "${settings_file}" "${num}"
+    node -e 'const fs = require("fs"); const storeFile = process.argv[1]; const settingsFile = process.argv[2]; const index = Number(process.argv[3]) - 1; const store = JSON.parse(fs.readFileSync(storeFile, "utf8")); const profiles = Array.isArray(store.profiles) ? store.profiles : []; if (!profiles[index] || !profiles[index].config) { console.error("配置序号不存在"); process.exit(1); } fs.writeFileSync(settingsFile, JSON.stringify(profiles[index].config, null, 2) + "\n", { mode: 0o600 }); try { fs.chmodSync(settingsFile, 0o600); } catch {} console.log(profiles[index].name);' "${store_file}" "${settings_file}" "${num}"
     local switch_status=$?
     if [ "${switch_status}" -ne 0 ]; then
         echo -e "${red}切换配置失败。${background}"
@@ -667,7 +683,7 @@ hapi_delete_claude_profile() {
     fi
 
     hapi_ensure_node_json || return
-    node -e 'const fs = require("fs"); const storeFile = process.argv[1]; const index = Number(process.argv[2]) - 1; const store = JSON.parse(fs.readFileSync(storeFile, "utf8")); const profiles = Array.isArray(store.profiles) ? store.profiles : []; if (!profiles[index]) { console.error("配置序号不存在"); process.exit(1); } const removed = profiles.splice(index, 1)[0]; store.profiles = profiles; fs.writeFileSync(storeFile, JSON.stringify(store, null, 2) + "\n"); console.log(removed.name);' "${store_file}" "${num}"
+    node -e 'const fs = require("fs"); const storeFile = process.argv[1]; const index = Number(process.argv[2]) - 1; const store = JSON.parse(fs.readFileSync(storeFile, "utf8")); const profiles = Array.isArray(store.profiles) ? store.profiles : []; if (!profiles[index]) { console.error("配置序号不存在"); process.exit(1); } const removed = profiles.splice(index, 1)[0]; store.profiles = profiles; fs.writeFileSync(storeFile, JSON.stringify(store, null, 2) + "\n", { mode: 0o600 }); try { fs.chmodSync(storeFile, 0o600); } catch {} console.log(removed.name);' "${store_file}" "${num}"
     local delete_status=$?
     if [ "${delete_status}" -ne 0 ]; then
         echo -e "${red}删除配置失败。${background}"
@@ -731,6 +747,11 @@ function isSensitiveKey(key) {
 }
 
 function sanitizeJson(value, key = "") {
+  // tokens 是容器：只对子字段打码（access_token / id_token / refresh_token），
+  // 保留 account_id 之类非密字段，便于人工核对粘贴结构。
+  if (key === "tokens" && value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
+  }
   if (isSensitiveKey(key) && value !== undefined && value !== null) return "******";
   if (Array.isArray(value)) return value.map((item) => sanitizeJson(item));
   if (value && typeof value === "object") {
@@ -968,11 +989,13 @@ hapi_write_codex_current_config() {
     if [ -f "${auth_file}" ]; then
         backup_file="${auth_file}.bak"
         cp -a "${auth_file}" "${backup_file}"
+        chmod 600 "${backup_file}" 2>/dev/null
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
     if [ -f "${config_file}" ]; then
         backup_file="${config_file}.bak"
         cp -a "${config_file}" "${backup_file}"
+        chmod 600 "${backup_file}" 2>/dev/null
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
 
@@ -1117,6 +1140,8 @@ function findSection(lines, sectionName, providerId) {
 }
 
 function updateExistingExperimentalToken(lines) {
+  // 空 Key 不应该把已有的第三方 token 抹掉：只有确实填了新 Key 才覆盖
+  if (!apiKey) return;
   for (let i = 0; i < lines.length; i += 1) {
     if (keyOf(lines[i]) === "experimental_bearer_token") lines[i] = replaceAssignment(lines[i], apiKey);
   }
@@ -1145,7 +1170,36 @@ function validateToml(text) {
   });
 }
 
-function createTemplate() {
+// Codex 保留的内置 provider id：cc-switch CODEX_RESERVED_MODEL_PROVIDER_IDS
+// （0.149 就是这五个）。给这些 id 建 [model_providers.<id>] 表会让 Codex
+// 在加载时直接拒绝整份 config.toml（validate_reserved_model_provider_ids，大小写敏感）。
+const CODEX_RESERVED_MODEL_PROVIDER_IDS = [
+  "amazon-bedrock",
+  "amazon-bedrock-runtime",
+  "openai",
+  "ollama",
+  "lmstudio",
+];
+
+function isCustomProviderId(id) {
+  const trimmed = String(id === undefined || id === null ? "" : id).trim();
+  return trimmed !== "" && !CODEX_RESERVED_MODEL_PROVIDER_IDS.includes(trimmed);
+}
+
+// 官方登录（auth.json 里是 ChatGPT OAuth）且没填 API Key 时，不能凭空造出
+// `model_provider = "custom"`：Codex 在 model_provider 缺省时默认走内置 openai provider
+// （见 cc-switch `active_codex_model_provider_id` 的注释），而 custom + env_key 又拿不到
+// Key 时请求既进不了官方路由、也拿不到第三方凭据。
+function createTemplate(preserveOfficialRoute) {
+  if (preserveOfficialRoute) {
+    return [
+      `model = ${tomlString(model)}`,
+      "",
+      "[features]",
+      "goals = true",
+      "",
+    ].join("\n");
+  }
   return [
     `model = ${tomlString(model)}`,
     'model_provider = "custom"',
@@ -1162,15 +1216,37 @@ function createTemplate() {
   ].join("\n");
 }
 
-function updateToml(text) {
-  if (!text.trim()) return createTemplate();
+// 返回 { text, notice }；notice 取值: "" | "official" | "reserved" | "third-party-no-key"
+function updateToml(text, options) {
+  const preserveOnEmpty = options.officialLogin && !options.hasApiKey;
+  if (!text.trim()) {
+    return { text: createTemplate(preserveOnEmpty), notice: preserveOnEmpty ? "official" : "" };
+  }
   validateToml(text);
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   if (lines.length && lines[lines.length - 1] === "") lines.pop();
-  const providerId = getTopLevelString(lines, "model_provider") || "custom";
+  const existingProviderId = getTopLevelString(lines, "model_provider").trim();
+  const customProviderRoute = isCustomProviderId(existingProviderId);
+  const reservedRoute = existingProviderId !== "" && !customProviderRoute;
+  const preserveOfficialRoute = options.officialLogin && !options.hasApiKey && !customProviderRoute;
+
   ensureTopLevelString(lines, "model", model);
-  if (!getTopLevelString(lines, "model_provider")) ensureTopLevelString(lines, "model_provider", providerId);
   updateExistingExperimentalToken(lines);
+
+  if (reservedRoute) {
+    // 内置/保留 provider：保持原样，既不补 model_provider 也不建表，否则 Codex 拒绝启动
+    ensureFeatureGoals(lines);
+    return { text: `${lines.join("\n")}\n`, notice: "reserved" };
+  }
+
+  if (preserveOfficialRoute) {
+    // 保持「没有 model_provider」= 走内置 openai provider，也不新建任何 provider 段
+    ensureFeatureGoals(lines);
+    return { text: `${lines.join("\n")}\n`, notice: "official" };
+  }
+
+  const providerId = existingProviderId || "custom";
+  if (!existingProviderId) ensureTopLevelString(lines, "model_provider", providerId);
 
   const sectionName = `model_providers.${tomlKeySegment(providerId)}`;
   const section = findSection(lines, sectionName, providerId);
@@ -1192,7 +1268,58 @@ function updateToml(text) {
     }
   }
   ensureFeatureGoals(lines);
-  return `${lines.join("\n")}\n`;
+  const notice = options.officialLogin && !options.hasApiKey ? "third-party-no-key" : "";
+  return { text: `${lines.join("\n")}\n`, notice };
+}
+
+// ---- 与 cc-switch 对齐的 Codex auth.json 语义（writer 与 validator 共用判定） ----
+
+// codex_auth_resolved_mode 的「字段存在」：只要非 null 就算存在（空字符串也算），决定模式优先级
+function fieldExistsForMode(value) {
+  return value !== undefined && value !== null;
+}
+
+// codex_auth_has_openai_account_material 的 value_present：字符串必须非空白，容器必须非空
+function credentialIsUsable(value) {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string") return value.trim() !== "";
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+
+function resolveAuthMode(auth) {
+  const mode = auth.auth_mode;
+  if (fieldExistsForMode(mode)) {
+    if (typeof mode !== "string") return "unrecognized";
+    const known = ["apikey", "chatgpt", "chatgptAuthTokens", "headers", "agentIdentity", "personalAccessToken", "bedrockApiKey", "bedrockAccessKeys"];
+    return known.includes(mode) ? mode : "unrecognized";
+  }
+  if (fieldExistsForMode(auth.personal_access_token)) return "personalAccessToken";
+  if (fieldExistsForMode(auth.bedrock_api_key)) return "bedrockApiKey";
+  if (fieldExistsForMode(auth.bedrock_access_keys)) return "bedrockAccessKeys";
+  if (fieldExistsForMode(auth.OPENAI_API_KEY)) return "apikey";
+  return "chatgpt";
+}
+
+function hasOfficialAccountMaterial(auth) {
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return false;
+  switch (resolveAuthMode(auth)) {
+  case "apikey":
+    return credentialIsUsable(auth.OPENAI_API_KEY);
+  case "personalAccessToken":
+    return credentialIsUsable(auth.personal_access_token);
+  case "agentIdentity":
+    return credentialIsUsable(auth.agent_identity);
+  case "chatgpt":
+  case "chatgptAuthTokens": {
+    const tokens = auth.tokens;
+    if (!tokens || typeof tokens !== "object" || Array.isArray(tokens)) return false;
+    return ["id_token", "access_token", "refresh_token"].some((key) => credentialIsUsable(tokens[key]));
+  }
+  default:
+    return false;
+  }
 }
 
 try {
@@ -1202,13 +1329,45 @@ try {
     auth = rawAuth.trim() ? JSON.parse(rawAuth) : {};
     if (!auth || typeof auth !== "object" || Array.isArray(auth)) throw new Error("auth.json 必须是 JSON 对象");
   }
-  auth.OPENAI_API_KEY = apiKey;
+  // 先按 cc-switch 的 resolved mode 判定，再决定是否碰 OPENAI_API_KEY：
+  // auth_mode 缺失/null 的隐式 ChatGPT 登录同样适用——cc-switch 的字段存在判定是
+  // 「非 null 即存在」，所以写进空字符串会把隐式模式抢成 apikey，等于毁掉官方登录。
+  const resolvedMode = resolveAuthMode(auth);
+  const officialLogin = hasOfficialAccountMaterial(auth);
+  if (resolvedMode === "chatgpt" || resolvedMode === "chatgptAuthTokens") {
+    // 官方 auth.json 里 OPENAI_API_KEY 应为 null；写入空字符串会被 Codex 视为提供了 API Key，
+    // 从而覆盖官方登录路径，因此这里只在用户确实填写了 Key 时才写入。
+    if (apiKey) {
+      console.error("提示: auth.json 当前是官方 ChatGPT 登录缓存，本次仍写入了 OPENAI_API_KEY。");
+      console.error("      如需长期保留官方登录，请让第三方 Key 走 config.toml，或改用「7 写入/编辑官方 auth.json」。");
+      auth.OPENAI_API_KEY = apiKey;
+    } else {
+      console.error("提示: auth.json 当前是官方 ChatGPT 登录缓存，未填写 API Key，已保留原有登录字段不变。");
+    }
+  } else {
+    auth.OPENAI_API_KEY = apiKey;
+  }
 
   const rawConfig = fs.existsSync(configFile) ? fs.readFileSync(configFile, "utf8") : "";
-  const nextConfig = updateToml(rawConfig);
+  const result = updateToml(rawConfig, { officialLogin, hasApiKey: Boolean(apiKey) });
+  const nextConfig = result.text;
   fs.mkdirSync(path.dirname(authFile), { recursive: true });
-  fs.writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`);
-  fs.writeFileSync(configFile, nextConfig);
+  // 凭据文件按 cc-switch atomic_write_private 的做法在创建时就指定 0600
+  fs.writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
+  try { fs.chmodSync(authFile, 0o600); } catch {}
+  fs.writeFileSync(configFile, nextConfig, { mode: 0o600 });
+  try { fs.chmodSync(configFile, 0o600); } catch {}
+
+  if (result.notice === "official") {
+    console.error("提示: auth.json 是官方 ChatGPT 登录且未填写 API Key，config.toml 保持不指定 model_provider，模型请求继续走内置 openai provider。");
+  } else if (result.notice === "reserved") {
+    console.error("提示: config.toml 里的 model_provider 指向 Codex 内置/保留 provider，已保持原样：");
+    console.error("      不补 model_provider、也不创建 [model_providers.<id>]，因为覆盖保留 id 会让 Codex 拒绝加载整份配置。");
+    console.error("      如需自定义 base_url，请改用自定义 provider id（菜单 1 默认写 custom）。");
+  } else if (result.notice === "third-party-no-key") {
+    console.error("提示: config.toml 已指定第三方 model_provider 且本次未填写 API Key，该路由可能拿不到可用凭据；");
+    console.error("      如需完全回到官方，请移除 model_provider 与对应的 [model_providers.*] 段。");
+  }
 } catch (error) {
   console.error(error.message);
   process.exit(1);
@@ -1248,11 +1407,13 @@ hapi_config_codex() {
         if [ -f "${auth_file}" ]; then
             auth_backup_file="${auth_file}.bak"
             cp -a "${auth_file}" "${auth_backup_file}"
+            chmod 600 "${auth_backup_file}" 2>/dev/null
             echo -e "${green}已备份原配置到: ${auth_backup_file}${background}"
         fi
         if [ -f "${config_file}" ]; then
             config_backup_file="${config_file}.bak"
             cp -a "${config_file}" "${config_backup_file}"
+            chmod 600 "${config_backup_file}" 2>/dev/null
             echo -e "${green}已备份原配置到: ${config_backup_file}${background}"
         fi
     fi
@@ -1325,6 +1486,7 @@ hapi_toggle_codex_recommended_values() {
     mkdir -p "${config_dir}"
     if [ -f "${config_file}" ]; then
         cp -a "${config_file}" "${config_file}.bak"
+        chmod 600 "${config_file}.bak" 2>/dev/null
         echo -e "${green}已备份原配置到: ${config_file}.bak${background}"
     fi
 
@@ -1394,7 +1556,8 @@ try {
   const rawConfig = fs.existsSync(configFile) ? fs.readFileSync(configFile, "utf8") : "";
   const nextConfig = toggleRecommended(rawConfig);
   fs.mkdirSync(path.dirname(configFile), { recursive: true });
-  fs.writeFileSync(configFile, nextConfig);
+  fs.writeFileSync(configFile, nextConfig, { mode: 0o600 });
+  try { fs.chmodSync(configFile, 0o600); } catch {}
 } catch (error) {
   console.error(error.message);
   process.exit(1);
@@ -1470,7 +1633,8 @@ try {
     store.profiles.push(profile);
   }
   fs.mkdirSync(path.dirname(storeFile), { recursive: true });
-  fs.writeFileSync(storeFile, `${JSON.stringify(store, null, 2)}\n`);
+  fs.writeFileSync(storeFile, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+  try { fs.chmodSync(storeFile, 0o600); } catch {}
 } catch (error) {
   console.error(error.message);
   process.exit(1);
@@ -1536,6 +1700,11 @@ function isSensitiveKey(key) {
 }
 
 function sanitizeJson(value, key = "") {
+  // tokens 是容器：只对子字段打码（access_token / id_token / refresh_token），
+  // 保留 account_id 之类非密字段，便于人工核对粘贴结构。
+  if (key === "tokens" && value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
+  }
   if (isSensitiveKey(key) && value !== undefined && value !== null) return "******";
   if (Array.isArray(value)) return value.map((item) => sanitizeJson(item));
   if (value && typeof value === "object") {
@@ -1581,6 +1750,13 @@ hapi_store_current_codex_config() {
         echo -e "${red}检测到 Codex 配置格式异常，已中止储存。${background}"
         return 1
     }
+    # 配置库不能成为「写入无效 auth」的旁路：菜单 4 切换时会把这个 auth 直接写回 live auth.json，
+    # 所以这里先按「Codex 能加载且带可用凭据」这一级卡一次（不要求完整的官方三件套，避免误杀 apikey/PAT 配置）。
+    if ! hapi_check_codex_auth_file "${auth_file}" loadable; then
+        echo -e "${red}当前 auth.json 不符合 Codex 的加载要求，已中止储存。${background}"
+        echo -e "${yellow}请先用菜单 7「写入/编辑官方 auth.json」写入有效配置，或修正 ${auth_file} 后重试。${background}"
+        return 1
+    fi
     echo -en "${cyan}请输入配置名称: ${background}"
     read -r profile_name
     if [ -z "${profile_name}" ]; then
@@ -1603,9 +1779,17 @@ hapi_create_codex_profile() {
         return 1
     fi
 
-    echo -en "${cyan}请输入 OPENAI_API_KEY（已隐藏输入，默认留空）: ${background}"
+    echo -en "${cyan}请输入 OPENAI_API_KEY（已隐藏输入）: ${background}"
     read -rs api_key
     echo
+    # 空 Key 会写出 {OPENAI_API_KEY: ""}：隐式模式会被判成 apikey 却没有可用凭据，
+    # 等于造出一个 Codex 用不了的配置，所以这里必须非空。
+    while [ -z "${api_key}" ]; do
+        echo -e "${red}OPENAI_API_KEY 不能为空（空 Key 会让 Codex 既进不了官方登录、也拿不到第三方凭据）。${background}"
+        echo -en "${cyan}请重新输入 OPENAI_API_KEY（已隐藏输入）: ${background}"
+        read -rs api_key
+        echo
+    done
     echo -en "${cyan}请输入 base_url (默认 ${default_base_url}): ${background}"
     read -r base_url
     base_url=${base_url:-${default_base_url}}
@@ -1663,7 +1847,8 @@ try {
     store.profiles.push(profile);
   }
   fs.mkdirSync(path.dirname(storeFile), { recursive: true });
-  fs.writeFileSync(storeFile, `${JSON.stringify(store, null, 2)}\n`);
+  fs.writeFileSync(storeFile, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+  try { fs.chmodSync(storeFile, 0o600); } catch {}
 } catch (error) {
   console.error(error.message);
   process.exit(1);
@@ -1678,8 +1863,35 @@ NODE
     echo -e "${yellow}新配置已保存，但未切换当前 Codex 配置。${background}"
 }
 
+# 把配置库里某个 profile 的 auth 抽成 JSON 文件，供 hapi_check_codex_auth_file 复用。
+# ⚠️ 临时文件由调用方创建并登记（不要在这里 mktemp 后用 `$(...)` 返回路径）：
+#    命令替换会起子 shell，子 shell 退出时 EXIT trap 会把刚写好的临时文件删掉。
+hapi_extract_codex_profile_auth() {
+    local store_file="$1"
+    local index="$2"
+    local out_file="$3"
+
+    hapi_ensure_node_json || return 1
+    CODEX_STORE_FILE="${store_file}" CODEX_PROFILE_INDEX="${index}" CODEX_OUT_FILE="${out_file}" node <<'NODE'
+const fs = require("fs");
+try {
+  const store = JSON.parse(fs.readFileSync(process.env.CODEX_STORE_FILE, "utf8"));
+  const profiles = Array.isArray(store.profiles) ? store.profiles : [];
+  const profile = profiles[Number(process.env.CODEX_PROFILE_INDEX) - 1];
+  if (!profile || !profile.config) throw new Error("配置序号不存在");
+  const auth = profile.config.auth || {};
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) throw new Error("profile auth 必须是 JSON 对象");
+  fs.writeFileSync(process.env.CODEX_OUT_FILE, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
+  try { fs.chmodSync(process.env.CODEX_OUT_FILE, 0o600); } catch {}
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+NODE
+}
+
 hapi_switch_codex_profile() {
-    local store_file config_dir auth_file config_file backup_file num confirm
+    local store_file config_dir auth_file config_file backup_file num confirm profile_auth_tmp
     store_file=$(hapi_codex_profile_store_file)
     config_dir="${HOME}/.codex"
     auth_file="${config_dir}/auth.json"
@@ -1702,15 +1914,39 @@ hapi_switch_codex_profile() {
         return
     fi
 
+    # 配置库不能成为旁路：写回 live auth.json 之前，先确认这份 auth 是 Codex 真能加载的
+    # （loadable 级：类型/格式/可反序列化 + 至少一个可用凭据，不要求官方三件套）。
+    profile_auth_tmp=$(mktemp "${TMPDIR:-/tmp}/hapi_codex_profile_auth.XXXXXX") || {
+        echo -e "${red}临时文件创建失败，请确认系统有可用的 mktemp。${background}"
+        return 1
+    }
+    chmod 600 "${profile_auth_tmp}" 2>/dev/null
+    HAPI_CODEX_AUTH_TMP="${profile_auth_tmp}"
+    hapi_install_sensitive_tmp_traps
+    if ! hapi_extract_codex_profile_auth "${store_file}" "${num}" "${profile_auth_tmp}"; then
+        echo -e "${red}无法读取该配置的 auth.json，已中止切换。${background}"
+        hapi_cleanup_sensitive_tmp
+        return 1
+    fi
+    if ! hapi_check_codex_auth_file "${profile_auth_tmp}" loadable; then
+        echo -e "${red}该配置的 auth.json 不符合 Codex 的加载要求，已中止切换（未改动 ~/.codex）。${background}"
+        echo -e "${yellow}请删除并重建该配置，或先用菜单 7 写入有效的官方 auth.json 后再储存。${background}"
+        hapi_cleanup_sensitive_tmp
+        return 1
+    fi
+    hapi_cleanup_sensitive_tmp
+
     mkdir -p "${config_dir}"
     if [ -f "${auth_file}" ]; then
         backup_file="${auth_file}.bak"
         cp -a "${auth_file}" "${backup_file}"
+        chmod 600 "${backup_file}" 2>/dev/null
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
     if [ -f "${config_file}" ]; then
         backup_file="${config_file}.bak"
         cp -a "${config_file}" "${backup_file}"
+        chmod 600 "${backup_file}" 2>/dev/null
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
     hapi_ensure_node_json || return
@@ -1731,8 +1967,10 @@ try {
   const config = String(profile.config.config || "");
   if (!auth || typeof auth !== "object" || Array.isArray(auth)) throw new Error("profile auth 必须是 JSON 对象");
   fs.mkdirSync(path.dirname(authFile), { recursive: true });
-  fs.writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`);
-  fs.writeFileSync(configFile, config.endsWith("\n") ? config : `${config}\n`);
+  fs.writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
+  try { fs.chmodSync(authFile, 0o600); } catch {}
+  fs.writeFileSync(configFile, config.endsWith("\n") ? config : `${config}\n`, { mode: 0o600 });
+  try { fs.chmodSync(configFile, 0o600); } catch {}
   console.log(profile.name);
 } catch (error) {
   console.error(error.message);
@@ -1781,7 +2019,8 @@ try {
   if (!profiles[index]) throw new Error("配置序号不存在");
   const removed = profiles.splice(index, 1)[0];
   store.profiles = profiles;
-  fs.writeFileSync(storeFile, `${JSON.stringify(store, null, 2)}\n`);
+  fs.writeFileSync(storeFile, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+  try { fs.chmodSync(storeFile, 0o600); } catch {}
   console.log(removed.name);
 } catch (error) {
   console.error(error.message);
@@ -1797,6 +2036,663 @@ NODE
     echo -e "${green}配置已删除。${background}"
 }
 
+hapi_editor_program() {
+    local editor="$1"
+    local -a editor_cmd=()
+
+    read -r -a editor_cmd <<< "${editor}"
+    if [ "${#editor_cmd[@]}" -eq 0 ]; then
+        return 1
+    fi
+    printf '%s' "${editor_cmd[0]}"
+}
+
+hapi_editor_basename() {
+    local editor_program
+    editor_program=$(hapi_editor_program "$1") || return 1
+    basename "${editor_program}"
+}
+
+hapi_detect_editor() {
+    local editor="" candidate editor_program
+
+    if [ -n "${HAPI_EDITOR}" ]; then
+        editor="${HAPI_EDITOR}"
+    elif [ -n "${VISUAL}" ]; then
+        editor="${VISUAL}"
+    elif [ -n "${EDITOR}" ]; then
+        editor="${EDITOR}"
+    fi
+
+    if [ -n "${editor}" ]; then
+        editor_program=$(hapi_editor_program "${editor}")
+        if [ -n "${editor_program}" ] && command -v "${editor_program}" >/dev/null 2>&1; then
+            printf '%s' "${editor}"
+            return 0
+        fi
+        echo -e "${yellow}环境变量指定的编辑器不可用: ${editor}，改用自动探测。${background}" >&2
+    fi
+
+    for candidate in vim vi nano emacs; do
+        if command -v "${candidate}" >/dev/null 2>&1; then
+            printf '%s' "${candidate}"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# 判断编辑器是否兼容 vim 的 -c 参数；vi 在多数发行版是 vim 的软链，但不能直接假定
+hapi_editor_is_vim_like() {
+    local editor="$1"
+    local editor_program editor_name
+
+    editor_program=$(hapi_editor_program "${editor}") || return 1
+    editor_name=$(basename "${editor_program}")
+
+    case "${editor_name}" in
+    vim | nvim) return 0 ;;
+    vi)
+        "${editor_program}" --version 2>/dev/null | head -n 1 | grep -qi 'vim' && return 0
+        return 1
+        ;;
+    esac
+    return 1
+}
+
+hapi_run_editor() {
+    local editor="$1"
+    local target_file="$2"
+    local -a editor_cmd=()
+
+    read -r -a editor_cmd <<< "${editor}"
+    if [ "${#editor_cmd[@]}" -eq 0 ]; then
+        echo -e "${red}编辑器命令为空，无法打开编辑器。${background}"
+        return 1
+    fi
+
+    if hapi_editor_is_vim_like "${editor}"; then
+        # paste 模式关闭自动缩进，避免粘贴 JSON 时被逐层缩进破坏结构；
+        # 同时关闭 backup / swap / undo / viminfo，避免 token 残留在磁盘上。
+        "${editor_cmd[@]}" -c 'set paste' -c 'set nobackup nowritebackup noswapfile noundofile viminfo=' "${target_file}"
+    else
+        "${editor_cmd[@]}" "${target_file}"
+    fi
+}
+
+# 校验待写入 / 待写回的 Codex auth.json。
+# 分级原则（对齐 Codex 的 AuthDotJson 反序列化约束 + cc-switch 的判定函数）：
+#   · 结构/类型不符合 Codex AuthDotJson、或官方 ChatGPT 登录缺少必要凭据 → error（阻断写入）
+#   · 不影响反序列化的可选元数据缺失（account_id / last_refresh）、非目标登录模式 → warning（须二次确认）
+#   · level=official（默认，菜单 7 用）：额外要求 tokens 三件套（id_token/access_token/refresh_token）齐备
+#   · level=loadable（配置库写入 / 切换时用）：只要求「Codex 能加载，且带至少一个可用凭据」
+hapi_check_codex_auth_file() {
+    local auth_file="$1"
+    local level="${2:-official}"
+
+    hapi_ensure_node_json || return 1
+    if [ ! -f "${auth_file}" ]; then
+        echo -e "${red}待校验文件不存在: ${auth_file}${background}"
+        return 1
+    fi
+    CODEX_AUTH_FILE="${auth_file}" CODEX_AUTH_LEVEL="${level}" node <<'NODE'
+const fs = require("fs");
+
+const authFile = process.env.CODEX_AUTH_FILE;
+const level = process.env.CODEX_AUTH_LEVEL === "loadable" ? "loadable" : "official";
+const errors = [];
+const warnings = [];
+const infos = [];
+const TOP_LEVEL_KEYS = ["auth_mode", "OPENAI_API_KEY", "tokens", "last_refresh"];
+const TOKEN_KEYS = ["access_token", "account_id", "id_token", "refresh_token"];
+const LOGIN_TOKEN_KEYS = ["id_token", "access_token", "refresh_token"];
+const KNOWN_AUTH_MODES = [
+  "apikey",
+  "chatgpt",
+  "chatgptAuthTokens",
+  "headers",
+  "agentIdentity",
+  "personalAccessToken",
+  "bedrockApiKey",
+  "bedrockAccessKeys",
+];
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function typeName(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+// cc-switch 判定模式优先级用的是「字段存在」：值非 null 即算存在，
+// 空字符串 / 空数组一样算，因此空值也会抢到模式优先级。
+function fieldExistsForMode(value) {
+  return value !== undefined && value !== null;
+}
+
+// cc-switch codex_auth_has_openai_account_material 的 value_present：
+// 字符串必须非空白、容器必须非空，数字/布尔算存在。用来判断「凭据是否可用」。
+function credentialIsUsable(value) {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string") return value.trim() !== "";
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+
+// 与 cc-switch 的 codex_auth_resolved_mode 一致：auth_mode 缺失或为 null 时按隐式优先级判定，
+// 最终回退到 ChatGPT 模式，因此「没有 auth_mode」也按官方登录校验。
+function resolveAuthMode(auth) {
+  const mode = auth.auth_mode;
+  if (mode !== undefined && mode !== null) {
+    if (typeof mode !== "string") return "invalid-type";
+    return KNOWN_AUTH_MODES.includes(mode) ? mode : "unrecognized";
+  }
+  if (fieldExistsForMode(auth.personal_access_token)) return "personalAccessToken";
+  if (fieldExistsForMode(auth.bedrock_api_key)) return "bedrockApiKey";
+  if (fieldExistsForMode(auth.bedrock_access_keys)) return "bedrockAccessKeys";
+  if (fieldExistsForMode(auth.OPENAI_API_KEY)) return "apikey";
+  return "chatgpt";
+}
+
+function daysInMonth(year, month) {
+  const table = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const isLeap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  return month === 2 && isLeap ? 29 : table[month - 1];
+}
+
+// 真·RFC3339：只做正则是不够的（"2026-99-99T99:99:99Z" 形状合法但日期不存在），
+// 而 Codex 按 DateTime 类型反序列化，非法日期会让整份 auth.json 加载失败。
+function isValidRfc3339(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?([Zz]|([+-])(\d{2}):(\d{2}))$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = match[10] === undefined ? 0 : Number(match[10]);
+  const offsetMinute = match[11] === undefined ? 0 : Number(match[11]);
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > daysInMonth(year, month)) return false;
+  if (hour > 23 || minute > 59 || second > 60) return false;
+  if (offsetHour > 23 || offsetMinute > 59) return false;
+  return true;
+}
+
+// 严格 base64url-no-pad（Rust 侧是 URL_SAFE_NO_PAD）。Node 的 base64 解码很宽容
+// （会忽略非法字符、容忍缺填充），所以这里用「字符集 + 长度 + 往返编码一致」把宽容性收回来。
+function decodeBase64UrlStrict(segment) {
+  if (typeof segment !== "string" || segment === "") return null;
+  if (!BASE64URL_PATTERN.test(segment)) return null;
+  if (segment.length % 4 === 1) return null;
+  try {
+    const decoded = Buffer.from(segment, "base64url");
+    if (decoded.toString("base64url") !== segment) return null;
+    return decoded.toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+// JWT envelope 严格校验：恰好三段、三段都非空、都必须是合法 base64url-no-pad，
+// header / payload 反序列化后必须是 plain object。
+// 不校验签名——Codex 自己也只是解 envelope 与 claims。
+function decodeJwt(token) {
+  if (typeof token !== "string") return null;
+  const segments = token.split(".");
+  if (segments.length !== 3) return null;
+  if (segments.some((segment) => segment === "")) return null;
+  const headerJson = decodeBase64UrlStrict(segments[0]);
+  const payloadJson = decodeBase64UrlStrict(segments[1]);
+  if (decodeBase64UrlStrict(segments[2]) === null) return null;
+  if (headerJson === null || payloadJson === null) return null;
+  let header;
+  let claims;
+  try { header = JSON.parse(headerJson); } catch { return null; }
+  try { claims = JSON.parse(payloadJson); } catch { return null; }
+  if (!isPlainObject(header) || !isPlainObject(claims)) return null;
+  return { header, claims };
+}
+
+function isSensitiveKey(key) {
+  const normalized = String(key).toLowerCase();
+  return normalized === "openai_api_key"
+    || normalized.includes("api_key")
+    || normalized.includes("apikey")
+    || normalized.includes("token")
+    || normalized.includes("secret");
+}
+
+function sanitizeJson(value, key = "") {
+  // tokens 是容器：只对子字段打码（access_token / id_token / refresh_token），
+  // 保留 account_id 之类非密字段，便于人工核对粘贴结构。
+  if (key === "tokens" && value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
+  }
+  if (isSensitiveKey(key) && value !== undefined && value !== null) return "******";
+  if (Array.isArray(value)) return value.map((item) => sanitizeJson(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
+  }
+  return value;
+}
+
+// 非 ChatGPT 模式各自的凭据字段：存在 + 类型正确 + 非空，缺一不可。
+// 字段名对齐 cc-switch 的 codex_auth_has_openai_account_material（PAT / agentIdentity 分支），
+// bedrock 两族 cc-switch 把它算作"非 OpenAI 账号材料"，但对我们的写入路径同样是"必须有可用凭据"。
+const MODE_CREDENTIAL_SPEC = {
+  apikey: { key: "OPENAI_API_KEY", accepts: (value) => typeof value === "string", desc: "非空白字符串" },
+  personalAccessToken: { key: "personal_access_token", accepts: (value) => typeof value === "string", desc: "非空白字符串" },
+  agentIdentity: { key: "agent_identity", accepts: (value) => isPlainObject(value) || typeof value === "string", desc: "非空对象或非空白字符串" },
+  bedrockApiKey: { key: "bedrock_api_key", accepts: (value) => typeof value === "string", desc: "非空白字符串" },
+  bedrockAccessKeys: { key: "bedrock_access_keys", accepts: (value) => isPlainObject(value) || typeof value === "string", desc: "非空对象或非空白字符串" },
+};
+
+function checkModeCredential(auth, mode) {
+  const spec = MODE_CREDENTIAL_SPEC[mode];
+  if (!spec) return;
+  const value = auth[spec.key];
+  if (value === undefined || value === null) {
+    errors.push(`auth_mode 解析为 ${mode}，但缺少 ${spec.key}，Codex 拿不到可用凭据。`);
+    return;
+  }
+  if (!spec.accepts(value)) {
+    errors.push(`auth_mode 解析为 ${mode}，${spec.key} 类型不符（当前为 ${typeName(value)}，期望${spec.desc}）。`);
+    return;
+  }
+  if (!credentialIsUsable(value)) {
+    errors.push(`auth_mode 解析为 ${mode}，${spec.key} 为空，Codex 会视为未登录。`);
+  }
+}
+
+// ChatGPT 登录凭据：三个字段必须**存在且是字符串**（Codex 的 TokenData 里它们都是必需字段，
+// 缺一个会让整份 auth.json 反序列化失败）；official 级别还要求三者都非空。
+function checkChatgptTokens(auth) {
+  const tokens = auth.tokens;
+  if (tokens === undefined || tokens === null) {
+    errors.push("auth_mode 解析为 ChatGPT 登录，但缺少 tokens 字段，Codex 拿不到任何可用凭据。");
+    return null;
+  }
+  if (!isPlainObject(tokens)) {
+    errors.push(`tokens 必须是 JSON 对象，当前为 ${typeName(tokens)}。`);
+    return null;
+  }
+
+  const unknownTokenKeys = Object.keys(tokens).filter((key) => !TOKEN_KEYS.includes(key));
+  if (unknownTokenKeys.length) {
+    warnings.push(`tokens 存在官方登录缓存之外的字段: ${unknownTokenKeys.join(", ")}`);
+  }
+
+  LOGIN_TOKEN_KEYS.forEach((key) => {
+    const value = tokens[key];
+    if (value === undefined || value === null) {
+      errors.push(`缺少 tokens.${key}：Codex 的 TokenData 里 id_token / access_token / refresh_token 都是必需字段，缺失会让整份 auth.json 反序列化失败（account_id 才是可选）。`);
+      return;
+    }
+    if (typeof value !== "string") {
+      errors.push(`tokens.${key} 必须是字符串，当前为 ${typeName(value)}。`);
+      return;
+    }
+    if (value.trim() === "") {
+      if (level === "official") errors.push(`tokens.${key} 是空字符串，官方 ChatGPT 登录需要 id_token / access_token / refresh_token 三者齐备。`);
+      else warnings.push(`tokens.${key} 是空字符串（Codex 能加载，但该配置无法完成登录）。`);
+    }
+  });
+
+  if (level === "loadable" && !LOGIN_TOKEN_KEYS.some((key) => isNonEmptyString(tokens[key]))) {
+    errors.push("tokens 里没有任何可用凭据（id_token / access_token / refresh_token 全空），该配置无法登录。");
+  }
+
+  if (tokens.account_id !== undefined && tokens.account_id !== null && typeof tokens.account_id !== "string") {
+    errors.push(`tokens.account_id 必须是字符串，当前为 ${typeName(tokens.account_id)}（Codex 的类型是 Option\u003cString\u003e，类型不符会让整份 auth.json 反序列化失败）。`);
+  } else if (!credentialIsUsable(tokens.account_id)) {
+    warnings.push("tokens.account_id 缺失或为空（Codex 只把它当元数据，不影响登录，但可能影响 workspace 识别）。");
+  }
+  return tokens;
+}
+
+let raw = "";
+try {
+  // 去掉 BOM 并把 Windows 换行统一成 LF：从网页/剪贴板粘贴时经常带 \r\n
+  raw = fs.readFileSync(authFile, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+} catch (error) {
+  console.log(`错误: 读取失败: ${error.message}`);
+  process.exit(1);
+}
+
+if (!raw.trim()) errors.push("文件为空，没有可写入的内容。");
+
+let auth = null;
+if (errors.length === 0) {
+  try {
+    auth = JSON.parse(raw);
+  } catch (error) {
+    errors.push(`JSON 解析失败: ${error.message}`);
+    errors.push("常见原因：缺少首尾大括号、复制内容不完整，或粘贴时被编辑器自动缩进/自动补全破坏。");
+  }
+}
+
+if (errors.length === 0 && !isPlainObject(auth)) {
+  errors.push("顶层必须是 JSON 对象（以 { 开头、以 } 结尾）。");
+  auth = null;
+}
+
+if (auth) {
+  const unknownTopKeys = Object.keys(auth).filter((key) => !TOP_LEVEL_KEYS.includes(key));
+  if (unknownTopKeys.length) {
+    warnings.push(`顶层存在官方登录缓存之外的字段: ${unknownTopKeys.join(", ")}（官方 auth.json 通常只有 auth_mode / OPENAI_API_KEY / tokens / last_refresh）`);
+  }
+
+  if (auth.last_refresh !== undefined && auth.last_refresh !== null) {
+    if (typeof auth.last_refresh !== "string") {
+      errors.push(`last_refresh 必须是 RFC3339 字符串，当前为 ${typeName(auth.last_refresh)}（Codex 用强类型 DateTime 反序列化，类型不符会让整份 auth.json 加载失败）。`);
+    } else if (!isValidRfc3339(auth.last_refresh)) {
+      errors.push(`last_refresh 不是合法的 RFC3339 时间: ${JSON.stringify(auth.last_refresh)}（日期/时钟/时区越界；Codex 反序列化整份 auth.json 会失败，不会退化成"当作缺失"）。`);
+    }
+  }
+
+  if (fieldExistsForMode(auth.OPENAI_API_KEY) && typeof auth.OPENAI_API_KEY !== "string") {
+    errors.push(`OPENAI_API_KEY 必须是字符串或 null，当前为 ${typeName(auth.OPENAI_API_KEY)}。`);
+  }
+
+  const mode = resolveAuthMode(auth);
+  if (mode === "invalid-type") {
+    errors.push(`auth_mode 必须是字符串，当前为 ${typeName(auth.auth_mode)}。`);
+  } else if (mode === "unrecognized") {
+    errors.push(`auth_mode 取值无法识别: ${JSON.stringify(auth.auth_mode)}（Codex 支持的取值：${KNOWN_AUTH_MODES.join(" / ")}；不认识的取值会让整份 auth.json 反序列化失败）。`);
+  } else if (mode === "headers") {
+    // cc-switch：'Modes Codex cannot load from storage (headers, unrecognized) are signed out'
+    errors.push('auth_mode 为 "headers"：Codex 无法从 auth.json 加载该模式，写进去等于没登录。');
+  } else if (mode !== "chatgpt" && mode !== "chatgptAuthTokens") {
+    // 非 ChatGPT 模式：先按各自模式的凭据字段做「存在 + 类型 + 非空」检查，再给模式提示
+    checkModeCredential(auth, mode);
+    if (mode !== "apikey") {
+      warnings.push(`auth_mode 解析为 ${mode}，不是官方 ChatGPT 登录缓存（本选项用来写入官方登录态）。`);
+    }
+  }
+
+  if (mode === "chatgpt" || mode === "chatgptAuthTokens") {
+    if (!(auth.OPENAI_API_KEY === null || auth.OPENAI_API_KEY === undefined || auth.OPENAI_API_KEY === "")) {
+      warnings.push("OPENAI_API_KEY 建议为 null（官方登录使用 tokens，该字段会被忽略）");
+    }
+    const tokens = checkChatgptTokens(auth);
+    if (tokens) {
+      if (isNonEmptyString(tokens.id_token)) {
+        const identity = decodeJwt(tokens.id_token);
+        if (!identity) {
+          errors.push("tokens.id_token 不是合法的 JWT（要求恰好三段、三段非空、严格 base64url、payload 是 JSON 对象；Codex 对 id_token 有专用反序列化，解析失败会让整份 auth.json 加载失败）。");
+        } else {
+          const account = [];
+          if (identity.claims.email) account.push(`email: ${identity.claims.email}`);
+          if (identity.claims.sub) account.push(`sub: ${identity.claims.sub}`);
+          if (account.length) infos.push(`id_token 账号信息: ${account.join("    ")}`);
+          if (!isNonEmptyString(identity.header.alg)) {
+            warnings.push("tokens.id_token 的 header 缺少 alg（cc-switch 提取账号身份时要求该字段，登录本身通常不受影响）。");
+          }
+        }
+      }
+      if (isNonEmptyString(tokens.access_token)) {
+        const access = decodeJwt(tokens.access_token);
+        if (access && access.claims.exp) {
+          const expiresAt = new Date(access.claims.exp * 1000);
+          const remainHours = (expiresAt.getTime() - Date.now()) / 3600000;
+          if (remainHours > 0) infos.push(`access_token 有效期至: ${expiresAt.toISOString()}（约 ${remainHours.toFixed(1)} 小时后过期）`);
+          else infos.push(`access_token 已于 ${expiresAt.toISOString()} 过期（Codex 启动时会用 refresh_token 自动刷新）`);
+        }
+      }
+    }
+  }
+  // 注意：apikey 模式由上面的 checkModeCredential 负责（原处另一个 apikey 判据已删除，避免留下死分支）
+}
+
+infos.forEach((message) => console.log(message));
+warnings.forEach((message) => console.log(`警告: ${message}`));
+errors.forEach((message) => console.log(`错误: ${message}`));
+
+if (auth) {
+  console.log("内容预览（敏感字段已隐藏）:");
+  console.log(JSON.stringify(sanitizeJson(auth), null, 2));
+}
+
+process.exit(errors.length > 0 ? 1 : 0);
+NODE
+}
+# 把已校验的内容规范化（去 BOM、统一两空格缩进）后写入目标文件
+hapi_write_codex_auth_file() {
+    local source_file="$1"
+    local dest_file="$2"
+
+    hapi_ensure_node_json || return 1
+    CODEX_AUTH_SOURCE="${source_file}" CODEX_AUTH_DEST="${dest_file}" node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const sourceFile = process.env.CODEX_AUTH_SOURCE;
+const destFile = process.env.CODEX_AUTH_DEST;
+
+try {
+  const raw = fs.readFileSync(sourceFile, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+  const auth = raw.trim() ? JSON.parse(raw) : {};
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) throw new Error("auth.json 必须是 JSON 对象");
+  fs.mkdirSync(path.dirname(destFile), { recursive: true });
+  // 与 cc-switch 的 atomic_write_private 一致：凭据文件在创建时就要求 0600，
+  // 避免「先 0644 再 chmod」之间出现可读窗口；已存在的文件再统一收紧一次。
+  fs.writeFileSync(destFile, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
+  try { fs.chmodSync(destFile, 0o600); } catch {}
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+NODE
+}
+
+# 只在正常返回路径删临时文件是不够的：Ctrl+C / 断线 / kill 都可能留下凭据副本，
+# 因此敏感临时文件统一用 mktemp 生成不可预测路径，并挂上退出清理
+# （见 hapi_edit_codex_official_auth / hapi_create_claude_profile）。
+HAPI_CODEX_AUTH_TMP=""
+HAPI_CLAUDE_SETTINGS_TMP=""
+
+hapi_cleanup_sensitive_tmp() {
+    local tmp_file
+    for tmp_file in "${HAPI_CODEX_AUTH_TMP}" "${HAPI_CLAUDE_SETTINGS_TMP}"; do
+        if [ -n "${tmp_file}" ] && [ -f "${tmp_file}" ]; then
+            rm -f "${tmp_file}"
+        fi
+    done
+    HAPI_CODEX_AUTH_TMP=""
+    HAPI_CLAUDE_SETTINGS_TMP=""
+}
+
+hapi_cleanup_sensitive_tmp_and_exit() {
+    hapi_cleanup_sensitive_tmp
+    exit "$1"
+}
+
+# 敏感临时文件就绪后立即安装清理钩子；重复安装无副作用。
+# 故意不挂 INT：vim 里 Ctrl+C 是退出插入模式的常用操作，挂上会在 vim 退出后
+# 连带删掉用户刚保存的内容。
+hapi_install_sensitive_tmp_traps() {
+    trap 'hapi_cleanup_sensitive_tmp' EXIT
+    trap 'hapi_cleanup_sensitive_tmp_and_exit 143' TERM
+    trap 'hapi_cleanup_sensitive_tmp_and_exit 129' HUP
+}
+
+hapi_warn_codex_provider_route() {
+    local model_provider
+    model_provider=$(hapi_codex_current_value "model_provider")
+
+    if [ -z "${model_provider}" ] || [ "${model_provider}" = "openai" ]; then
+        echo -e "${green}当前 config.toml 未指定第三方 model_provider，Codex 会直接使用 auth.json 中的官方登录。${background}"
+        return 0
+    fi
+    echo -e "${yellow}注意: 当前 config.toml 中 model_provider = \"${model_provider}\"，模型请求仍会走该第三方 provider。${background}"
+    echo -e "${yellow}      官方登录态只影响 Codex 识别到的账号；若想完全走官方，请移除 model_provider 及对应的 [model_providers.*] 段。${background}"
+}
+
+hapi_edit_codex_official_auth() {
+    local config_dir auth_file config_file backup_file editor tmp_file editor_status
+    local edit_mode edit_round max_editor_rounds confirm profile_name default_profile_name
+    config_dir="${HOME}/.codex"
+    auth_file="${config_dir}/auth.json"
+    config_file="${config_dir}/config.toml"
+    max_editor_rounds=5
+    default_profile_name="官方登录"
+
+    hapi_ensure_node_json || return
+
+    echo -e "${white}=====${green}写入官方 auth.json（ChatGPT 登录缓存）${white}=====${background}"
+    echo -e "${yellow}该文件保存 Codex 官方登录态（access_token / id_token / refresh_token），属于敏感凭据，请勿泄露。${background}"
+    echo -e "${yellow}目标文件: ${auth_file}${background}"
+    echo -e "${green}1.  ${cyan}空白文件（推荐：直接粘贴整份官方 auth.json）${background}"
+    echo -e "${green}2.  ${cyan}载入现有 auth.json 内容（适合局部修改）${background}"
+    echo -e "${green}0.  ${cyan}取消${background}"
+    echo "========================="
+    echo -en "${green}请输入您的选项: ${background}"; read -r edit_mode
+
+    case "${edit_mode}" in
+    1) edit_mode="blank" ;;
+    2) edit_mode="existing" ;;
+    0)
+        echo -e "${yellow}已取消。${background}"
+        return
+        ;;
+    *)
+        echo -e "${red}输入错误${background}"
+        return 1
+        ;;
+    esac
+
+    editor=$(hapi_detect_editor)
+    if [ -z "${editor}" ]; then
+        echo -e "${red}未找到可用的文本编辑器，请先安装 vim 或 nano。${background}"
+        echo -e "${yellow}也可用 HAPI_EDITOR 指定编辑器，例如: HAPI_EDITOR=vim bash Hapi_Claude_Manage.sh${background}"
+        return 1
+    fi
+
+    if [ "${edit_mode}" = "existing" ] && [ ! -f "${auth_file}" ]; then
+        echo -e "${yellow}未找到 ${auth_file}，改为从空白文件开始。${background}"
+        edit_mode="blank"
+    fi
+
+    tmp_file=$(mktemp "${TMPDIR:-/tmp}/hapi_codex_auth.XXXXXX") || {
+        echo -e "${red}临时文件创建失败，请确认系统有可用的 mktemp。${background}"
+        return 1
+    }
+    chmod 600 "${tmp_file}" 2>/dev/null
+    HAPI_CODEX_AUTH_TMP="${tmp_file}"
+    hapi_install_sensitive_tmp_traps
+
+    if [ "${edit_mode}" = "existing" ]; then
+        cp -a "${auth_file}" "${tmp_file}"
+        chmod 600 "${tmp_file}" 2>/dev/null
+        echo -e "${green}已载入现有 auth.json 内容，可直接修改后保存。${background}"
+    else
+        echo -e "${yellow}请粘贴完整 JSON，字段结构如下（示例仅用于说明，不要把示例一起粘贴进去）:${background}"
+        echo '{
+  "auth_mode": "chatgpt",
+  "OPENAI_API_KEY": null,
+  "tokens": {
+    "access_token": "eyJ...",
+    "account_id": "00000000-0000-0000-0000-000000000000",
+    "id_token": "eyJ...",
+    "refresh_token": "rt_..."
+  },
+  "last_refresh": "2026-01-01T00:00:00.000000000Z"
+}'
+    fi
+
+    echo -e "${yellow}编辑器: ${editor}${background}"
+    if hapi_editor_is_vim_like "${editor}"; then
+        echo -e "${yellow}已为 vim 开启 paste 模式，按 i 后直接粘贴即可（保存退出: Esc 后输入 :wq 回车）。${background}"
+    else
+        echo -e "${yellow}保存并退出编辑器后，脚本会立即校验内容。${background}"
+    fi
+    pause
+
+    edit_round=1
+    while [ "${edit_round}" -le "${max_editor_rounds}" ]; do
+        hapi_run_editor "${editor}" "${tmp_file}"
+        editor_status=$?
+        if [ "${editor_status}" -ne 0 ]; then
+            echo -e "${yellow}编辑器异常退出（退出码 ${editor_status}），内容可能根本没有被修改。${background}"
+            echo -en "${yellow}是否仍然校验并写入当前内容？[y/N]: ${background}"
+            read -r confirm
+            if [[ "${confirm}" != "y" && "${confirm}" != "Y" ]]; then
+                echo -e "${yellow}已取消写入。${background}"
+                hapi_cleanup_sensitive_tmp
+                return 1
+            fi
+        fi
+        echo -e "${white}=====${green}校验 auth.json 内容（第 ${edit_round} 次）${white}=====${background}"
+        if hapi_check_codex_auth_file "${tmp_file}"; then
+            echo -en "${green}确认将以上内容写入 ${auth_file} 吗？[y/N]: ${background}"
+            read -r confirm
+            if [[ "${confirm}" == "y" || "${confirm}" == "Y" ]]; then
+                break
+            fi
+            echo -e "${yellow}已取消写入。${background}"
+            hapi_cleanup_sensitive_tmp
+            return
+        fi
+
+        echo -en "${yellow}校验未通过，是否重新打开编辑器修改？[Y/n]: ${background}"
+        read -r confirm
+        if [[ "${confirm}" == "n" || "${confirm}" == "N" ]]; then
+            echo -e "${yellow}已取消写入。${background}"
+            hapi_cleanup_sensitive_tmp
+            return
+        fi
+        edit_round=$((edit_round + 1))
+    done
+
+    if [ "${edit_round}" -gt "${max_editor_rounds}" ]; then
+        echo -e "${red}连续 ${max_editor_rounds} 次校验未通过，已放弃写入。${background}"
+        hapi_cleanup_sensitive_tmp
+        return 1
+    fi
+
+    mkdir -p "${config_dir}"
+    if [ -f "${auth_file}" ]; then
+        backup_file="${auth_file}.bak"
+        cp -a "${auth_file}" "${backup_file}"
+        chmod 600 "${backup_file}" 2>/dev/null
+        echo -e "${green}已备份原配置到: ${backup_file}${background}"
+    fi
+    if ! hapi_write_codex_auth_file "${tmp_file}" "${auth_file}"; then
+        echo -e "${red}auth.json 写入失败。${background}"
+        hapi_cleanup_sensitive_tmp
+        return 1
+    fi
+    hapi_cleanup_sensitive_tmp
+    chmod 600 "${auth_file}" 2>/dev/null
+    echo -e "${green}官方 auth.json 已写入: ${auth_file}${background}"
+
+    hapi_warn_codex_provider_route
+
+    echo -en "${cyan}是否同时保存到 Codex 配置库（之后可用「切换配置」恢复）？[Y/n]: ${background}"
+    read -r confirm
+    if [[ "${confirm}" == "n" || "${confirm}" == "N" ]]; then
+        return 0
+    fi
+    if [ ! -f "${config_file}" ]; then
+        echo -e "${yellow}未找到 ${config_file}，配置库中该条配置的 config.toml 将为空。${background}"
+    fi
+    echo -en "${cyan}请输入配置名称 (默认 ${default_profile_name}): ${background}"
+    read -r profile_name
+    profile_name=${profile_name:-${default_profile_name}}
+    hapi_save_codex_profile_from_files "${profile_name}" "${auth_file}" "${config_file}"
+}
+
 hapi_codex_config_menu() {
     local num
 
@@ -1808,6 +2704,7 @@ hapi_codex_config_menu() {
         echo -e "${green}4.  ${cyan}切换配置${background}"
         echo -e "${green}5.  ${cyan}删除配置${background}"
         echo -e "${green}6.  ${cyan}切换新增推荐值${background}"
+        echo -e "${green}7.  ${cyan}写入/编辑官方 auth.json（ChatGPT 登录）${background}"
         echo -e "${green}0.  ${cyan}返回上一级${background}"
         echo "========================="
         echo -en "${green}请输入您的选项: ${background}"; read -r num
@@ -1819,6 +2716,7 @@ hapi_codex_config_menu() {
         4) hapi_switch_codex_profile; pause ;;
         5) hapi_delete_codex_profile; pause ;;
         6) hapi_toggle_codex_recommended_values; pause ;;
+        7) hapi_edit_codex_official_auth; pause ;;
         0) return ;;
         *) echo -e "${red}输入错误${background}"; pause ;;
         esac
@@ -2226,6 +3124,7 @@ hapi_set_listen_config() {
     if [ -f "${settings_file}" ]; then
         backup_file="${settings_file}.bak"
         cp -a "${settings_file}" "${backup_file}"
+        chmod 600 "${backup_file}" 2>/dev/null
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
     if ! node -e 'const fs = require("fs"); const path = require("path"); const file = process.argv[1]; const host = process.argv[2]; const port = Number(process.argv[3]); let data = {}; if (fs.existsSync(file)) { try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch {} } data.listenHost = host; data.listenPort = port; fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");' "${settings_file}" "${listen_host}" "${listen_port}"; then
@@ -2286,9 +3185,10 @@ hapi_set_cli_api_token() {
     if [ -f "${settings_file}" ]; then
         backup_file="${settings_file}.bak"
         cp -a "${settings_file}" "${backup_file}"
+        chmod 600 "${backup_file}" 2>/dev/null
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
-    if ! node -e 'const fs = require("fs"); const path = require("path"); const file = process.argv[1]; const token = process.argv[2]; let data = {}; if (fs.existsSync(file)) { try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch {} } data.cliApiToken = token; fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");' "${settings_file}" "${token}"; then
+    if ! node -e 'const fs = require("fs"); const path = require("path"); const file = process.argv[1]; const token = process.argv[2]; let data = {}; if (fs.existsSync(file)) { try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch {} } data.cliApiToken = token; fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 }); try { fs.chmodSync(file, 0o600); } catch {}' "${settings_file}" "${token}"; then
         echo -e "${red}cliApiToken 写入失败: ${settings_file}${background}"
         return 1
     fi
