@@ -4,7 +4,7 @@
 #   Manage/Hapi_Claude_Manage.sh 的回归测试（Codex / Claude 配置语义 + 凭据写入路径）
 #
 # 用法：
-#   bash tests/Hapi_Claude_Manage/run.sh                  # 全量（A~H）
+#   bash tests/Hapi_Claude_Manage/run.sh                  # 全量（A~I）
 #   bash tests/Hapi_Claude_Manage/run.sh --only A,C       # 只跑指定分组（日常最常用）
 #   bash tests/Hapi_Claude_Manage/run.sh --log /tmp/x.log # 指定进度日志（默认自动生成）
 #
@@ -17,6 +17,7 @@
 #   F 配置库旁路卡点（菜单 2 储存、菜单 3 新建、菜单 4 切换）
 #   G 凭据权限（备份 0600）与预览脱敏
 #   H 兼容性回归（既有校验 / 展示 / 菜单接线）
+#   I 路由自动收敛（官方登录剥离并暂存第三方路由 / 第三方 base_url 自动恢复 / 保留 id 不动）
 #
 # 三条"绝不卡住"的保证（与 tests/meme_generator/run.sh 一致）：
 #   1) harness 里 `exec 0< /dev/null`：漏写重定向的 read 立刻 EOF，不会永久阻塞；
@@ -409,7 +410,8 @@ for f in hapi_check_codex_auth_file hapi_write_codex_auth_file hapi_write_codex_
          hapi_editor_is_vim_like hapi_run_editor hapi_cleanup_sensitive_tmp \
          hapi_install_sensitive_tmp_traps hapi_extract_codex_profile_auth \
          hapi_save_codex_profile_from_files hapi_store_current_codex_config \
-         hapi_create_codex_profile hapi_switch_codex_profile hapi_codex_profile_store_file; do
+         hapi_create_codex_profile hapi_switch_codex_profile hapi_codex_profile_store_file \
+         hapi_sync_codex_route hapi_codex_route_stash_file; do
   declare -f "${f}" > /dev/null || MISSING="${MISSING} ${f}"
 done
 if [ -n "${MISSING}" ]; then
@@ -550,17 +552,20 @@ model_provider = \"${reserved}\"
     expect_grep "保留 id ${reserved}：给出提示" "${WORK_DIR}/d_res.log" "内置/保留 provider"
   done
 
+  rm -f "$(hapi_codex_route_stash_file)"
   seed_live ok_official $'model = "gpt-5.5"\nmodel_provider = "myrelay"\n'
   hapi_write_codex_current_config "" "https://api.example.com/v1" "gpt-5.5" > "${WORK_DIR}/d5.log" 2>&1
-  expect_count "自定义 id 仍建表" "${HOME}/.codex/config.toml" "model_providers.myrelay" 1
-  expect_grep "自定义路由给出缺凭据提示" "${WORK_DIR}/d5.log" "拿不到可用凭据"
+  expect_count "官方登录 + 残留自定义路由：不再保留第三方路由" "${HOME}/.codex/config.toml" "model_provider" 0
+  expect_grep "官方登录剥离路由时给出说明" "${WORK_DIR}/d5.log" "已自动移除 config.toml 里的第三方路由"
 
+  rm -f "$(hapi_codex_route_stash_file)"
   seed_live ok_official
   hapi_write_codex_current_config "sk-third-party" "https://api.example.com/v1" "gpt-5.5" > "${WORK_DIR}/d6.log" 2>&1
-  expect_count "官方登录 + 填了 Key 时写 custom 模板" "${HOME}/.codex/config.toml" 'model_provider = "custom"' 1
+  expect_count "官方登录 + 填了 Key + 第三方 base_url 时写 custom 模板" "${HOME}/.codex/config.toml" 'model_provider = "custom"' 1
   expect_grep "填 Key 时给出风险提示" "${WORK_DIR}/d6.log" "本次仍写入了 OPENAI_API_KEY"
   expect_count "官方登录字段未被删" "${HOME}/.codex/auth.json" '"refresh_token"' 1
 
+  # 官方登录 + 残留第三方路由 + 已有 token：路由整段剥离并暂存，token 不留在 config.toml
   seed_live ok_official 'model = "gpt-5.5"
 model_provider = "myrelay"
 
@@ -569,7 +574,20 @@ base_url = "https://api.example.com/v1"
 experimental_bearer_token = "sk-existing"
 '
   hapi_write_codex_current_config "" "https://api.example.com/v1" "gpt-5.5" > /dev/null 2>&1
-  expect_count "空 Key 不清空已有 experimental_bearer_token" "${HOME}/.codex/config.toml" "sk-existing" 1
+  expect_count "剥离后 config.toml 不再留第三方 token" "${HOME}/.codex/config.toml" "sk-existing" 0
+  expect_count "第三方 token 随路由一起暂存" "$(hapi_codex_route_stash_file)" "sk-existing" 1
+
+  # 第三方端点的 apikey 配置：空 Key 依旧不能清掉已写的 token，路由也必须保留
+  seed_live c_apikey_ok 'model = "gpt-5.5"
+model_provider = "myrelay"
+
+[model_providers.myrelay]
+base_url = "https://api.example.com/v1"
+experimental_bearer_token = "sk-existing"
+'
+  hapi_write_codex_current_config "" "https://api.example.com/v1" "gpt-5.5" > /dev/null 2>&1
+  expect_count "第三方 apikey：空 Key 不清空已有的 experimental_bearer_token" "${HOME}/.codex/config.toml" "sk-existing" 1
+  expect_count "第三方 apikey：路由保留" "${HOME}/.codex/config.toml" 'model_provider = "myrelay"' 1
 
   rm -rf "${HOME}/.codex"; mkdir -p "${HOME}/.codex"
   hapi_write_codex_current_config "" "https://api.example.com/v1" "gpt-5.5" > "${WORK_DIR}/d8.log" 2>&1
@@ -755,6 +773,235 @@ base_url = "https://api.example.com/v1"
     <(grep -c 'hapi_check_codex_auth_file "${auth_file}" loadable' "${TARGET_SCRIPT}") "1" 1
   expect_count "菜单 4 走 loadable 级校验" \
     <(grep -c 'hapi_check_codex_auth_file "${profile_auth_tmp}" loadable' "${TARGET_SCRIPT}") "1" 1
+fi
+
+# ============================================================
+# I) 路由自动收敛：官方登录剥离第三方路由 / 第三方 base_url 自动恢复
+#    （对照 cc-switch：官方预设 = 空 config，第三方预设 = model_provider + [model_providers.*]；
+#      脚本没有 cc-switch 的数据库，所以剥离时把路由原文存进暂存文件）
+# ============================================================
+if group_on I; then
+  head_ "I) 官方 ↔ 第三方路由自动收敛"
+  STASH="$(hapi_codex_route_stash_file)"
+
+  # --- I1 菜单 7 的同步入口：官方登录 + 残留第三方路由 → 剥离并暂存 ---
+  rm -f "${STASH}"
+  seed_live ok_official 'model = "gpt-5.5"
+model_provider = "myrelay"
+
+[model_providers.myrelay]
+name = "MyRelay"
+base_url = "https://relay.example.com/v1"
+env_key = "OPENAI_API_KEY"
+experimental_bearer_token = "sk-relay-secret"
+wire_api = "responses"
+
+[features]
+goals = true
+'
+  : > "${CHMOD_LOG}"
+  hapi_sync_codex_route > "${WORK_DIR}/i1.log" 2>&1
+  expect_rc "官方登录下同步路由成功" 0 "$?"
+  expect_count "剥离 model_provider 行" "${HOME}/.codex/config.toml" "model_provider" 0
+  expect_count "剥离 [model_providers.*] 段" "${HOME}/.codex/config.toml" "model_providers" 0
+  expect_count "config.toml 里不再留第三方 token" "${HOME}/.codex/config.toml" "sk-relay-secret" 0
+  expect_count "保留顶层 model" "${HOME}/.codex/config.toml" '^model = "gpt-5.5"$' 1
+  expect_count "保留 [features] 段" "${HOME}/.codex/config.toml" '^\[features\]$' 1
+  expect_grep "提示已自动移除路由" "${WORK_DIR}/i1.log" "已自动移除 config.toml 里的第三方路由"
+  expect_count "暂存文件记住 provider id" "${STASH}" '"providerId": "myrelay"' 1
+  expect_count "暂存文件保存段原文（含 token）" "${STASH}" "sk-relay-secret" 1
+  expect_grep "暂存文件权限收紧到 600" "${CHMOD_LOG}" "600 ${STASH}"
+
+  # --- I2 幂等：已无第三方路由时不再改写 config.toml ---
+  before_config=$(cat "${HOME}/.codex/config.toml")
+  hapi_sync_codex_route > "${WORK_DIR}/i2.log" 2>&1
+  expect_rc "再次同步仍成功（幂等）" 0 "$?"
+  expect_eq "已无第三方路由时不改写 config.toml" "${before_config}" "$(cat "${HOME}/.codex/config.toml")"
+  expect_grep "无路由可剥离时提示保持官方路由" "${WORK_DIR}/i2.log" "保持不指定 model_provider"
+
+  # route-only 只做路由收敛：连 [features] 这种无关字段都不补（最小改动，便于肉眼 diff）
+  # ⚠️ 这里**不能调 seed_live**：它第一行是 `rm -rf "${HOME}/.codex"`，会把 I1 刚写下的暂存路由删掉，
+  #    于是 I3 的恢复链失去前提（曾经因此丢过 4 条断言）。只覆盖这两个文件。
+  cp "$(fx_path ok_official)" "${HOME}/.codex/auth.json"
+  printf '%s' $'model = "gpt-5.5"\n' > "${HOME}/.codex/config.toml"
+  hapi_sync_codex_route > /dev/null 2>&1
+  expect_count "无第三方路由时 route-only 不补 [features]" "${HOME}/.codex/config.toml" '^\[features\]$' 0
+  expect_eq "config.toml 保持只有 model 一行" 'model = "gpt-5.5"' "$(cat "${HOME}/.codex/config.toml")"
+
+  # 前置断言：I3 依赖 I1 留下的暂存路由，先把"前提还在"钉死，免得后续用例再把它删掉却看不出来
+  expect_count "I3 前暂存路由仍存在" "${STASH}" '"providerId": "myrelay"' 1
+
+  # --- I3 菜单 1 填第三方 base_url：自动恢复暂存的路由并更新端点 ---
+  hapi_write_codex_current_config "sk-new-relay" "https://relay2.example.com/v1" "gpt-5.5" > "${WORK_DIR}/i3.log" 2>&1
+  expect_rc "填写第三方 base_url 时写入成功" 0 "$?"
+  expect_count "恢复 model_provider 行（provider id 沿用暂存值）" "${HOME}/.codex/config.toml" '^model_provider = "myrelay"$' 1
+  expect_count "恢复 [model_providers.myrelay] 段" "${HOME}/.codex/config.toml" '^\[model_providers\.myrelay\]$' 1
+  expect_count "按本次 base_url 更新端点" "${HOME}/.codex/config.toml" 'base_url = "https://relay2.example.com/v1"' 1
+  expect_count "恢复段里的其它字段（env_key）" "${HOME}/.codex/config.toml" 'env_key = "OPENAI_API_KEY"' 1
+  expect_count "恢复段里的 token 换成本次填入的 Key" "${HOME}/.codex/config.toml" "sk-new-relay" 1
+  expect_grep "提示已自动恢复路由" "${WORK_DIR}/i3.log" "已自动恢复此前的第三方路由"
+
+  # --- I4 官方 API Key + 官方端点：剥离第三方路由（不建 provider 段）---
+  rm -f "${STASH}"
+  seed_live c_apikey_ok 'model = "gpt-5.5"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "Custom"
+base_url = "https://relay.example.com/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+'
+  hapi_write_codex_current_config "sk-official" "https://api.openai.com/v1" "gpt-5.5" > "${WORK_DIR}/i4.log" 2>&1
+  expect_rc "官方 Key + 官方端点写入成功" 0 "$?"
+  expect_count "官方端点下不保留 model_provider" "${HOME}/.codex/config.toml" "model_provider" 0
+  expect_count "官方端点下不建 provider 段" "${HOME}/.codex/config.toml" "model_providers" 0
+  expect_grep "提示已自动移除路由" "${WORK_DIR}/i4.log" "已自动移除 config.toml 里的第三方路由"
+  expect_count "剥离内容进入暂存文件" "${STASH}" '"providerId": "custom"' 1
+
+  # --- I5 保留 id（openai / ollama…）：不建表、不剥离、不产生暂存 ---
+  rm -f "${STASH}"
+  seed_live ok_official 'model = "gpt-5.5"
+model_provider = "openai"
+'
+  hapi_sync_codex_route > "${WORK_DIR}/i5.log" 2>&1
+  expect_rc "保留 id 下同步成功" 0 "$?"
+  expect_count "保留 id 行保持原样" "${HOME}/.codex/config.toml" '^model_provider = "openai"$' 1
+  expect_count "保留 id 不建 provider 表" "${HOME}/.codex/config.toml" "model_providers" 0
+  expect_count "保留 id 不产生暂存文件" <(ls -A "${HOME}/.codex" 2>/dev/null) "^hapi_provider_route\.json$" 0
+
+  # --- I6 脚本判断不了的登录模式（PAT）：路由原样保留，base_url 也不动 ---
+  seed_live c_load_pat_ok 'model = "gpt-5.5"
+model_provider = "myrelay"
+
+[model_providers.myrelay]
+base_url = "https://relay.example.com/v1"
+'
+  hapi_write_codex_current_config "pat-key" "https://other.example.com/v1" "gpt-5.5" > "${WORK_DIR}/i6.log" 2>&1
+  expect_rc "PAT 模式下写入成功" 0 "$?"
+  expect_count "PAT 模式保留原路由" "${HOME}/.codex/config.toml" '^model_provider = "myrelay"$' 1
+  expect_count "PAT 模式不覆盖原 base_url" "${HOME}/.codex/config.toml" 'base_url = "https://relay.example.com/v1"' 1
+  expect_count "PAT 模式不写入本次 base_url" "${HOME}/.codex/config.toml" "https://other.example.com/v1" 0
+  expect_grep "提示脚本无法判断路由" "${WORK_DIR}/i6.log" "无法判断"
+
+  # --- I7 预览：显示暂存路由，但不打印暂存里的 token ---
+  seed_live ok_official 'model = "gpt-5.5"
+model_provider = "myrelay"
+
+[model_providers.myrelay]
+base_url = "https://relay.example.com/v1"
+experimental_bearer_token = "sk-should-not-print"
+'
+  hapi_sync_codex_route > /dev/null 2>&1
+  hapi_show_codex_config > "${WORK_DIR}/i7.log" 2>&1
+  expect_grep "查看配置显示暂存路由" "${WORK_DIR}/i7.log" "暂存的第三方路由"
+  expect_grep "显示暂存 provider id" "${WORK_DIR}/i7.log" "provider id: myrelay"
+  expect_count "不打印暂存里的 token" "${WORK_DIR}/i7.log" "sk-should-not-print" 0
+
+  # --- I8 空配置 + 官方登录：不凭空建第三方路由 ---
+  rm -rf "${HOME}/.codex"; mkdir -p "${HOME}/.codex"
+  cp "$(fx_path ok_official)" "${HOME}/.codex/auth.json"
+  hapi_write_codex_current_config "" "https://api.openai.com/v1" "gpt-5.5" > "${WORK_DIR}/i8.log" 2>&1
+  expect_rc "空配置 + 官方登录写入成功" 0 "$?"
+  expect_count "空配置下不建 model_provider" "${HOME}/.codex/config.toml" "model_provider" 0
+  expect_count "空配置下不建 provider 段" "${HOME}/.codex/config.toml" "model_providers" 0
+  expect_grep "提示保持官方路由" "${WORK_DIR}/i8.log" "保持不指定 model_provider"
+
+  # 空配置分支同样必须写 auth.json（曾经因为提前 exit 漏掉过），所以用"文件本来不存在"来验证
+  rm -rf "${HOME}/.codex"; mkdir -p "${HOME}/.codex"
+  hapi_write_codex_current_config "sk-first-run" "https://api.openai.com/v1" "gpt-5.5" > /dev/null 2>&1
+  expect_count "空配置 + 无 auth.json 时仍创建 auth.json" "${HOME}/.codex/auth.json" '"OPENAI_API_KEY": "sk-first-run"' 1
+  expect_count "空配置 + 无 auth.json 时也不建第三方路由" "${HOME}/.codex/config.toml" "model_provider" 0
+
+  # --- I9 近似官方域名（api.openai.com.evil.com）必须按第三方处理，不得误剥离 ---
+  rm -f "${STASH}"
+  seed_live ok_official $'model = "gpt-5.5"\n'
+  hapi_write_codex_current_config "sk-lookalike" "https://api.openai.com.evil.com/v1" "gpt-5.5" > "${WORK_DIR}/i9.log" 2>&1
+  expect_rc "近似官方域名下写入成功" 0 "$?"
+  expect_count "近似官方域名按第三方处理（建路由）" "${HOME}/.codex/config.toml" '^model_provider = "custom"$' 1
+  expect_count "近似官方域名下 base_url 原样写入" "${HOME}/.codex/config.toml" 'base_url = "https://api.openai.com.evil.com/v1"' 1
+  expect_count "近似官方域名不产生暂存文件" <(ls -A "${HOME}/.codex" 2>/dev/null) "^hapi_provider_route\.json$" 0
+
+  # --- I10 对照：暂存文件不存在 → 允许按新配置建 generic custom ---
+  rm -f "${STASH}"
+  seed_live ok_official $'model = "gpt-5.5"\n'
+  hapi_write_codex_current_config "sk-generic" "https://relay4.example.com/v1" "gpt-5.5" > "${WORK_DIR}/i10.log" 2>&1
+  expect_rc "无暂存文件时写入成功" 0 "$?"
+  expect_count "无暂存文件时建 generic custom" "${HOME}/.codex/config.toml" '^model_provider = "custom"$' 1
+  expect_count "generic custom 段用本次 base_url" "${HOME}/.codex/config.toml" 'base_url = "https://relay4.example.com/v1"' 1
+
+  # --- I11 暂存文件损坏 → fail-closed：不静默降级成 generic custom，两个文件都不动 ---
+  seed_live ok_official $'model = "gpt-5.5"\n'
+  printf '%s' '{"providerId": "myrelay", "sectionLines": [' > "${STASH}"   # 截断的 JSON
+  before_auth=$(cat "${HOME}/.codex/auth.json")
+  before_cfg=$(cat "${HOME}/.codex/config.toml")
+  hapi_write_codex_current_config "sk-broken" "https://relay5.example.com/v1" "gpt-5.5" > "${WORK_DIR}/i11.log" 2>&1
+  expect_rc "暂存文件损坏时中止写入（非 0）" 1 "$?"
+  expect_eq "损坏时 config.toml 未被改动" "${before_cfg}" "$(cat "${HOME}/.codex/config.toml")"
+  expect_eq "损坏时 auth.json 未被改动" "${before_auth}" "$(cat "${HOME}/.codex/auth.json")"
+  expect_grep "明确提示暂存路由文件已损坏" "${WORK_DIR}/i11.log" "暂存的路由文件已损坏"
+  expect_count "损坏时不建 generic custom" "${HOME}/.codex/config.toml" "model_providers" 0
+
+  # 另一种损坏形态：能解析、但字段不合法
+  printf '%s' '{"providerId": "myrelay", "sectionLines": "oops"}' > "${STASH}"
+  hapi_write_codex_current_config "sk-broken2" "https://relay5.example.com/v1" "gpt-5.5" > "${WORK_DIR}/i11b.log" 2>&1
+  expect_rc "字段不合法的暂存文件同样中止（非 0）" 1 "$?"
+  expect_eq "字段不合法时 config.toml 未被改动" "${before_cfg}" "$(cat "${HOME}/.codex/config.toml")"
+
+  # --- I12 官方登录 + 损坏暂存：剥离照常（用新内容覆盖），但要明确警告 ---
+  seed_live ok_official $'model = "gpt-5.5"\nmodel_provider = "myrelay"\n'
+  printf '%s' 'not-json' > "${STASH}"
+  hapi_sync_codex_route > "${WORK_DIR}/i12.log" 2>&1
+  expect_rc "损坏暂存不影响官方剥离" 0 "$?"
+  expect_count "剥离后 config.toml 已无路由" "${HOME}/.codex/config.toml" "model_provider" 0
+  expect_grep "警告原暂存文件已损坏并被覆盖" "${WORK_DIR}/i12.log" "已损坏"
+  expect_count "损坏文件被新的暂存内容覆盖" "${STASH}" '"providerId": "myrelay"' 1
+
+  # --- I13 端到端：生产代码自己把 config.toml 剥成空文件后，第三方输入必须恢复原 provider ---
+  # 现场是生产剥离造出来的（不是手造"空 config + stash"）：只写了第三方路由的配置被官方同步剥离后，
+  # config.toml 只剩一个换行。首版实现在这里提前 exit，于是下次填第三方 base_url 会绕过暂存、
+  # 静默建成 generic custom，原 provider 的 id / query_params / requires_openai_auth 全丢。
+  rm -f "${STASH}"
+  seed_live ok_official 'model_provider = "myrelay"
+
+[model_providers.myrelay]
+name = "MyRelay"
+base_url = "https://old.example.com/v1"
+env_key = "OPENAI_API_KEY"
+requires_openai_auth = true
+query_params = { foo = "bar" }
+'
+  hapi_sync_codex_route > "${WORK_DIR}/i13a.log" 2>&1
+  expect_rc "仅路由配置可被官方同步剥离" 0 "$?"
+  expect_count "剥离后 config.toml 里没有路由" "${HOME}/.codex/config.toml" "model_provider" 0
+  expect_count "生产剥离后暂存仍是 myrelay" "${STASH}" '"providerId": "myrelay"' 1
+  expect_eq "生产剥离后 config.toml 已成为空文件" "" "$(cat "${HOME}/.codex/config.toml")"
+
+  hapi_write_codex_current_config "sk-native-restore" "https://relay-native.example.com/v1" "gpt-5.5" > "${WORK_DIR}/i13b.log" 2>&1
+  expect_rc "空配置下填第三方 base_url 写入成功" 0 "$?"
+  expect_count "空配置恢复原 provider id" "${HOME}/.codex/config.toml" '^model_provider = "myrelay"$' 1
+  expect_count "空配置恢复 provider 段" "${HOME}/.codex/config.toml" '^\[model_providers\.myrelay\]$' 1
+  expect_count "空配置恢复 query_params" "${HOME}/.codex/config.toml" "query_params" 1
+  expect_count "空配置恢复 requires_openai_auth" "${HOME}/.codex/config.toml" "requires_openai_auth = true" 1
+  expect_count "空配置按本次 base_url 更新端点" "${HOME}/.codex/config.toml" 'base_url = "https://relay-native.example.com/v1"' 1
+  expect_count "空配置下不建 generic custom" "${HOME}/.codex/config.toml" 'name = "custom"' 0
+  expect_grep "空配置恢复时提示已恢复路由" "${WORK_DIR}/i13b.log" "已自动恢复此前的第三方路由"
+
+  # --- I14 预览的 stash 结构校验必须和写入侧 readStash() 同规则 ---
+  seed_live ok_official $'model = "gpt-5.5"\n'
+  printf '%s' '{"providerId": "openai", "sectionLines": []}' > "${STASH}"
+  hapi_show_codex_config > "${WORK_DIR}/i14a.log" 2>&1
+  expect_grep "预览把保留 providerId 判为格式异常" "${WORK_DIR}/i14a.log" "格式异常"
+  printf '%s' '{"providerId": "myrelay", "sectionLines": [1, 2]}' > "${STASH}"
+  hapi_show_codex_config > "${WORK_DIR}/i14b.log" 2>&1
+  expect_grep "预览把非字符串 sectionLines 判为格式异常" "${WORK_DIR}/i14b.log" "格式异常"
+  printf '%s' '{"providerId": "myrelay", "sectionLines": [], "extraTopLevelLines": "oops"}' > "${STASH}"
+  hapi_show_codex_config > "${WORK_DIR}/i14c.log" 2>&1
+  expect_grep "预览把非字符串数组 extraTopLevelLines 判为格式异常" "${WORK_DIR}/i14c.log" "格式异常"
+  printf '%s' '{"providerId": "myrelay", "sectionLines": ["[model_providers.myrelay]"]}' > "${STASH}"
+  hapi_show_codex_config > "${WORK_DIR}/i14d.log" 2>&1
+  expect_grep "对照：合法 stash 正常显示 provider id" "${WORK_DIR}/i14d.log" "provider id: myrelay"
+  expect_count "对照：合法 stash 不报格式异常" "${WORK_DIR}/i14d.log" "格式异常" 0
 fi
 
 done_

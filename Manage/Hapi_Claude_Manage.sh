@@ -723,6 +723,13 @@ hapi_codex_profile_store_file() {
     printf '%s' "${HOME}/.codex/hapi_config_profiles.json"
 }
 
+# 第三方路由暂存文件：官方登录/官方 Key 会把 config.toml 里的第三方路由（model_provider
+# 与对应的 [model_providers.*] 段）整段剥离到这里，之后填第三方 base_url 时按原文恢复。
+# 它可能带着第三方 bearer token，因此写入时同样按 0600 处理。
+hapi_codex_route_stash_file() {
+    printf '%s' "${HOME}/.codex/hapi_provider_route.json"
+}
+
 hapi_show_codex_config() {
     local config_dir auth_file config_file
     config_dir="${HOME}/.codex"
@@ -731,10 +738,11 @@ hapi_show_codex_config() {
 
     echo -e "${white}=====${green}当前 Codex 配置${white}=====${background}"
     hapi_ensure_node_json || return
-    CODEX_AUTH_FILE="${auth_file}" CODEX_CONFIG_FILE="${config_file}" node <<'NODE'
+    CODEX_AUTH_FILE="${auth_file}" CODEX_CONFIG_FILE="${config_file}" CODEX_STASH_FILE="$(hapi_codex_route_stash_file)" node <<'NODE'
 const fs = require("fs");
 const authFile = process.env.CODEX_AUTH_FILE;
 const configFile = process.env.CODEX_CONFIG_FILE;
+const stashFile = process.env.CODEX_STASH_FILE;
 
 function isSensitiveKey(key) {
   const normalized = String(key).toLowerCase();
@@ -814,6 +822,57 @@ if (!fs.existsSync(configFile)) {
 } else {
   const raw = fs.readFileSync(configFile, "utf8");
   console.log(sanitizeToml(raw) || "(空文件)");
+}
+
+// 官方登录/官方 Key 会把第三方路由剥离到暂存文件，这里只报 id 与时间（不打印内容，避免泄露 token）
+//
+// ⚠️ 下面这份结构校验必须与写入侧 readStash() 的规则保持同步（那边才是权威）。
+//    漏同步的后果：写入侧判 invalid（会 fail-closed 拒绝恢复）的暂存，预览却显示成正常，
+//    用户会以为还能恢复。readStash 的规则顺序：
+//    顶层是对象 → providerId 是可用自定义 id → sectionLines 是字符串数组 → extraTopLevelLines（可选）是字符串数组。
+const CODEX_RESERVED_MODEL_PROVIDER_IDS = [
+  "amazon-bedrock",
+  "amazon-bedrock-runtime",
+  "openai",
+  "ollama",
+  "lmstudio",
+];
+
+function stashProblem(stash) {
+  if (!stash || typeof stash !== "object" || Array.isArray(stash)) return "顶层不是 JSON 对象";
+  const providerId = String(stash.providerId === undefined || stash.providerId === null ? "" : stash.providerId).trim();
+  if (providerId === "" || CODEX_RESERVED_MODEL_PROVIDER_IDS.includes(providerId)) {
+    return `providerId 不是可用的自定义 id（当前为 ${JSON.stringify(stash.providerId)}）`;
+  }
+  if (!Array.isArray(stash.sectionLines) || !stash.sectionLines.every((line) => typeof line === "string")) {
+    return "sectionLines 缺失或不是字符串数组";
+  }
+  if (stash.extraTopLevelLines !== undefined
+      && (!Array.isArray(stash.extraTopLevelLines) || !stash.extraTopLevelLines.every((line) => typeof line === "string"))) {
+    return "extraTopLevelLines 不是字符串数组";
+  }
+  return "";
+}
+
+console.log("");
+console.log("暂存的第三方路由（下次填写第三方 base_url 时自动恢复）:");
+if (!stashFile || !fs.existsSync(stashFile)) {
+  console.log("(无)");
+} else {
+  try {
+    const stash = JSON.parse(fs.readFileSync(stashFile, "utf8"));
+    const problem = stashProblem(stash);
+    if (problem) {
+      console.log(`格式异常（${problem}）: ${stashFile}`);
+      console.log("写入第三方 base_url 时会被拒绝（fail-closed），请修复或删除该文件。");
+    } else {
+      console.log(`provider id: ${stash.providerId}    暂存于: ${stash.savedAt || "-"}    section 行数: ${stash.sectionLines.length}`);
+      console.log(`暂存文件: ${stashFile}`);
+    }
+  } catch (error) {
+    console.log(`暂存文件读取失败: ${error.message}`);
+    console.log("写入第三方 base_url 时会被拒绝（fail-closed），请修复或删除该文件。");
+  }
 }
 NODE
 }
@@ -976,37 +1035,53 @@ NODE
 }
 
 hapi_write_codex_current_config() {
-    local api_key="$1"
-    local base_url="$2"
-    local model="$3"
-    local config_dir auth_file config_file backup_file
+    local route_only=0
+    if [ "$1" = "route-only" ]; then
+        route_only=1
+        shift
+    fi
+    local api_key="${1:-}"
+    local base_url="${2:-}"
+    local model="${3:-}"
+    local config_dir auth_file config_file stash_file backup_file
     config_dir="${HOME}/.codex"
     auth_file="${config_dir}/auth.json"
     config_file="${config_dir}/config.toml"
+    stash_file=$(hapi_codex_route_stash_file)
 
     hapi_ensure_node_json || return
     mkdir -p "${config_dir}"
-    if [ -f "${auth_file}" ]; then
-        backup_file="${auth_file}.bak"
-        cp -a "${auth_file}" "${backup_file}"
-        chmod 600 "${backup_file}" 2>/dev/null
-        echo -e "${green}已备份原配置到: ${backup_file}${background}"
-    fi
-    if [ -f "${config_file}" ]; then
-        backup_file="${config_file}.bak"
-        cp -a "${config_file}" "${backup_file}"
-        chmod 600 "${backup_file}" 2>/dev/null
-        echo -e "${green}已备份原配置到: ${backup_file}${background}"
+    # route-only（菜单 7 写完官方 auth、菜单 4 切换配置之后）只收敛路由，不改 model / base_url / Key，
+    # 也不碰 auth.json，因此不需要备份。
+    if [ "${route_only}" -eq 0 ]; then
+        if [ -f "${auth_file}" ]; then
+            backup_file="${auth_file}.bak"
+            cp -a "${auth_file}" "${backup_file}"
+            chmod 600 "${backup_file}" 2>/dev/null
+            echo -e "${green}已备份原配置到: ${backup_file}${background}"
+        fi
+        if [ -f "${config_file}" ]; then
+            backup_file="${config_file}.bak"
+            cp -a "${config_file}" "${backup_file}"
+            chmod 600 "${backup_file}" 2>/dev/null
+            echo -e "${green}已备份原配置到: ${backup_file}${background}"
+        fi
     fi
 
-    CODEX_AUTH_FILE="${auth_file}" CODEX_CONFIG_FILE="${config_file}" CODEX_API_KEY="${api_key}" CODEX_BASE_URL="${base_url}" CODEX_MODEL="${model}" node <<'NODE'
+    CODEX_AUTH_FILE="${auth_file}" CODEX_CONFIG_FILE="${config_file}" CODEX_STASH_FILE="${stash_file}" CODEX_API_KEY="${api_key}" CODEX_BASE_URL="${base_url}" CODEX_MODEL="${model}" CODEX_ROUTE_ONLY="${route_only}" node <<'NODE'
 const fs = require("fs");
 const path = require("path");
 const authFile = process.env.CODEX_AUTH_FILE;
 const configFile = process.env.CODEX_CONFIG_FILE;
+const stashFile = process.env.CODEX_STASH_FILE;
 const apiKey = process.env.CODEX_API_KEY || "";
-const baseUrl = process.env.CODEX_BASE_URL || "https://api.openai.com/v1";
+const baseUrlInput = (process.env.CODEX_BASE_URL || "").trim();
 const model = process.env.CODEX_MODEL || "gpt-5.5";
+const routeOnly = process.env.CODEX_ROUTE_ONLY === "1";
+// 菜单 1 的 base_url 提示语给出的默认值。只在「真的要写 base_url」的分支用它，
+// route-only 不写 base_url，避免把官方默认值当成用户输入。
+const defaultBaseUrl = "https://api.openai.com/v1";
+const writeBaseUrl = baseUrlInput || defaultBaseUrl;
 
 function tomlString(value) {
   return JSON.stringify(String(value));
@@ -1190,88 +1265,11 @@ function isCustomProviderId(id) {
 // `model_provider = "custom"`：Codex 在 model_provider 缺省时默认走内置 openai provider
 // （见 cc-switch `active_codex_model_provider_id` 的注释），而 custom + env_key 又拿不到
 // Key 时请求既进不了官方路由、也拿不到第三方凭据。
-function createTemplate(preserveOfficialRoute) {
-  if (preserveOfficialRoute) {
-    return [
-      `model = ${tomlString(model)}`,
-      "",
-      "[features]",
-      "goals = true",
-      "",
-    ].join("\n");
-  }
-  return [
-    `model = ${tomlString(model)}`,
-    'model_provider = "custom"',
-    "",
-    "[model_providers.custom]",
-    'name = "Custom"',
-    `base_url = ${tomlString(baseUrl)}`,
-    'env_key = "OPENAI_API_KEY"',
-    'wire_api = "responses"',
-    "",
-    "[features]",
-    "goals = true",
-    "",
-  ].join("\n");
-}
-
-// 返回 { text, notice }；notice 取值: "" | "official" | "reserved" | "third-party-no-key"
-function updateToml(text, options) {
-  const preserveOnEmpty = options.officialLogin && !options.hasApiKey;
-  if (!text.trim()) {
-    return { text: createTemplate(preserveOnEmpty), notice: preserveOnEmpty ? "official" : "" };
-  }
-  validateToml(text);
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  if (lines.length && lines[lines.length - 1] === "") lines.pop();
-  const existingProviderId = getTopLevelString(lines, "model_provider").trim();
-  const customProviderRoute = isCustomProviderId(existingProviderId);
-  const reservedRoute = existingProviderId !== "" && !customProviderRoute;
-  const preserveOfficialRoute = options.officialLogin && !options.hasApiKey && !customProviderRoute;
-
-  ensureTopLevelString(lines, "model", model);
-  updateExistingExperimentalToken(lines);
-
-  if (reservedRoute) {
-    // 内置/保留 provider：保持原样，既不补 model_provider 也不建表，否则 Codex 拒绝启动
-    ensureFeatureGoals(lines);
-    return { text: `${lines.join("\n")}\n`, notice: "reserved" };
-  }
-
-  if (preserveOfficialRoute) {
-    // 保持「没有 model_provider」= 走内置 openai provider，也不新建任何 provider 段
-    ensureFeatureGoals(lines);
-    return { text: `${lines.join("\n")}\n`, notice: "official" };
-  }
-
-  const providerId = existingProviderId || "custom";
-  if (!existingProviderId) ensureTopLevelString(lines, "model_provider", providerId);
-
-  const sectionName = `model_providers.${tomlKeySegment(providerId)}`;
-  const section = findSection(lines, sectionName, providerId);
-  if (!section) {
-    if (lines.length && lines[lines.length - 1].trim() !== "") lines.push("");
-    lines.push(`[${sectionName}]`, `name = ${tomlString(providerId)}`, `base_url = ${tomlString(baseUrl)}`, 'env_key = "OPENAI_API_KEY"', 'wire_api = "responses"');
-  } else {
-    let baseLine = -1;
-    for (let i = section.start + 1; i < section.end; i += 1) {
-      if (keyOf(lines[i]) === "base_url") {
-        baseLine = i;
-        break;
-      }
-    }
-    if (baseLine >= 0) {
-      lines[baseLine] = replaceAssignment(lines[baseLine], baseUrl);
-    } else {
-      lines.splice(section.start + 1, 0, `base_url = ${tomlString(baseUrl)}`);
-    }
-  }
-  ensureFeatureGoals(lines);
-  const notice = options.officialLogin && !options.hasApiKey ? "third-party-no-key" : "";
-  return { text: `${lines.join("\n")}\n`, notice };
-}
-
+// 这条语义现在由 decideCodexRoute 的 official 目标承担；空配置也走同一条流程，
+// 所以这里不再保留「按模板生成整份 config」的 createTemplate——
+// 否则「空配置」会绕过暂存恢复（历史 bug：只写了第三方路由的 config 被剥离成空文件后，
+// 下一次填第三方 base_url 会静默退化成 generic custom）。
+//
 // ---- 与 cc-switch 对齐的 Codex auth.json 语义（writer 与 validator 共用判定） ----
 
 // codex_auth_resolved_mode 的「字段存在」：只要非 null 就算存在（空字符串也算），决定模式优先级
@@ -1322,6 +1320,210 @@ function hasOfficialAccountMaterial(auth) {
   }
 }
 
+// ---- 路由判定与自动收敛（对照 cc-switch） ----
+//
+// cc-switch 的官方预设是 `auth: {}` + `config: ""`（src/config/codexProviderPresets.ts 里
+// OpenAI Official 那条：`isOfficial: true` / `category: "official"` / 空 config），也就是
+// 「官方 = config.toml 里既没有 model_provider，也没有 [model_providers.*]」；第三方预设则同时给出
+// `model_provider = "custom"` 与 `[model_providers.custom]`。cc-switch 靠数据库保存每个供应商的
+// config 文本，切回时整份写回（write_codex_live_config_atomic），本脚本没有数据库，
+// 所以剥离时把这段原文存进暂存文件。
+//
+// ⚠️ 官方 host 判据是**本脚本自己加的保守规则**（host 精确等于 api.openai.com）：
+//    cc-switch 没有「Codex 官方 host 分类」函数——它判断官方与否靠预设的 isOfficial / category，
+//    以及 auth.json 侧的 codex_auth_has_openai_account_material。这个「host 精确匹配」的写法与
+//    src-tauri/src/proxy/providers/codex.rs 的 `should_send_codex_chat_prompt_cache_key()`
+//    （用途：决定转成 Chat Completions 后要不要发 prompt_cache_key）里的 host 比较形式一致，
+//    但**用途不同**，引用时不要写成「cc-switch 定义了官方 host」。
+
+function classifyBaseUrl(rawUrl) {
+  const value = String(rawUrl || "").trim();
+  if (!value) return "official";
+  let host = "";
+  try {
+    host = new URL(value).hostname.toLowerCase();
+  } catch {
+    // 不是完整 URL（例如只写了 host，或用户手滑）：退化成手工取 host
+    const match = value.match(/^(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/)?([^/?#]*)/);
+    host = (match ? match[1] : "").toLowerCase();
+    const at = host.lastIndexOf("@");
+    if (at >= 0) host = host.slice(at + 1);
+    host = host.replace(/:\d+$/, "");
+  }
+  if (!host) return "unknown";
+  return host === "api.openai.com" ? "official" : "third-party";
+}
+
+function providerBaseUrls(lines) {
+  const result = {};
+  let section = "";
+  for (const line of lines) {
+    const sectionName = parseSectionHeader(line, 0);
+    if (sectionName !== null) {
+      section = sectionName;
+      continue;
+    }
+    if (section.startsWith("model_providers.") && keyOf(line) === "base_url") {
+      result[section.slice("model_providers.".length).replace(/^"|"$/g, "")] = parseTomlString(line, 0, "base_url");
+    }
+  }
+  return result;
+}
+
+function currentProviderBaseUrl(lines, providerId) {
+  const baseUrls = providerBaseUrls(lines);
+  return baseUrls[providerId] || baseUrls.custom || "";
+}
+
+// 返回 { target, notice }；target 取值:
+//   "official"    要收敛到官方内置 openai provider（config.toml 不得有第三方路由）
+//   "third-party" 要走第三方 provider（缺路由时恢复暂存的路由）
+//   "keep"        保留 id / 脚本无法判断的模式：不动路由
+//   "legacy"      既不是官方登录、也没有新的 Key：沿用旧行为（有路由更新，没有则建 custom 模板）
+function decideCodexRoute(options) {
+  const providerId = options.existingProviderId || "";
+  if (providerId && !isCustomProviderId(providerId)) {
+    // 内置/保留 provider：openai 本身就是官方路由；其余（ollama / lmstudio / bedrock）是别的内置后端，
+    // 一律保持原样——既不补 model_provider 也不建表，否则 Codex 拒绝加载整份 config.toml。
+    return { target: "keep", notice: "reserved" };
+  }
+  const mode = options.resolvedMode;
+  if (mode !== "chatgpt" && mode !== "chatgptAuthTokens" && mode !== "apikey") {
+    // PAT / agentIdentity / Bedrock：这些模式该配哪条路由脚本判断不了，宁可不动
+    return { target: "keep", notice: "unsupported-mode" };
+  }
+  if (mode === "chatgpt" || mode === "chatgptAuthTokens") {
+    if (options.officialLogin) {
+      // auth.json 里是官方登录材料：默认走官方内置 provider（残留的第三方路由要剥离，
+      // 否则官方登录只影响 Codex 识别到的账号，请求仍会发到第三方）。
+      // 只有「本次明确填了第三方 base_url，且同时填了 Key」才按第三方路由处理。
+      if (options.hasNewKey && options.baseUrlClass === "third-party") return { target: "third-party", notice: "" };
+      return { target: "official", notice: "" };
+    }
+    if (options.hasNewKey) {
+      if (options.baseUrlClass === "third-party") return { target: "third-party", notice: "" };
+      if (options.baseUrlClass === "official") return { target: "official", notice: "" };
+      return { target: "legacy", notice: "" };
+    }
+    // 没有可用登录材料、本次也没填 Key：不确认是官方，沿用旧行为（有路由更新，没有则建 custom 模板）
+    return { target: "legacy", notice: "" };
+  }
+  // apikey：凭据就在 auth.json 里，官方/第三方只能靠 base_url 判断——
+  // 第三方端点（中转/自建）要保留它自己的路由，不能因为"auth.json 有 Key"就当成官方登录剥掉。
+  if (options.baseUrlClass === "official") return { target: "official", notice: "" };
+  if (options.baseUrlClass === "third-party") return { target: "third-party", notice: "" };
+  return { target: "keep", notice: "unknown-base-url" };
+}
+
+function removeTopLevelLine(lines, key) {
+  let section = "";
+  for (let i = 0; i < lines.length; i += 1) {
+    const sectionName = parseSectionHeader(lines[i], i + 1);
+    if (sectionName !== null) {
+      section = sectionName;
+      continue;
+    }
+    if (!section && keyOf(lines[i]) === key) {
+      const removed = lines.splice(i, 1)[0];
+      if (i < lines.length && i > 0 && lines[i].trim() === "" && lines[i - 1].trim() === "") lines.splice(i, 1);
+      return removed;
+    }
+  }
+  return "";
+}
+
+function ensureTopLevelRawLine(lines, rawLine) {
+  const key = keyOf(rawLine);
+  if (!key) return;
+  let section = "";
+  for (let i = 0; i < lines.length; i += 1) {
+    const sectionName = parseSectionHeader(lines[i], i + 1);
+    if (sectionName !== null) {
+      section = sectionName;
+      continue;
+    }
+    if (!section && keyOf(lines[i]) === key) return;
+  }
+  lines.splice(firstSectionIndex(lines), 0, rawLine);
+}
+
+// 摘掉整个段（含它前面的空行），返回段本身（去掉首尾空行），供暂存用
+function takeSection(lines, section) {
+  const body = lines.slice(section.start, section.end);
+  while (body.length && body[body.length - 1].trim() === "") body.pop();
+  lines.splice(section.start, section.end - section.start);
+  if (section.start > 0 && section.start < lines.length && lines[section.start].trim() === "" && lines[section.start - 1].trim() === "") {
+    lines.splice(section.start, 1);
+  }
+  return body;
+}
+
+function appendSection(lines, sectionLines) {
+  if (lines.length && lines[lines.length - 1].trim() !== "") lines.push("");
+  for (const line of sectionLines) lines.push(line);
+}
+
+// 暂存文件读取结果必须分**三态**，不能把 invalid 和 missing 混成同一个 null：
+//   missing —— 文件不存在：允许退化成「新建 generic custom 模板」（旧行为，合理）
+//   valid   —— 文件存在且合法：按原文恢复（provider id 与段内字段一起回来）
+//   invalid —— 文件存在但损坏：**fail-closed**，中止本次写入，既不恢复也不新建
+// 把 invalid 当 missing 的后果是「假恢复」：rc=0、悄悄建出 generic custom，
+// 用户原来 provider 的 query_params / requires_openai_auth 等字段无声丢失。
+function readStash() {
+  if (!stashFile || !fs.existsSync(stashFile)) return { status: "missing", entry: null, reason: "" };
+  let parsed = null;
+  try {
+    const raw = fs.readFileSync(stashFile, "utf8");
+    parsed = raw.trim() ? JSON.parse(raw) : null;
+  } catch (error) {
+    return { status: "invalid", entry: null, reason: `JSON 解析失败: ${error.message}` };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { status: "invalid", entry: null, reason: "顶层不是 JSON 对象" };
+  }
+  if (!isCustomProviderId(parsed.providerId)) {
+    return { status: "invalid", entry: null, reason: `providerId 不是可用的自定义 id（当前为 ${JSON.stringify(parsed.providerId)}）` };
+  }
+  if (!Array.isArray(parsed.sectionLines) || !parsed.sectionLines.every((line) => typeof line === "string")) {
+    return { status: "invalid", entry: null, reason: "sectionLines 缺失或不是字符串数组" };
+  }
+  if (parsed.extraTopLevelLines !== undefined
+      && (!Array.isArray(parsed.extraTopLevelLines) || !parsed.extraTopLevelLines.every((line) => typeof line === "string"))) {
+    return { status: "invalid", entry: null, reason: "extraTopLevelLines 不是字符串数组" };
+  }
+  return { status: "valid", entry: parsed, reason: "" };
+}
+
+function abortCorruptStash(reason) {
+  console.error("暂存的路由文件已损坏，已中止本次写入（fail-closed）。");
+  console.error(`  文件: ${stashFile}`);
+  console.error(`  原因: ${reason}`);
+  console.error("  为避免把原 provider 的字段（query_params / requires_openai_auth 等）静默换成 generic custom，");
+  console.error("  auth.json 与 config.toml 均未改动。请修复该文件后重试；删除它则会按新配置生成 generic custom。");
+  process.exit(1);
+}
+
+// 暂存文件里可能有第三方 bearer token，所以和 auth.json 一样按 0600 写
+function writeStash(entry) {
+  fs.mkdirSync(path.dirname(stashFile), { recursive: true });
+  fs.writeFileSync(stashFile, `${JSON.stringify(entry, null, 2)}\n`, { mode: 0o600 });
+  try { fs.chmodSync(stashFile, 0o600); } catch {}
+}
+
+function writeConfigText(text) {
+  fs.mkdirSync(path.dirname(configFile), { recursive: true });
+  fs.writeFileSync(configFile, text, { mode: 0o600 });
+  try { fs.chmodSync(configFile, 0o600); } catch {}
+}
+
+// 凭据文件按 cc-switch atomic_write_private 的做法在创建时就指定 0600。
+// 两条写盘路径（空配置 / 非空配置）都要写 auth.json——空配置分支曾经提前 exit 漏掉过这一句。
+function writeAuthJson(auth) {
+  fs.mkdirSync(path.dirname(authFile), { recursive: true });
+  fs.writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
+  try { fs.chmodSync(authFile, 0o600); } catch {}
+}
+
 try {
   let auth = {};
   if (fs.existsSync(authFile)) {
@@ -1334,39 +1536,169 @@ try {
   // 「非 null 即存在」，所以写进空字符串会把隐式模式抢成 apikey，等于毁掉官方登录。
   const resolvedMode = resolveAuthMode(auth);
   const officialLogin = hasOfficialAccountMaterial(auth);
-  if (resolvedMode === "chatgpt" || resolvedMode === "chatgptAuthTokens") {
-    // 官方 auth.json 里 OPENAI_API_KEY 应为 null；写入空字符串会被 Codex 视为提供了 API Key，
-    // 从而覆盖官方登录路径，因此这里只在用户确实填写了 Key 时才写入。
-    if (apiKey) {
-      console.error("提示: auth.json 当前是官方 ChatGPT 登录缓存，本次仍写入了 OPENAI_API_KEY。");
-      console.error("      如需长期保留官方登录，请让第三方 Key 走 config.toml，或改用「7 写入/编辑官方 auth.json」。");
-      auth.OPENAI_API_KEY = apiKey;
+  if (!routeOnly) {
+    if (resolvedMode === "chatgpt" || resolvedMode === "chatgptAuthTokens") {
+      // 官方 auth.json 里 OPENAI_API_KEY 应为 null；写入空字符串会被 Codex 视为提供了 API Key，
+      // 从而覆盖官方登录路径，因此这里只在用户确实填写了 Key 时才写入。
+      if (apiKey) {
+        console.error("提示: auth.json 当前是官方 ChatGPT 登录缓存，本次仍写入了 OPENAI_API_KEY。");
+        console.error("      如需长期保留官方登录，请让第三方 Key 走 config.toml，或改用「7 写入/编辑官方 auth.json」。");
+        auth.OPENAI_API_KEY = apiKey;
+      } else {
+        console.error("提示: auth.json 当前是官方 ChatGPT 登录缓存，未填写 API Key，已保留原有登录字段不变。");
+      }
     } else {
-      console.error("提示: auth.json 当前是官方 ChatGPT 登录缓存，未填写 API Key，已保留原有登录字段不变。");
+      auth.OPENAI_API_KEY = apiKey;
     }
-  } else {
-    auth.OPENAI_API_KEY = apiKey;
   }
 
+  // 空配置 / 不存在的 config.toml 走**同一条**路由流程，不在这里提前 exit：
+  // 「只写了第三方路由的 config.toml 被官方同步剥离」正好会把文件变成空文件（或只剩一个换行），
+  // 这是本脚本自己会制造出来的状态。空配置若提前返回，下一次填第三方 base_url 就会绕过
+  // 暂存直接建 generic custom —— 原 provider 的 id / query_params / requires_openai_auth 全丢。
   const rawConfig = fs.existsSync(configFile) ? fs.readFileSync(configFile, "utf8") : "";
-  const result = updateToml(rawConfig, { officialLogin, hasApiKey: Boolean(apiKey) });
-  const nextConfig = result.text;
-  fs.mkdirSync(path.dirname(authFile), { recursive: true });
-  // 凭据文件按 cc-switch atomic_write_private 的做法在创建时就指定 0600
-  fs.writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
-  try { fs.chmodSync(authFile, 0o600); } catch {}
-  fs.writeFileSync(configFile, nextConfig, { mode: 0o600 });
-  try { fs.chmodSync(configFile, 0o600); } catch {}
+  const emptyConfig = !rawConfig.trim();
+  if (emptyConfig && routeOnly) {
+    console.error("提示: config.toml 为空，无需同步 Codex 路由。");
+    process.exit(0);
+  }
+  if (!emptyConfig) validateToml(rawConfig);
+  const lines = emptyConfig ? [] : rawConfig.replace(/\r\n/g, "\n").split("\n");
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  // model 先写：空配置恢复路由时它才会落在文件顶部（与旧模板的字段顺序一致）
+  if (!routeOnly) ensureTopLevelString(lines, "model", model);
+  const existingProviderId = getTopLevelString(lines, "model_provider").trim();
+  // route-only 没有 base_url 输入，就用 config.toml 里现有路由的 base_url 判断
+  const baseUrlClass = classifyBaseUrl(baseUrlInput || currentProviderBaseUrl(lines, existingProviderId));
+  const decision = decideCodexRoute({
+    resolvedMode,
+    officialLogin,
+    hasNewKey: Boolean(apiKey),
+    baseUrlClass,
+    existingProviderId,
+  });
 
-  if (result.notice === "official") {
-    console.error("提示: auth.json 是官方 ChatGPT 登录且未填写 API Key，config.toml 保持不指定 model_provider，模型请求继续走内置 openai provider。");
-  } else if (result.notice === "reserved") {
+  if (routeOnly && decision.target !== "official") {
+    // route-only 只做「官方登录 → 剥离第三方路由」这一件事。恢复/新建第三方路由必须由用户在
+    // 菜单 1 显式填 base_url 触发，避免切换配置时凭空造出一条没凭据的路由。
+    console.error("提示: 当前 Codex 路由无需调整。");
+    process.exit(0);
+  }
+
+  let routeAction = "none";
+  let routeProviderId = existingProviderId;
+
+  if (decision.target === "official") {
+    if (isCustomProviderId(existingProviderId)) {
+      const modelProviderLine = removeTopLevelLine(lines, "model_provider");
+      const section = findSection(lines, `model_providers.${tomlKeySegment(existingProviderId)}`, existingProviderId);
+      const sectionLines = section ? takeSection(lines, section) : [];
+      const extraTopLevelLines = [];
+      const bearerLine = removeTopLevelLine(lines, "experimental_bearer_token");
+      if (bearerLine) extraTopLevelLines.push(bearerLine);
+      if (modelProviderLine || sectionLines.length) {
+        // 剥离会覆盖旧的暂存文件：旧文件要是坏的就明确说一声，别让用户以为它还在
+        const previousStash = readStash();
+        routeProviderId = existingProviderId;
+        writeStash({
+          version: 1,
+          savedAt: new Date().toISOString(),
+          providerId: existingProviderId,
+          modelProviderLine: modelProviderLine || `model_provider = ${tomlString(existingProviderId)}`,
+          sectionLines,
+          extraTopLevelLines,
+        });
+        routeAction = "strip";
+        if (previousStash.status === "invalid") {
+          console.error(`警告: 原暂存文件 ${stashFile} 已损坏（${previousStash.reason}），本次剥离已用新的路由内容覆盖它。`);
+        }
+      }
+    }
+  } else if (decision.target === "third-party" && !isCustomProviderId(existingProviderId)) {
+    const stash = readStash();
+    // 三态：missing（文件不存在）→ 什么都不做，允许继续走下面的「新建 generic custom」分支（旧行为）；
+    //       valid → 按原文恢复；invalid → fail-closed。
+    // invalid 的处理早于任何写盘动作，所以 auth.json / config.toml「未改动」是结构性保证，不是巧合。
+    if (stash.status === "invalid") abortCorruptStash(stash.reason);
+    if (stash.status === "valid") {
+      const entry = stash.entry;
+      const stashSection = findSection(lines, `model_providers.${tomlKeySegment(entry.providerId)}`, entry.providerId);
+      ensureTopLevelString(lines, "model_provider", entry.providerId);
+      if (!stashSection && entry.sectionLines.length) appendSection(lines, entry.sectionLines);
+      for (const rawLine of Array.isArray(entry.extraTopLevelLines) ? entry.extraTopLevelLines : []) {
+        ensureTopLevelRawLine(lines, rawLine);
+      }
+      routeProviderId = entry.providerId;
+      routeAction = "restore";
+    }
+  }
+
+  // model 已经在路由处理之前写入（空配置场景下要保证它在文件顶部），这里只做
+  // 「确实填了新 Key 才覆盖已有 token」这一件事。
+  if (!routeOnly) updateExistingExperimentalToken(lines);
+
+  if (decision.target === "official" || decision.target === "keep") {
+    // 官方路由 / 保留 id：不创建也不更新任何 [model_providers.*] 段。
+    // route-only 只做路由收敛，连 [features] 这类无关字段也不动（保持最小改动）。
+    if (!routeOnly) ensureFeatureGoals(lines);
+  } else {
+    // third-party / legacy：沿用原有行为（有 route 就更新 base_url，没有就建默认 custom 模板）
+    const providerId = routeProviderId || existingProviderId || "custom";
+    if (!existingProviderId) ensureTopLevelString(lines, "model_provider", providerId);
+
+    const sectionName = `model_providers.${tomlKeySegment(providerId)}`;
+    const section = findSection(lines, sectionName, providerId);
+    if (!section) {
+      if (lines.length && lines[lines.length - 1].trim() !== "") lines.push("");
+      lines.push(`[${sectionName}]`, `name = ${tomlString(providerId)}`, `base_url = ${tomlString(writeBaseUrl)}`, 'env_key = "OPENAI_API_KEY"', 'wire_api = "responses"');
+    } else {
+      let baseLine = -1;
+      for (let i = section.start + 1; i < section.end; i += 1) {
+        if (keyOf(lines[i]) === "base_url") {
+          baseLine = i;
+          break;
+        }
+      }
+      if (baseLine >= 0) {
+        lines[baseLine] = replaceAssignment(lines[baseLine], writeBaseUrl);
+      } else {
+        lines.splice(section.start + 1, 0, `base_url = ${tomlString(writeBaseUrl)}`);
+      }
+    }
+    ensureFeatureGoals(lines);
+  }
+
+  const nextConfig = `${lines.join("\n")}\n`;
+  const configChanged = nextConfig !== rawConfig;
+  if (!routeOnly || configChanged) {
+    writeConfigText(nextConfig);
+  }
+  if (!routeOnly) {
+    writeAuthJson(auth);
+  }
+
+  if (routeAction === "strip") {
+    console.error(`提示: 检测到官方登录/官方 API Key，已自动移除 config.toml 里的第三方路由（model_provider = "${routeProviderId}" 与其对应的 [model_providers.*] 段）。`);
+    console.error(`      被移除的内容已暂存到 ${stashFile}，下次填写第三方 base_url 时会自动恢复。`);
+  } else if (routeAction === "restore") {
+    console.error(`提示: 已自动恢复此前的第三方路由 provider id = "${routeProviderId}"（来自 ${stashFile}），并按本次 base_url 更新端点。`);
+  }
+
+  if (decision.target === "official") {
+    if (routeAction !== "strip") {
+      console.error("提示: auth.json 是官方登录/官方 API Key，config.toml 保持不指定 model_provider，模型请求继续走内置 openai provider。");
+    }
+  } else if (decision.notice === "reserved") {
     console.error("提示: config.toml 里的 model_provider 指向 Codex 内置/保留 provider，已保持原样：");
     console.error("      不补 model_provider、也不创建 [model_providers.<id>]，因为覆盖保留 id 会让 Codex 拒绝加载整份配置。");
     console.error("      如需自定义 base_url，请改用自定义 provider id（菜单 1 默认写 custom）。");
-  } else if (result.notice === "third-party-no-key") {
-    console.error("提示: config.toml 已指定第三方 model_provider 且本次未填写 API Key，该路由可能拿不到可用凭据；");
-    console.error("      如需完全回到官方，请移除 model_provider 与对应的 [model_providers.*] 段。");
+  } else if (decision.notice === "unsupported-mode") {
+    console.error(`提示: auth.json 的登录模式解析为 ${resolvedMode}，脚本无法判断它该走官方还是第三方，已保持 config.toml 的路由不变。`);
+  } else if (decision.notice === "unknown-base-url") {
+    console.error("提示: base_url 解析不出主机名，无法判断官方/第三方，已保持 config.toml 的路由不变。");
+  } else if (officialLogin && !apiKey) {
+    console.error("提示: config.toml 仍指定第三方 model_provider 且本次未填写 API Key，该路由可能拿不到可用凭据；");
+    console.error("      如需完全回到官方，请清空 base_url 指向或改用官方端点。");
   }
 } catch (error) {
   console.error(error.message);
@@ -1378,8 +1710,28 @@ NODE
         echo -e "${red}Codex 配置写入失败。${background}"
         return "${write_status}"
     fi
+    # 暂存文件里可能有第三方 bearer token，存在就再收紧一次权限（与备份同一处理方式）
+    if [ -f "${stash_file}" ]; then
+        chmod 600 "${stash_file}" 2>/dev/null
+    fi
+    if [ "${route_only}" -eq 1 ]; then
+        chmod 600 "${config_file}" 2>/dev/null
+        return 0
+    fi
     chmod 600 "${auth_file}" "${config_file}" 2>/dev/null
     echo -e "${green}Codex 配置已写入: ${auth_file} / ${config_file}${background}"
+}
+
+# 只按 auth.json + config.toml 现状收敛路由：官方登录/官方 Key 会把第三方路由剥离并暂存。
+# 供菜单 7（写完官方 auth.json）与菜单 4（切换配置）调用；不写 model / base_url / Key。
+hapi_sync_codex_route() {
+    local config_file="${HOME}/.codex/config.toml"
+
+    if [ ! -f "${config_file}" ]; then
+        echo -e "${yellow}未找到 ${config_file}，跳过 Codex 路由同步。${background}"
+        return 0
+    fi
+    hapi_write_codex_current_config route-only
 }
 
 hapi_config_codex() {
@@ -1398,6 +1750,8 @@ hapi_config_codex() {
     }
 
     if [ -f "${auth_file}" ] || [ -f "${config_file}" ]; then
+        echo -e "${yellow}说明: base_url 指向官方端点时 config.toml 不会保留第三方 model_provider（会剥离并暂存）；${background}"
+        echo -e "${yellow}      指向第三方端点时会自动恢复此前暂存的路由。${background}"
         echo -en "${yellow}检测到已存在 Codex 配置，是否仅修改 key/model/base_url 等字段（其他配置会保留），是否继续修改？[y/N]: ${background}"
         read -r overwrite
         if [[ "${overwrite}" != "y" && "${overwrite}" != "Y" ]]; then
@@ -1984,6 +2338,13 @@ NODE
     fi
     chmod 600 "${auth_file}" "${config_file}" 2>/dev/null
     echo -e "${green}Codex 配置已切换: ${auth_file} / ${config_file}${background}"
+
+    # 切过来的配置也要收敛路由：旧配置可能是「官方登录 + 残留第三方 model_provider」，
+    # 那样请求会走第三方 provider。判定为「需要保持第三方」时（保留 id / 第三方 base_url）不动。
+    if ! hapi_sync_codex_route; then
+        echo -e "${red}Codex 路由同步失败：当前路由可能与该配置不匹配，请检查 ${config_file}。${background}"
+        return 1
+    fi
 }
 
 hapi_delete_codex_profile() {
@@ -2527,6 +2888,8 @@ hapi_install_sensitive_tmp_traps() {
     trap 'hapi_cleanup_sensitive_tmp_and_exit 129' HUP
 }
 
+# 路由状态报告。路由的自动收敛由 hapi_sync_codex_route / 写入器完成，这里只报告最终状态：
+# 还能留下第三方 model_provider 的情形只有「保留 id」「脚本无法判断的登录模式」「本轮判定为保持不变」。
 hapi_warn_codex_provider_route() {
     local model_provider
     model_provider=$(hapi_codex_current_value "model_provider")
@@ -2535,8 +2898,9 @@ hapi_warn_codex_provider_route() {
         echo -e "${green}当前 config.toml 未指定第三方 model_provider，Codex 会直接使用 auth.json 中的官方登录。${background}"
         return 0
     fi
-    echo -e "${yellow}注意: 当前 config.toml 中 model_provider = \"${model_provider}\"，模型请求仍会走该第三方 provider。${background}"
-    echo -e "${yellow}      官方登录态只影响 Codex 识别到的账号；若想完全走官方，请移除 model_provider 及对应的 [model_providers.*] 段。${background}"
+    echo -e "${yellow}注意: 当前 config.toml 中 model_provider = \"${model_provider}\"，模型请求仍会走该 provider。${background}"
+    echo -e "${yellow}      脚本只在识别到官方登录/官方 Key（自动移除并暂存）或填写第三方 base_url（自动恢复）时改路由；${background}"
+    echo -e "${yellow}      这条路由本轮判定为保持不变。如需完全走官方，请移除 model_provider 及对应的 [model_providers.*] 段。${background}"
 }
 
 hapi_edit_codex_official_auth() {
@@ -2677,6 +3041,13 @@ hapi_edit_codex_official_auth() {
     chmod 600 "${auth_file}" 2>/dev/null
     echo -e "${green}官方 auth.json 已写入: ${auth_file}${background}"
 
+    # 官方登录写入后立刻收敛路由：把 config.toml 里残留的第三方路由（model_provider +
+    # 对应的 [model_providers.*] 段）剥离并暂存。否则模型请求仍会走那个第三方 provider——
+    # 官方登录只影响 Codex 识别到的账号，不改变请求实际发往哪里。
+    if ! hapi_sync_codex_route; then
+        echo -e "${red}Codex 路由同步失败：config.toml 可能仍指向第三方 provider，请检查后重试。${background}"
+        return 1
+    fi
     hapi_warn_codex_provider_route
 
     echo -en "${cyan}是否同时保存到 Codex 配置库（之后可用「切换配置」恢复）？[Y/n]: ${background}"

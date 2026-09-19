@@ -104,7 +104,8 @@ mainbak
 
 - **按文件保持它原有的 EOL**：不要无意归一化。2026-09-19 实测基线：
   `Manage/meme_generator.sh`（2642 行 / 2642 CRLF）、`Manage/SYS_Manage.sh`（1128 / 1128）、`Manage/Main.sh`（1107 / 1107）、
-  `Manage/NapCat.sh`（3281 / 3281）都是**全 CRLF**；`Manage/Hapi_Claude_Manage.sh` 现在是**全 LF**（3575 行 / 0 CRLF）。
+  `Manage/NapCat.sh`（3281 / 3281）都是**全 CRLF**；`Manage/Hapi_Claude_Manage.sh` 现在是**全 LF**（4114 行 / 0 CRLF，2026-09-19 实测；
+  这个行数每次改动都会变，**判据看 `crlf=0`**，行数只是用来发现"整文件被归一化"的异常）。
   ⚠️ `Hapi_Claude_Manage.sh` 原先记录为"已知历史例外（混行）"，**该状态已不存在**：2026-09-19 实测工作区副本已是全 LF。
   仓库里（对象库）本来就是纯 LF（`git show HEAD:Manage/Hapi_Claude_Manage.sh` 实测 0 CRLF），
   所以 `git diff` 不会出现整文件假 diff；目标平台是 Linux，全 LF 是**正确状态，不要"修回"CRLF**。
@@ -486,6 +487,13 @@ git diff --stat && git diff --check
   以及 `src-tauri/src/config.rs` 的 `atomic_write_private`。
 - 审查（人 / 模型）给出的结论**先拿去和参考实现求证**，冲突时以参考代码为准（用户三次强调"审查模型给出的不一定对"）。
   推论：别把自己对某个 helper 的读法当成"被管理程序的生产行为"——helper 的容错 ≠ Codex 真的能加载这个文件。
+- 反向教训（2026-09-19，审查方抓到我方引用错误）：文档里曾写「官方 host 判据见 cc-switch
+  `src-tauri/src/proxy/providers/codex.rs`」——那个 `Some("api.openai.com") => true` 其实在
+  `should_send_codex_chat_prompt_cache_key()` 里，用途是「转成 Chat Completions 后要不要发 `prompt_cache_key`」，
+  **不是官方供应商判定**。cc-switch 对 Codex 官方与否的判定靠预设的 `isOfficial` / `category: "official"` /
+  空 config，以及 `codex_auth_has_openai_account_material`（按 auth.json 判，不按 host）；
+  它只有一个 `is_official_provider()`，在 `claude_desktop_config.rs`（Claude Desktop 用的）。
+  **引用前先打开函数读完上下文**，别只 grep 到一行相似的代码就当成结论。
 
 ### Codex `auth.json` 语义
 
@@ -531,6 +539,32 @@ git diff --stat && git diff --check
     （`CODEX_RESERVED_MODEL_PROVIDER_IDS`）。给它们写 `[model_providers.<id>]` 会让 **Codex 拒绝加载整份 config.toml**
     （`validate_reserved_model_provider_ids`，大小写敏感）。
   - 空 Key 不得清空已有的 `experimental_bearer_token`（只有确实填了新 Key 才覆盖）。
+  - **路由自动收敛（2026-09-19 加）**：写入器（`hapi_write_codex_current_config`）与
+    `hapi_sync_codex_route` 会按 `auth.json` 模式 + `base_url` 自动决定路由目标：
+    - **official**：剥离顶层 `model_provider`、它指向的 `[model_providers.<id>]` 整段、以及顶层
+      `experimental_bearer_token`，并把原文存进 `~/.codex/hapi_provider_route.json`（`0600`，单槽）；
+    - **third-party**：填第三方 `base_url` 时按暂存原文恢复路由（provider id 与段内其它字段一起回来），
+      `base_url` 用本次输入覆盖；
+    - **keep**：保留 id、PAT/agentIdentity/Bedrock/未识别模式、`base_url` 解析不出 host —— 一律不动路由（只提示）。
+    ⚠️ 官方 host 判据（host **精确等于** `api.openai.com`）是**脚本自己加的保守规则**，不是抄自 cc-switch 的判定函数
+    （见上文「反向教训」）。`https://api.openai.com.evil.com/v1` 必须判成第三方（I9 已覆盖）。
+    - **暂存文件损坏必须 fail-closed**：`readStash()` 分 `missing` / `valid` / `invalid` 三态；
+      `invalid` 时**中止写入**（rc=1，auth.json 与 config.toml 都不动），绝不静默降级成 generic custom——
+      那会把原 provider 的 `query_params` / `requires_openai_auth` 等字段无声丢掉。
+      官方方向的剥离照常进行（用新内容覆盖坏文件），但要打印「原暂存文件已损坏并被覆盖」的警告。
+    `route-only` 形参（`hapi_sync_codex_route` 用）**只剥离不恢复**，且只有内容真变了才写回：
+    恢复/新建路由必须由用户在菜单 1 显式填 `base_url` 触发，避免切换配置时凭空造出没凭据的路由。
+    - ⚠️ **空配置 / 不存在的 `config.toml` 必须走同一条路由流程**，不许在 `readStash()` 之前 `process.exit`：
+      「只写了第三方路由的配置被官方剥离」会把文件变成空文件（只剩一个换行）——**这是脚本自己会造出来的状态**。
+      空配置一旦提前返回，下次填第三方 `base_url` 就会绕过暂存、静默建成 generic custom
+      （原 provider 的 id / `query_params` / `requires_openai_auth` 全丢）。现已统一：`lines = []` 后继续走
+      `decideCodexRoute` → `readStash()` 三态（invalid 仍 fail-closed）。I13 用端到端现场钉住它。
+      附带后果（有意）：空配置不再用 `createTemplate` 生成整份文件，于是新建的 generic 段里
+      `name = "custom"`（旧模板是 `"Custom"`），且「脚本判断不了的模式 + 空配置」不再凭空建模板段。
+    - ⚠️ `hapi_show_codex_config` 里的 `stashProblem()` 是 `readStash()` 的**第二份规则**，
+      增删规则必须两边同步（漏同步会让预览显示"正常"，而写入侧其实 fail-closed 拒绝恢复）。I14 钉住三条规则。
+    ⚠️ 判定细节与依据写在 `tests/Hapi_Claude_Manage/路由自动收敛-测试文档.md`，改判定前先读它；
+    特别是：**`apikey` 模式不能用「auth.json 有官方凭据」这条捷径**（中转 key + 中转路由会被误判成官方登录而剥掉）。
 
 ### 凭据文件与临时文件
 
@@ -556,12 +590,40 @@ git diff --stat && git diff --check
 ### 本脚本的验证方式
 
 - 每次改完最低要求：`bash -n Manage/Hapi_Claude_Manage.sh`。
+- **内嵌 node 段的语法 `bash -n` 检查不到**（`local x=$(...)` 之外，`node <<'NODE' … NODE` 里的 JS 只在运行时才炸）：
+  本脚本有 **16 个** `node <<'NODE'` 块，改过其中一个就把它们全部抽出来逐个 `node --check`——
+  做法：按 `<<.NODE.` / 单独一行 `NODE` 切块，各写一个临时 `.js`（路径用盘符形式给 node），再 `for f in ...; do node --check "$f"; done`。
+  几秒钟能拦住 heredoc 里的手滑，比等测试跑到一半才报错划算。
 - 行为回归：`bash tests/Hapi_Claude_Manage/run.sh`（失败非零退出；`--only A,C` 只跑指定组，`--log FILE` 指定进度日志）。
   分组：**A** `last_refresh` 真 RFC3339 ／ **B** `id_token` 严格 JWT envelope ／ **C** `auth_mode` 解析 + official/loadable 两级校验 ／
-  **D** 写入器路由保护 ／ **E** 菜单 7 编辑器流程（含 SIGTERM 清理）／ **F** 配置库旁路卡点 ／ **G** 凭据 0600 与预览脱敏 ／ **H** 兼容性。
+  **D** 写入器路由保护 ／ **E** 菜单 7 编辑器流程（含 SIGTERM 清理）／ **F** 配置库旁路卡点 ／ **G** 凭据 0600 与预览脱敏 ／ **H** 兼容性 ／
+  **I** 路由自动收敛（官方剥离+暂存 / 第三方恢复 / 保留 id 不动 / 损坏暂存 fail-closed / 空配置走同一条流程，81 条断言；语义与反例清单见
+  `tests/Hapi_Claude_Manage/路由自动收敛-测试文档.md`）。
   实测（2026-09-19，本机 Windows/MSYS）：**定向分组** `--only C` = 39 断言全绿、`--only E,F` = 35 断言全绿；A 组 ≈15s、C 组 ≈25s、E 组 ≈2min、E+F ≈3min（进程创建极慢，别指望秒级）。
-  全量套件上一次实测是 **pass=128 fail=0**，本轮给 C 组补了 loadable 漏口的断言后**没有重跑全量**（用户明确要求别跑），要报全量数字必须自己跑一遍再写。
-  该套件的新断言按仓库约定用**手工反例自证**过一次：移除 `isValidRfc3339` 的日历天数判据后，A 组立刻报 2 条 `NOT OK`（`a_bad_feb31` / `a_bad_feb29_nonleap`），还原后恢复全绿。
+  全量套件**更早一次**实测是 **pass=128 fail=0**（给 C 组补 loadable 漏口断言之前/之后没重跑过全量），
+  该数字**不代表当前代码**，要报数字必须自己跑一遍再写。
+  该套件的新断言按仓库约定用**手工反例自证**过一次（旧的 A 组记录）：移除 `isValidRfc3339` 的日历天数判据后，
+  A 组立刻报 2 条 `NOT OK`（`a_bad_feb31` / `a_bad_feb29_nonleap`），还原后恢复全绿。
+  ⚠️ **路由自动收敛那一轮（同日稍晚）本地一条测试都没跑**（用户要求改由审查环境执行）。审查环境实跑 + 反馈：
+  - 首版 `--only D,I` = pass=67 / **fail=4**（A~I = 185 / 4）：blocker 是 **I 组自己的 fixture 打架**——
+    I2 后半段用了 `seed_live`（第一行 `rm -rf "$HOME/.codex"`），把 I1 刚写下的暂存路由删了，I3 的恢复链失去前提。
+    已修：该子用例改为只覆盖 `auth.json`/`config.toml`，并在 I3 前加前置断言。**生产代码没动。**
+  - 第二轮审查环境在**仓库版本**上实跑：`--only D,I` = pass=90 / fail=0、A~I = pass=208 / fail=0（**该轮**数字，已被下一轮取代）。
+    同时又抓到第二个 blocker：**空配置 fast path 早于 `readStash()`** —— 只写了第三方路由的 config 被官方剥离后会变成
+    空文件（脚本自己造出来的状态），此时填第三方 `base_url` 会绕过暂存静默建 generic custom。已按「空配置走同一条流程」统一，
+    并补 I13（端到端现场）/ I14（预览规则同步）/ I9（近似域名）等断言。
+  - 第三轮（封板轮）审查环境在**仓库版本**上实跑，P1/P2 清零、A~H 无回归：
+    ```text
+    bash tests/Hapi_Claude_Manage/run.sh --only I     →  pass=81  fail=0 skip=0
+    bash tests/Hapi_Claude_Manage/run.sh --only D,I   →  pass=107 fail=0 skip=0
+    bash tests/Hapi_Claude_Manage/run.sh              →  pass=225 fail=0 skip=0   RESULT: PASS
+    ```
+    **以上是当前正式基线**（先前记录过的 `--only C` 39 / `--only E,F` 35 / `pass=128` / `90` / `208` 都已被它取代）。
+  - 手工反例（审查环境在**临时副本**上做，没动仓库原文）：#12（invalid stash 退化成 missing）= 8 条红、#15（I2 重新用 `seed_live`）
+    = 5 条红（**I3 前置断言最先红**）、#16（空配置提前退出/旧式 generic）= 5 条红（正好是 I13 的核心恢复链）、
+    #17（放宽 `stashProblem()`）= 3 条红 —— 断言有效；#18（只给 `readStash()` 加规则、不同步预览）实测 **81/0 不红**，
+    确认「预览侧是第二份规则」这个缺口**真实存在**。其余反例未逐条实测。
+  - 反例清单（**18 条**）与上述实测结果都在 `tests/Hapi_Claude_Manage/路由自动收敛-测试文档.md` 第 7 / 11 节。
 - ⚠️ **本套件的路径必须用盘符形式（`C:/…` / `E:/…`）**：MSYS 会转换**命令行参数**里的类 POSIX 路径，但
   **不转换环境变量**，而 Windows 原生 node 会把 `/tmp/x` 解析成"当前盘符根 + `tmp\x`"（如 `E:\tmp\x`），
   与 bash 眼里的 `/tmp` **不是同一位置**。后果很隐蔽：夹具/配置被写到另一个目录 → **正向用例整片变红、反向用例反而假绿**。
@@ -569,6 +631,13 @@ git diff --stat && git diff --check
   只有 `PATH` 例外——里面必须放 `cygpath -u` 的 POSIX 形式，否则 bash 找不到假编辑器。
 - 两处防"假绿"的保险：① `auth_check` 在夹具缺失时返回专用码 **3**（否则"期望 rc=1"的断言会因为文件不存在而假绿）；
   ② 夹具数量 < 30 直接 `exit 2`（夹具没生成时整套反向断言都会假绿）。
+- ⚠️ **夹具 helper 自己的副作用会打断后续用例**（2026-09-19 被审查环境抓到，blocker 级）：
+  `seed_live()` 第一行是 `rm -rf "${HOME}/.codex"`，I2 里为了造一份"只有 model 行"的配置调用了它，
+  于是把 I1 刚写下的**暂存路由**删了，I3 的恢复链失去前提 → 4 条断言全红，而生产代码其实没错。
+  规则：① 需要保留**跨用例状态**（暂存文件、配置库、`*.bak`）时，不要用会 `rm -rf` 的 helper，
+  改成只覆盖单个文件（`cp 夹具 → auth.json` + `printf → config.toml`）；
+  ② 依赖前序状态的用例（如 I3 依赖 I1 的暂存）**前面必须加一条前置断言**把依赖钉死，
+  否则以后再有人改动 fixture，红的是"恢复实现"这种误导性位置。
 - 交互式菜单（`read` 驱动）的自动化办法：`run.sh` 用 awk 按**内容锚点**抽取（`^# 按任意键继续函数` → `^# 主循环函数`，
   颜色变量单独抽、守卫块与 `mainloop` 都丢掉），再用 `printf '1\n\ny\nn\n' | 函数名` 按顺序喂每个 `read`
   （`pause` / 确认提示也各吃一行），用假编辑器（把预置夹具 `cp` 到 `${@: -1}` 的目标路径）模拟"用户在 vim 里粘贴并保存"。
