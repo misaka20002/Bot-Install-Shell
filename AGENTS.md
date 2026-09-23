@@ -566,15 +566,232 @@ git diff --stat && git diff --check
     ⚠️ 判定细节与依据写在 `tests/Hapi_Claude_Manage/路由自动收敛-测试文档.md`，改判定前先读它；
     特别是：**`apikey` 模式不能用「auth.json 有官方凭据」这条捷径**（中转 key + 中转路由会被误判成官方登录而剥掉）。
 
+### Claude Code `settings.json` 语义
+
+写盘只有一个入口：`hapi_write_claude_settings_file`（2026-09-23 重写）。
+
+- **合并写盘，不是整文件重建**：读取现有 JSON → **保留所有未知顶层键**（`permissions` / `hooks` / `statusLine` /
+  `enabledPlugins` …）→ 合并 `env` → 删除废弃/冲突键 → `JSON.stringify` 输出。
+  旧版用 bash heredoc 重建整个文件，等于把用户的其它顶层配置整份丢掉（实测：`customTopLevel` 之类在 live 与 `.bak` 里同时消失）。
+- **JSON 交给 node 生成，不要再用 bash heredoc 拼 JSON**：`hapi_json_escape` 只转义 `\` 与 `"`，
+  token 里出现 TAB / 换行就会写出非法 JSON（实测 `JSON.parse` 直接失败；引号/反斜杠/`$`/反引号反而没事，别被这种正向用例误导）。
+- 字段集合（依据 cc-switch `src-tauri/src/services/proxy.rs` 的 `CLAUDE_MODEL_OVERRIDE_ENV_KEYS` /
+  `build_claude_takeover_model_fields`，与 `src/components/providers/forms/ClaudeFormFields.tsx` 的角色行）：
+  - 四档角色 `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS,FABLE}_MODEL` **各自配一个 `*_MODEL_NAME` 显示名**
+    （缺显示名会让 `/model` 菜单残留上一家供应商的名字——cc-switch 接管时必须同步写它，注释写明了原因）。
+  - `ANTHROPIC_MODEL` = **兜底模型**（承接未落到角色档的请求，含 Claude Code 的 Haiku 后台子任务；
+    中转端点不填会让这些请求带着原始 Claude 模型名透传而报错）。本脚本让它与 Sonnet 档**同串**，**包含 `[1M]` 声明**。
+  - `[1M]` 只加在 `*_MODEL` 上，`*_MODEL_NAME` 一律剥掉；剥离只认**尾部**后缀且大小写不敏感。
+    旧写法 `${model%%\[*}` 截到第一个 `[`，`a[b]c[1M]` 会被截成 `a`（错的）。
+  - 认证键只留目标那一个（`ANTHROPIC_AUTH_TOKEN`）；`ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `OPENAI_API_KEY`
+    必须删掉——同时存在会触发 Claude Code 的 "Both ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY set"（cc-switch `proxy.rs` 注释 #4919）。
+  - `ANTHROPIC_REASONING_MODEL` / `ANTHROPIC_SMALL_FAST_MODEL` 是 **legacy 已废弃**（cc-switch 只在清理/剥离列表里保留，
+    v3.14.0 起从 Quick-Set 移除并清理旧值）——不要再写。
+  - **不写「固定补齐项」**（2026-09-23 曾加过一版，同日整块撤销）：`CLAUDE_CODE_ATTRIBUTION_HEADER` /
+    `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` / `ANTHROPIC_SMALL_MODEL` / `CLAUDE_CODE_SUBAGENT_MODEL` /
+    `*_SUPPORTED_CAPABILITIES` / 顶层 `hasCompletedOnboarding` 都**不由写盘器注入**。
+    前两个仍留在可选的「Claude Code 额外参数」清单里（用户显式选 `y` 才写），这是它们原本的归属。
+  - ⚠️ **`*_SUPPORTED_CAPABILITIES` 是 Claude Code 官方字段，但显式设置会禁用未列出的能力**——
+    官方只接受：`effort` / `xhigh_effort` / `max_effort` / `thinking` / `adaptive_thinking` / `interleaved_thinking`。
+    2026-09-23 采纳那版写了清单里不存在的 `temperature`，又漏了 `xhigh_effort` 与 `interleaved_thinking`，
+    等于主动砍能力，因此整块撤销。而且**不能四档塞同一组**：官方列出的 effort 支持模型里有 Fable 5 / Opus 4.8，
+    **没有 Sonnet 4.5 / Haiku 4.5**，官方另说这两个模型会拒绝 effort 参数。
+    结论：标准 `claude-*` 模型 ID **一律不写**这个键——不设置时 Claude Code 按模型 ID 内建识别；
+    该覆盖字段是给 Bedrock ARN / 自定义 deployment name 这类 Claude Code 认不出的 provider-specific ID 用的。
+  - ⚠️ **`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` 是网关兼容开关，不是性能参数**：它会剥掉 beta header /
+    beta tool schema，并且**禁用 MCP tool search（所有 MCP 工具改成 upfront load）**。cc-switch 只把它用在
+    「平台明确要求禁用全部 beta 参数」的网关（`claudeProviderPresets.ts:960/968/980` 及 968 行注释）。
+    所以**不做全局固定项**，只留在可选清单里（谁勾谁负责）。
+    2026-09-23 我先写过「它会让 `[1m]` 失效」——那是**未经验证的猜测，已撤回**：能确定的是剥 beta 请求内容 +
+    关 MCP tool search；`[1m]` 本身是 Claude Code 官方的模型后缀机制。
+  - **预览（`hapi_show_claude_config`）必须用 Node 递归脱敏，禁止再用 sed 正则**：旧实现只认三个固定键，
+    ① token 里带 JSON escaped quote 时后半段明文泄漏；② `OPENROUTER_API_KEY` / `OPENAI_API_KEY` /
+    任意 `*_SECRET` / `*_PASSWORD` 全部明文打印。更糟的是它是「先预览、后清理」——旧配置里残留的认证键
+    会先被打印出来（P1，2026-09-23 审查环境实跑证实）。JSON 解析失败时**不回退打原文**，只报
+    「不是合法 JSON，为避免泄露敏感字段，不显示原始内容」。
+    ⚠️ `isSensitiveKey` 在脚本里有 **5 份副本**（Claude live 预览 / Claude profile 预览 / Codex 的 3 处），
+    **改一处必须同步其余四处**——2026-09-23 就踩过两次：① 只改了一份（另外几份首行写法不同，
+    `replace_all` 没匹配到），`password` 条款漏了出去；② 漏掉了 profile 预览这条路径，
+    它在菜单 4/5 的**确认之前**就会打印，属于真实可达泄漏（P1）。
+    统一判据：`api_key` / `apikey` / `token` / `secret` / `password` / `experimental_bearer_token`
+    （`password` 是本次新加的：`settings.json.env` 是任意用户环境变量，MCP server 常有 `*_PASSWORD`）。
+  - `hasCompletedOnboarding` **写 `~/.claude.json`，不是 `settings.json`**：由 `hapi_ensure_claude_onboarding` 负责，
+    菜单 1（配置）与菜单 4（切换）写完 live settings 后各调一次，失败只打警告、不影响已写好的 settings.json。
+    依据 cc-switch `src-tauri/src/claude_mcp.rs:148-173` `set_has_completed_onboarding`
+    （注释原文「在 ~/.claude.json 根对象写入 hasCompletedOnboarding=true」「仅增量写入该字段，其他字段保持不变」）
+    + `commands/plugin.rs:38-42` + 设置开关 `skipClaudeOnboarding`（`src/types.ts:368`）。逐条对齐：
+    文件不存在按 `{}` 起手；根不是对象则报错；**已经是 true 就直接不碰文件**（幂等）；只加这一个键，
+    **绝不重建 `.claude.json`**（里面还有项目历史 / `mcpServers` 等用户状态）；坏 JSON fail-closed。
+    与 cc-switch 的唯一偏差：本脚本按仓库约定把该文件收紧到 **0600**（cc-switch 用普通 `atomic_write`）——
+    `mcpServers[].env` 里可能带密钥。
+    ⚠️ **参考实现自身文档与代码不一致（2026-09-23 复核）**：cc-switch v3.20.4 的**代码**走
+    `~/.claude.json.hasCompletedOnboarding`（上面引的三个文件都是活的：设置开关 + 两条 Tauri 命令），
+    但它的**用户手册**写的是「此选项会写入 `~/.claude/settings.json` 的 `skipIntroduction` 字段」
+    （`docs/user-manual/zh/1-getting-started/1.4-quickstart.md:51`、`1.5-settings.md:80`，en/ja 同）。
+    按仓库约定「冲突时以参考代码为准」，保留 `.claude.json` 那条；**`skipIntroduction` 未采纳**——
+    它只出现在文档、代码里一次都没有，要写必须先确认真机认这个字段。
+  - ⚠️ **`ANTHROPIC_SMALL_MODEL` 没有官方依据**：官方 model-config 文档只列 `ANTHROPIC_DEFAULT_HAIKU_MODEL`
+    与 `CLAUDE_CODE_SUBAGENT_MODEL`，并明确 `ANTHROPIC_SMALL_FAST_MODEL` 已废弃改用
+    `ANTHROPIC_DEFAULT_HAIKU_MODEL`。所以既不写 `ANTHROPIC_SMALL_MODEL`，也不把 legacy 名加回来；
+    小模型档由 `ANTHROPIC_DEFAULT_HAIKU_MODEL` 承担（`CLAUDE_CODE_SUBAGENT_MODEL` 是正式字段，带 subagent 的场景可留）。
+  - ⚠️ **`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`** 在 cc-switch 里用于「平台明确要求禁用全部 beta 参数」的网关
+    （`claudeProviderPresets.ts:960/968/980` 及 968 行注释）。它与 `[1m]` 声明的 1M beta 头可能互斥——
+    留在可选清单里，谁勾谁自己确认真机是否还有 1M。
+  - 署名：**不再写 `includeCoAuthoredBy`**（旧写法，用户既有值原样保留，别再自动加/改）；
+    「隐藏 AI 署名」开关写 `attribution = {commit:"", pr:"", sessionUrl:false}`（v3.20.4 起只清 commit/pr
+    藏不住 claude.ai 会话链接），取消勾选 = 删掉整个 `attribution` 对象（会先提示「已有 attribution」）。
+  - 「最大强度思考」的落点是 `env.CLAUDE_CODE_EFFORT_LEVEL = "max"`；关闭必须**显式删除该键**，不能留空串。
+- **备份固定一份、每次覆盖，不按时间戳堆积**（2026-09-23 按用户明确要求收敛）：
+  备份名一律是 `<原文件>.bak`（`~/.claude/settings.json.bak` / `~/.codex/auth.json.bak` /
+  `~/.codex/config.toml.bak` / `~/.hapi/settings.json.bak`），由 `hapi_backup_or_fail` 覆盖写入。
+  语义 = **「最近一次写入前」的状态**（随时能回退最近一步）。
+  ⚠️ **不要再改回「唯一名」**：`mktemp "${settings_file}.bak.$(date +%Y%m%d_%H%M%S).XXXXXX"` 会**无限堆积**
+  （每写一次多一个文件，用户得手工清理）。历史上为了「同一秒连跑两次不互相覆盖」加过唯一名，
+  2026-09-23 被用户要求撤销——**两者不可兼得**：要不堆积，就得接受 `.bak` 被后续操作覆盖。
+  想保留有限几代，必须由脚本自己轮转删除旧文件（**当前没做**，要做先跟用户确认删除策略与保留代数）。
+  J2/J11 两条断言就是盯这件事：文件数为 1、且**没有** `settings.json.bak.<时间戳>` 这类残留。
+- **备份 `cp` 失败必须立即中止，且统一走 `hapi_backup_or_fail`**（2026-09-23 起）：
+  helper = `if ! cp -a "${source}" "${target}"; then 报「备份失败，已中止修改」; return 1; fi` + `chmod 600 "${target}"`；
+  调用侧一律 `hapi_backup_or_fail <源> <目标> || return 1`。桩成 `cp(){ return 42; }` 的旧行为实测是
+  **备份 0 个、却打印两条「已备份」、live auth/config 都已被覆盖、外层 rc=0** —— 正好击穿这条流程最重要的恢复保障（P1）。
+  ⚠️ **不要再逐点复制 `if ! cp -a …`**：这条规则原本散在 12 处，2026-09-23 只修了 Claude 的两处、
+  Codex 侧仍是旧写法，于是**同一个 P1 在 Codex 又活了一轮**（审查环境发现）。现在全部 12 处走 helper，
+  `tests/Hapi_Claude_Manage/run.sh` 的 **G 组会扫源码**：helper 结构不对、或脚本里还残留裸 `cp -a`，直接红。
+  **唯一非备份的例外**是「把 live 读进临时文件供编辑」（菜单 7 `existing` 分支）：它仍是 copy，
+  但**同样必须检查返回值**——临时文件是空文件，载入失败还继续就是让用户在空白内容上编辑，
+  保存后写回一份没有凭据的 auth.json（等于清空官方登录态）。
+  `hapi_prompt_add_extra_env` 是纯合并 helper，**内部禁止再备份**：历史上它用同一个 `settings.json.bak` 又备份一次，
+  把原始备份覆盖成了刚写好的新配置 → 用户在「是否添加额外参数」选 `y` 时「live + 唯一 .bak」同时丢掉原配置
+  （2026-09-23 用变异体实测复现：目录里只剩 `settings.json` + 内容已是新配置的 `settings.json.bak`）。
+- **现有文件不是合法 JSON 时 fail-closed**：报错中止、不覆盖（别把用户手写但语法有问题的配置整份吃掉）。
+  推论：**坏文件目前无法从菜单修**（预览只报错、写入器拒写）——这是有意为之的安全取舍；
+  若将来要支持「整份重建」，必须单加一个显式确认，不能顺手放宽 fail-closed。
+- **两处 Node 写盘的 `env` 判断必须一致**：`typeof [] === "object"`，只判 `typeof config.env !== "object"`
+  会让 `{"env": []}` 变成「rc=0 但一个参数都没落盘」的静默失败。两处都要
+  `!config.env || typeof config.env !== "object" || Array.isArray(config.env)`（2026-09-23 在 extra-env helper 修上）。
+- **`hapi_prompt_add_extra_env` 的失败码必须 `|| return` 传播**（菜单 1 与菜单 4 两处）：它原本是函数体最后一句、
+  失败自然冒泡；后来在它后面接了没有 `|| return` 的 onboarding 调用，失败码被那句 `echo` 擦成 0，
+  外层函数于是报成功（P2 控制流回归，2026-09-23 审查环境用桩实跑证实：桩返回 7 时外层 rc=0）。
+  规则：**在任何函数末尾追加"尽力而为"的步骤前，先确认前一步的失败码是否会被吃掉**。
+
+### Claude 配置库（`~/.claude/hapi_config_profiles.json`）
+
+- **预览必须与 live 预览同一套递归脱敏**（`hapi_show_claude_profile_by_index`）：菜单 4（切换）与菜单 5（删除）
+  都是**先展示 profile、再 ask 确认**，所以这里泄漏的凭据一定会打到终端。旧实现只手工打码三个固定键，
+  `OPENROUTER_API_KEY` / `OPENAI_API_KEY` / 任意 `*_SECRET` / `*_PASSWORD` / 嵌套与数组内的敏感键全部明文（P1）。
+- **配置库损坏必须 fail-closed**（`hapi_save_claude_profile_from_file`）：旧实现 `try { … } catch {}` 把坏库当空库读，
+  紧接着 `writeFileSync` 用「只有新 profile」的 `{profiles:[new]}` 覆盖整个旧库 → 截断/手改/异常写盘之后，
+  下一次「储存当前配置」**静默吃掉全部历史配置**（P1 数据丢失，2026-09-23 实跑复现：rc=0、旧库被整份替换）。
+  规则：读配置库**一律不许 `catch {}`**；解析失败 → 报错 + `exit 1`，顶层不是对象同样中止。
+- **「损坏」包含 schema 级，不只是语法级**（2026-09-23 补）：`profiles` 不是数组也算损坏。
+  旧写法 `if (!Array.isArray(store.profiles)) store.profiles = [];` 会把
+  `{"profiles":{"legacy":{…}}}`（合法 JSON、顶层也是对象）**静默重置成空库**再写入新 profile，照样丢历史配置。
+  正确写法：`profiles === undefined` 才补 `[]`，`!Array.isArray` 一律 `exit 1`；列表侧对应 `exit 2` + 明确报损坏。
+- **写 live 的每个入口都要 plain-object 校验**（2026-09-23 补，P2）：`isPlainObject(v) = v!==null && typeof v==="object" && !Array.isArray(v)`。
+  四处都要：writer 读旧 `settings.json`、`extra-env` 读 `settings.json`、profile save 的 `sourceFile`、profile switch 的 `profile.config`。
+  空文件按 `{}` 处理，但非空的 `[]` / `null` / `"foo"` / `123` 一律 fail-closed。
+  两个具体症状：① writer 会 `rc=0` 把 `[]` 重建成 `{}`；② 给数组设 `config.env` 运行时成立、但
+  `JSON.stringify(array)` 不序列化命名属性 → 「rc=0、提示已添加、文件一个字节没变」。
+- **「损坏」与「空库」必须区分**：`hapi_list_claude_profiles` 损坏时返回退出码 **2**，调用方据此打
+  「配置库已损坏 + 请修复或删除」而不是「暂无已储存的配置」——后者会让用户以为「没配过」而不是「库坏了」。
+- 输入一律 `hapi_trim` 后再判空：只敲空格的 `base_url` 要落回默认值，模型名两侧空格不能进 JSON。
+- 交互值用 **NUL 分隔的临时文件**传给 node（`HAPI_CLAUDE_VALUES_TMP`，已挂 `hapi_install_sensitive_tmp_traps`）：
+  bash 变量不可能含 NUL，故 TAB/换行可无损传递；**不要走环境变量或 argv**（会出现在 `/proc/<pid>/environ` / `ps`）。
+  它的保密级别与既有 `HAPI_CODEX_AUTH_TMP` / `HAPI_CLAUDE_SETTINGS_TMP` 相同：**SIGKILL / 断电无法拦截**，
+  极端情况下会留下含 token 的 `hapi_claude_values.*`（实测：宿主强杀进程树后残留 2 个）。
+  想彻底消除，可改用 `node 9< <(printf '%s\0' …)` + `/dev/fd/9`（管道不进磁盘）——**尚未实测，别照抄**。
+- 验证（2026-09-23 实测，均在「撤销固定补齐项」之后重跑）：
+  - `bash -n Manage/Hapi_Claude_Manage.sh`；
+  - ⚠️ **既有套件 A~I 不覆盖 Claude 写入器**（全是 Codex / 通用约定），改动后另做针对性回归：
+    按内容锚点从脚本抽出**真实函数**建 harness（`HOME`/`TMPDIR` 指临时目录），`printf` 顺序喂 `read`。
+    实测：全新文件 + 既有文件合并 **53 条全绿**（字段集合 11 键、`[1M]` 只加在 `*_MODEL`、
+    `includeCoAuthoredBy` / `hasCompletedOnboarding` / `*_SUPPORTED_CAPABILITIES` **都不得出现**、
+    未知顶层键保留、legacy 与冲突认证键清理、effort 与 attribution 开关）、
+    菜单全流程 **33 条全绿**（含「撤销项不再写入」、单次备份且备份里是原配置、末尾接线到
+    `~/.claude.json` 的 onboarding）、
+    子集 **20 条全绿**（token 含 TAB 的控制字符 / 坏 JSON fail-closed / trim 与「只剥尾部 `[1M]`」）、
+    预览脱敏 **14 条全绿**（escaped-quote token / `OPENROUTER_API_KEY` / `OPENAI_API_KEY` / 自定义 `*_SECRET` /
+    `*_PASSWORD` / 嵌套 `deep_token` / 数组内 `item_api_key` 全部打码，非敏感字段保留，坏 JSON 不打原文）、
+    onboarding 语义 **18 条全绿**（增量加键且保留其它字段与键序 / 已是 true 时字节不变（幂等）/
+    坏 JSON 与「根非对象」fail-closed / 文件不存在时创建）、
+    profile 路径 **28 条全绿**（profile 预览与 live 同一套脱敏 / 坏库保存 fail-closed 且旧库字节不变 /
+    正常库保存仍保留旧 profile / 库不存在时报「暂无」不报「损坏」/ extra-env 失败码传播 7：
+    失败时 fail-fast 不越过、成功时才调 onboarding）、
+    本轮（2026-09-23 第二批）**31 条全绿**：`profiles` schema 损坏（保存中止 + 旧库字节不变、列表报损坏）/
+    `cp` 失败注入（菜单 1 与 4 都中止、不谎报「已备份」、live 不变）/ 四处 plain-object 校验
+    （writer、extra-env、save 的 source、switch 的 config）/ 固定 `date` 连跑两次得到两个不同备份且首个备份仍是原始配置
+    （**该「唯一名」策略同日已被撤销**，见下）；
+  - 仓库套件 **J 组**：审查环境已实跑 **J1~J6 = 51/51 PASS**，A~J 全量 **276/276 PASS**（正式基线，
+    `225` 仅作 A~I 历史基线）；本机受 1 分钟规则限制未跑全量，仅限时 60s 跑到 J1~J2（32 条全绿）。
+    上一轮又补 **J7~J11 = 20 条**（schema 损坏 / `cp` 失败注入 / `settings.json=[]` / profile `config=[]` / 备份名唯一）。
+  - **本轮（2026-09-23 第三批）改了什么**：
+    ① J2 备份名断言原来少写了 mktemp 随机后缀（只匹配到 `…_HHMMSS$`，真实名是 `…_HHMMSS.XXXXXX` → 必红）；
+       J8 输入流少了开头的 `y\n`（`settings.json` 已存在时第一个 `read` 是「是否继续修改」，
+       `sk-j8` 被吃成这个回答 → 走「已取消配置」并正常返回 0，writer 的根类型检查根本没执行）；
+    ② 新增 **J12 = 4 条**（profile save 的 `source=[]`）、**K 组 = 51 条**（Codex 配置库 schema + 备份 fail-fast）；
+    ③ **备份语义反转**：Claude 菜单 1/4 从「唯一名（时间戳 + 随机后缀）」改成**固定一份、每次覆盖**——
+       唯一名每写一次多一个文件、要用户手工清理（用户明确要求「不要按时间戳无限备份下去」）。
+       J2 改成断「只有 1 份 + 无时间戳残留」，J11 从「连跑两次要产生 2 个备份」反转成
+       「连跑两次仍然 1 份，且 `.bak` 已被最近一次操作覆盖（不是最早那份）」。
+    J 组合计 **77 条**（75 + J11 净增 2 条），A~K 全量 **需在服务器上重跑确认**：
+    `bash tests/Hapi_Claude_Manage/run.sh --only J,K`（本机跑不完，见下）。
+  - **本轮本机实测（自然结束，非截断）**：`--only K` = **pass=51 fail=0 skip=0**（K 组首次跑就全绿）。
+    `--only G,J` 跑到 J1 全绿后被用户叫停（用户 2026-09-23 追加规则：**本机不要再跑测试，改到另一台服务器跑**），
+    其中 G 组新断言「备份走 helper（内部 fail-fast + chmod 600）且脚本内无裸 cp -a」**已实测变绿**。
+    因此 **K 组是唯一完整跑过的新分组**；G/J 的完整结果以服务器那一轮为准。
+  - **新断言的「手工反例自证」本轮没做**（要跑测试才行，已按用户要求停在本机），
+    留到服务器上连同 `--only J,K` 一起做。三个变异体（改完记得还原）：
+    ① 把 `hapi_save_codex_profile_from_files` 的 `readStore` 退回
+       `if (!Array.isArray(store.profiles)) store.profiles = [];` → **K1/K2/K3 必须变红**；
+    ② 把任一 `hapi_backup_or_fail … || return 1` 退回裸 `cp -a` → **K5 与 G 组扫描必须变红**；
+    ③ 删掉 `hapi_save_claude_profile_from_file` 里的 `if (!isPlainObject(config))` → **J12 必须变红**；
+    ④ 把 Claude 备份名改回 `mktemp "$f.bak.$(date …).XXXXXX"` → **J2/J11 的「不堆积」断言必须变红**；
+    ⑤ 把固定名改成「只在文件不存在时创建」（冻结最早那份）→ **J11 的「已被最近一次操作覆盖」必须变红**。
+  - ⚠️ 自建 harness 也要**抽取自检**（缺函数就 `exit 2`）：踩过——漏抽 `hapi_ensure_claude_onboarding`，
+    函数体内的调用静默变成空命令，断言「~/.claude.json 已创建」直接红，但看日志才知道是 harness 的问题。
+    K 组新增 `hapi_backup_or_fail` / `hapi_list_codex_profiles` / `hapi_config_codex` /
+    `hapi_toggle_codex_recommended_values` 到抽取自检清单，缺任一立即 exit 2。
+  - 手工反例自证（唯一名时代的旧记录，作为「断言确实会红」的历史证据保留）：
+    三处 `${settings_file}.bak.$(date …)` 退回 `${settings_file}.bak`
+    + 把 `cp -a` 备份加回 `hapi_prompt_add_extra_env` → 「备份里是原始配置」等 3 条变红（实测）。
+  - ⚠️ 按用户 2026-09-23 的规则：**本机只跑 1 分钟内的定向验证，且一律后台任务 + 日志**；
+    整套针对性回归（6 例 ≈2min）与既有套件（≈9.5min）都**改到另一台服务器/审查环境跑**。
+
+### Codex 配置库（`~/.codex/hapi_config_profiles.json`）
+
+与 Claude 配置库同一套规则；2026-09-23 才补齐（此前只修了 Claude 侧，同一个 P1 在 Codex 侧原样存活）：
+
+- **配置库损坏必须 fail-closed，且「损坏」包含 schema 级**：`readStore()` 里
+  `if (!Array.isArray(store.profiles)) store.profiles = [];` 是**错的**——它会把
+  `{"profiles":{"legacy":{…}}}`（合法 JSON、顶层也是对象）静默重置成空库，紧接着用
+  「只有新 profile」的对象覆盖整个旧库 → 旧 profile 静默消失。
+  正确写法：`isPlainObject(store)` 不成立 → 抛错；`store.profiles === undefined` 才补 `[]`；
+  `!Array.isArray(store.profiles)` 一律抛错（错误信息里保留 `profiles 必须是数组` 便于检索）。
+  **两份 `readStore` 实现必须同步**：`hapi_save_codex_profile_from_files`（菜单 2）与
+  `hapi_create_codex_profile`（菜单 3）。
+  实测：旧实现 `SAVE_RC=0` 且 `legacy` profile 保存后消失（审查环境用真实函数复现）；修后 rc=1、旧库字节不变。
+- **列表三态**（`hapi_list_codex_profiles`）：`rc=2` = 库损坏（打「配置库已损坏 + 请修复或删除」），
+  `rc=1` = 空库 / 文件不存在（打「暂无已储存的 Codex 配置」）。旧实现 `try { … } catch {}` +
+  `Array.isArray(...) ? ... : []` 把坏库显示成「暂无」，用户会以为「没配过」而不是「库坏了」。
+  bash 侧必须先判 `list_status -eq 2` 再判 `-ne 0`，两者都 `return 1`（调用方只需 `|| return`）。
+- `hapi_switch_codex_profile` / `hapi_delete_codex_profile` 的第一句就是 `hapi_list_codex_profiles || return`，
+  所以库损坏时它们先被打回；列表入口统一，不必各自再判一次。
+- 尚未按同一规则收紧（都是**只读、不可能写盘**的路径，不构成数据丢失，留作 P3）：
+  `hapi_show_codex_profile_by_index` 对坏库会抛原始栈（`JSON.parse` 没有 try），
+  `hapi_extract_codex_profile_auth` 与切换 / 删除的内部对 `profiles` 非数组仍按空库处理
+  （结果是「配置序号不存在」+ rc=1，不会写盘）。**要改就四处一起改**，别只改一处。
+
 ### 凭据文件与临时文件
 
 - `auth.json` / `config.toml` / Codex 配置库 / `~/.claude/settings.json` / claude 配置库 / `cliApiToken`：**创建时就 0600**，
   不要只靠"写完再 chmod"（中间有可读窗口）。Node 侧 `fs.writeFileSync(file, data, { mode: 0o600 })` +
   `try { fs.chmodSync(file, 0o600) } catch {}`；shell 侧 heredoc 前置 `(umask 077; : > "${output_file}")` 占位。
-- **备份也要收紧权限**：所有 `cp -a <凭据文件> <备份>` 之后都要跟一句 `chmod 600 "<备份>"`。
+- **备份也要收紧权限**：`chmod 600 "<备份>"` 现在由 `hapi_backup_or_fail` 统一保证（`cp -a` 成功后立刻 chmod **目标**）。
   `cp -a` 会保留源文件 mode，所以旧版本留下的 / 人工放进去的 0644 文件会在一次新版本运行后变成
-  「正式文件 0600、备份 0644」——等于真正的 token 反而留在 `.bak` 里。2026-09-19 已覆盖全部 14 个 `cp -a` 站点
-  （claude settings、codex auth/config、含 `cliApiToken` 的 hapi settings）；只含 listenHost/port 的纯配置不在此列但一并收紧。
+  「正式文件 0600、备份 0644」——等于真正的 token 反而留在 `.bak` 里。2026-09-19 覆盖了当时的全部 `cp -a` 站点
+  （claude settings、codex auth/config、含 `cliApiToken` 的 hapi settings；只含 listenHost/port 的纯配置不在此列但一并收紧）。
+  2026-09-23 收敛后共 **12 个备份站点**走 helper（Claude 菜单 1/4、Codex writer / 菜单 1 / 推荐值 / profile 切换 / 菜单 7、
+  hapi settings 的 listen 与 cliApiToken），另有 1 处「把 live 读进临时文件供编辑」用同样检查返回值的 `if ! cp -a`。
 - 敏感临时文件：`mktemp` 生成不可预测路径（**不要** `${TMPDIR}/xxx_$$.json`），并挂 `hapi_install_sensitive_tmp_traps`
   （`hapi_cleanup_sensitive_tmp` 统一处理 `HAPI_CODEX_AUTH_TMP` / `HAPI_CLAUDE_SETTINGS_TMP`）。
   **故意不挂 INT**：vim 里 Ctrl+C 是退出插入模式的常用操作，挂上会在 vim 退出后连带删掉用户刚保存的内容。
@@ -591,15 +808,29 @@ git diff --stat && git diff --check
 
 - 每次改完最低要求：`bash -n Manage/Hapi_Claude_Manage.sh`。
 - **内嵌 node 段的语法 `bash -n` 检查不到**（`local x=$(...)` 之外，`node <<'NODE' … NODE` 里的 JS 只在运行时才炸）：
-  本脚本有 **16 个** `node <<'NODE'` 块，改过其中一个就把它们全部抽出来逐个 `node --check`——
+  本脚本有 **23 个** `node <<'NODE'` 块（2026-09-23 实测 `grep -c "<<'NODE'"`；曾记为 16，属于文档漂移），改过其中一个就把它们全部抽出来逐个 `node --check`——
   做法：按 `<<.NODE.` / 单独一行 `NODE` 切块，各写一个临时 `.js`（路径用盘符形式给 node），再 `for f in ...; do node --check "$f"; done`。
   几秒钟能拦住 heredoc 里的手滑，比等测试跑到一半才报错划算。
 - 行为回归：`bash tests/Hapi_Claude_Manage/run.sh`（失败非零退出；`--only A,C` 只跑指定组，`--log FILE` 指定进度日志）。
   分组：**A** `last_refresh` 真 RFC3339 ／ **B** `id_token` 严格 JWT envelope ／ **C** `auth_mode` 解析 + official/loadable 两级校验 ／
   **D** 写入器路由保护 ／ **E** 菜单 7 编辑器流程（含 SIGTERM 清理）／ **F** 配置库旁路卡点 ／ **G** 凭据 0600 与预览脱敏 ／ **H** 兼容性 ／
   **I** 路由自动收敛（官方剥离+暂存 / 第三方恢复 / 保留 id 不动 / 损坏暂存 fail-closed / 空配置走同一条流程，81 条断言；语义与反例清单见
-  `tests/Hapi_Claude_Manage/路由自动收敛-测试文档.md`）。
+  `tests/Hapi_Claude_Manage/路由自动收敛-测试文档.md`）／
+  **J** Claude Code `settings.json` 写入语义（合并写盘保留未知顶层键 / 备份固定一份不堆积 / 不注入固定补齐项 / 预览递归脱敏 /
+  配置库损坏 fail-closed（语法级 + schema 级）/ onboarding 幂等 / 写 live 四处 plain-object 校验）／
+  **K** Codex 配置库 schema fail-closed（save / create / list 三态）+ 备份 fail-fast
+  （writer / 菜单 1 / 推荐值 / profile 切换 / 菜单 7 粘贴 / 菜单 7 载入现有 auth，每条都断言日志里出现「备份失败，已中止修改」，
+  避免「因为别的卡点提前 return」造成的假绿）。
   实测（2026-09-19，本机 Windows/MSYS）：**定向分组** `--only C` = 39 断言全绿、`--only E,F` = 35 断言全绿；A 组 ≈15s、C 组 ≈25s、E 组 ≈2min、E+F ≈3min（进程创建极慢，别指望秒级）。
+- ⚠️ **全量套件在本机 Windows/MSYS 上超过默认 300s 上限**（2026-09-23 实测）：默认 `HARNESS_TIMEOUT=300` 会被
+  `timeout` 杀掉，表现为 **`NOT OK - harness 超时（300s）`、rc=124、日志停在 G 组且没有任何 `NOT OK` 断言**
+  （别把它误判成断言失败）。同一次改动加时长上限跑完：`HARNESS_TIMEOUT=1200` → **9m27s、pass=225 fail=0 skip=0、RESULT: PASS**
+  （与 2026-09-19 基线一致）。想在本机跑全量就显式抬上限，否则只跑 `--only`。慢是本机进程创建开销，不是断言数量问题。
+- ⚠️ 用户规则（2026-09-23）：**本机不再跑超过 1 分钟的测试**，且**任何测试一律后台任务 + 日志文件**。
+  全量套件与其它长验证统一交到**另一台服务器 / 审查环境**执行；本机只保留秒级到 1 分钟内的定向用例。
+  ⚠️ **同日追加（更严）**：改完**本机干脆不要跑测试**——由用户自己在服务器上跑。
+  本机只做**秒级静态检查**：`bash -n` ×2（生产脚本 + run.sh）+ 把 23 个 `node <<'NODE'` 块逐个 `node --check`。
+  要报测试数字只能是「服务器上跑出来的」，或明确标注为本机某一轮的旧数字。
   全量套件**更早一次**实测是 **pass=128 fail=0**（给 C 组补 loadable 漏口断言之前/之后没重跑过全量），
   该数字**不代表当前代码**，要报数字必须自己跑一遍再写。
   该套件的新断言按仓库约定用**手工反例自证**过一次（旧的 A 组记录）：移除 `isValidRfc3339` 的日历天数判据后，

@@ -4,7 +4,7 @@
 #   Manage/Hapi_Claude_Manage.sh 的回归测试（Codex / Claude 配置语义 + 凭据写入路径）
 #
 # 用法：
-#   bash tests/Hapi_Claude_Manage/run.sh                  # 全量（A~I）
+#   bash tests/Hapi_Claude_Manage/run.sh                  # 全量（A~K）
 #   bash tests/Hapi_Claude_Manage/run.sh --only A,C       # 只跑指定分组（日常最常用）
 #   bash tests/Hapi_Claude_Manage/run.sh --log /tmp/x.log # 指定进度日志（默认自动生成）
 #
@@ -18,6 +18,11 @@
 #   G 凭据权限（备份 0600）与预览脱敏
 #   H 兼容性回归（既有校验 / 展示 / 菜单接线）
 #   I 路由自动收敛（官方登录剥离并暂存第三方路由 / 第三方 base_url 自动恢复 / 保留 id 不动）
+#   J Claude Code settings.json 写入语义（merge 写盘保留未知顶层键 / 备份固定一份不堆积 / 不注入固定补齐项 /
+#     不写 includeCoAuthoredBy / live 预览与 profile 预览递归脱敏 / 配置库损坏 fail-closed（含 schema 级）/
+#     ~/.claude.json 的 onboarding 幂等写入 / 写 live 的各入口统一 plain-object 校验）
+#   K Codex 配置库 schema fail-closed（save / create / list 三态）+ 备份 fail-fast
+#     （writer / 菜单 1 / 推荐值 / profile 切换 / 菜单 7 粘贴 / 菜单 7 载入现有 auth）
 #
 # 三条"绝不卡住"的保证（与 tests/meme_generator/run.sh 一致）：
 #   1) harness 里 `exec 0< /dev/null`：漏写重定向的 read 立刻 EOF，不会永久阻塞；
@@ -411,7 +416,12 @@ for f in hapi_check_codex_auth_file hapi_write_codex_auth_file hapi_write_codex_
          hapi_install_sensitive_tmp_traps hapi_extract_codex_profile_auth \
          hapi_save_codex_profile_from_files hapi_store_current_codex_config \
          hapi_create_codex_profile hapi_switch_codex_profile hapi_codex_profile_store_file \
-         hapi_sync_codex_route hapi_codex_route_stash_file; do
+         hapi_list_codex_profiles hapi_config_codex hapi_toggle_codex_recommended_values \
+         hapi_backup_or_fail \
+         hapi_sync_codex_route hapi_codex_route_stash_file \
+         hapi_trim hapi_write_claude_settings_file hapi_show_claude_config hapi_config_claude \
+         hapi_show_claude_profile_by_index hapi_save_claude_profile_from_file hapi_list_claude_profiles \
+         hapi_ensure_claude_onboarding hapi_switch_claude_profile; do
   declare -f "${f}" > /dev/null || MISSING="${MISSING} ${f}"
 done
 if [ -n "${MISSING}" ]; then
@@ -718,19 +728,34 @@ fi
 # ============================================================
 if group_on G; then
   head_ "G) 凭据文件与备份的 0600，以及预览脱敏"
-  expect_count "所有 cp -a 备份点后都紧跟 chmod 600" \
-    <(node -e '
+  # 备份点结构（2026-09-23 起统一走 hapi_backup_or_fail）：
+  # ⚠️ 旧断言是「每个 `cp -a "a" "b"` 行后面紧跟 chmod 600 "b"」的**文本**匹配；改用 helper 之后
+  #    那些行不再以 `cp -a ` 开头，断言会退化成 0 命中却依然「通过」——静默失效，比没有断言更糟。
+  # 现在改断两件事：① helper 内部是 `if ! cp -a …; then … return 1` + `chmod 600 "目标"`；
+  #              ② 除 helper 外脚本里**不得**出现裸 `cp -a` 命令行（每处都必须检查返回值）。
+  backup_scan=$(node -e '
 const fs = require("fs");
 const lines = fs.readFileSync(process.env.TARGET_SCRIPT, "utf8").replace(/\r\n/g, "\n").split("\n");
-let miss = 0;
+let helperStart = -1;
+let helperEnd = -1;
 for (let i = 0; i < lines.length; i += 1) {
-  if (!/^\s*cp -a "[^"]+" "[^"]+"\s*$/.test(lines[i])) continue;
-  const dest = /^\s*cp -a "[^"]+" "([^"]+)"/.exec(lines[i])[1];
-  const next = [lines[i + 1] || "", lines[i + 2] || ""].join("\n");
-  if (!next.includes("chmod 600 \"" + dest + "\"")) { miss += 1; console.log("缺 chmod: " + lines[i].trim()); }
+  if (helperStart < 0 && /^hapi_backup_or_fail\(\) \{/.test(lines[i])) helperStart = i;
+  else if (helperStart >= 0 && helperEnd < 0 && /^\}/.test(lines[i])) helperEnd = i;
 }
-console.log("missing=" + miss);
-' | tail -n 1) "missing=0" 1
+if (helperStart < 0 || helperEnd < 0) { console.log("SCAN:helper-missing"); process.exit(0); }
+const helper = lines.slice(helperStart, helperEnd + 1).join("\n");
+const helperOk = /if ! cp -a "\$\{source\}" "\$\{target\}"; then/.test(helper)
+  && /return 1/.test(helper)
+  && /chmod 600 "\$\{target\}"/.test(helper);
+let bare = 0;
+const bareAt = [];
+for (let i = 0; i < lines.length; i += 1) {
+  if (i >= helperStart && i <= helperEnd) continue;
+  if (/^\s*cp -a /.test(lines[i])) { bare += 1; bareAt.push(i + 1); }
+}
+console.log("SCAN:helper=" + (helperOk ? "ok" : "BAD") + " bare=" + bare + (bareAt.length ? " lines=" + bareAt.join(",") : ""));
+' | tail -n 1)
+  expect_eq "备份走 helper（内部 fail-fast + chmod 600）且脚本内无裸 cp -a" "SCAN:helper=ok bare=0" "${backup_scan}"
 
   seed_live ok_official
   : > "${CHMOD_LOG}"
@@ -1002,6 +1027,378 @@ query_params = { foo = "bar" }
   hapi_show_codex_config > "${WORK_DIR}/i14d.log" 2>&1
   expect_grep "对照：合法 stash 正常显示 provider id" "${WORK_DIR}/i14d.log" "provider id: myrelay"
   expect_count "对照：合法 stash 不报格式异常" "${WORK_DIR}/i14d.log" "格式异常" 0
+fi
+
+# ============================================================
+# J) Claude Code settings.json：合并写盘 / 单次备份 / 不注入固定补齐项
+#
+#    覆盖的不变量（都对应真实事故或已确认的上游语义）：
+#      ① 备份固定一份、每次覆盖（`settings.json.bak`），里是「最近一次写入前」的配置，
+#         且**不按时间戳堆积**——唯一名写法每写一次多一个文件，用户得手工清理；
+#      ② 未知顶层键必须保留（旧版整文件重建会丢 permissions / hooks / …）；
+#      ③ 不写 includeCoAuthoredBy（旧写法），用户既有值原样保留；
+#      ④ 不写任何「固定补齐项」。特别地 *_SUPPORTED_CAPABILITIES 是官方字段，
+#         但显式设置会**禁用未列出的能力**，官方只接受 effort / xhigh_effort /
+#         max_effort / thinking / adaptive_thinking / interleaved_thinking——
+#         写错比不写更糟，所以写盘器不碰它。
+#      ⑤ 预览（hapi_show_claude_config）必须彻底脱敏：escaped-quote token、
+#         OPENROUTER/OPENAI/CUSTOM_SECRET/*_PASSWORD、嵌套与数组内的敏感键全部打码；
+#         坏 JSON 不回退打原文。可用 --only J 之外单独跑一个预览用例（见下 J5）。
+#      ⑥ 「跳过初次安装确认」写 ~/.claude.json 根对象（cc-switch claude_mcp.rs 语义）：
+#         保留其它字段、已是 true 时字节不变，settings.json 里不得出现该键。
+#      ⑦ 配置库「损坏」包含 schema 级：profiles 不是数组时不许当空库重置并覆盖（旧写法会静默吃历史配置）；
+#      ⑧ 备份 `cp` 失败必须立即中止（不许谎报「已备份」就继续改 live）；
+#      ⑨ 凡是会写进 live settings.json 的入口（writer / extra-env / profile save 的 source /
+#         profile switch 的 config）都要求根是 plain object：[] / null / "foo" / 123 一律 fail-closed。
+#
+#    反例自证（手工，改完记得还原）：
+#      · 把备份名改成 `mktemp "$f.bak.$(date …).XXXXXX"`（时间戳堆积）→ J2/J11 的「不堆积」断言必须变红；
+#      · 把固定名改成「只在文件不存在时创建」（冻结最早那份）→ J11 的「已被最近一次操作覆盖」必须变红；
+#      · 把 hapi_prompt_add_extra_env 的备份加回去（写盘后再备份）→ J2 的「备份里是修复前的原始配置」必须变红；
+#      · 重新加一行 config.env.ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES = "…"
+#        → J1/J2 的「不得写入」断言必须变红；
+#      · 把 `if (store.profiles === undefined) … else if (!Array.isArray(…)) exit 1` 退回
+#        无条件 `store.profiles = []` → J7 必须变红；
+#      · 把 `hapi_backup_or_fail` 调用退回裸 `cp -a` → J10 必须变红；
+#      · 去掉 profile save 的 `if (!isPlainObject(config))` → J12 必须变红。
+# ============================================================
+if group_on J; then
+  head_ "J) Claude Code settings.json 写入语义"
+
+  claude_seed(){ # $1 = settings.json 内容
+    rm -rf "${HOME}/.claude"
+    mkdir -p "${HOME}/.claude"
+    printf '%s' "$1" > "${HOME}/.claude/settings.json"
+  }
+  claude_bak(){ # 打印固定的 ${HOME}/.claude/settings.json.bak
+    printf '%s' "${HOME}/.claude/settings.json.bak"
+  }
+
+  # J1 全新文件：字段集合 + [1M] 只加在 MODEL 上 + 不注入固定补齐项
+  rm -rf "${HOME}/.claude"
+  printf 'sk-j1\n\n\n\n\n\nn\nn\n' | hapi_config_claude > "${WORK_DIR}/j1.log" 2>&1
+  expect_rc "J1 全新配置写入成功" 0 "$?"
+  expect_count "J1 env 键恰好 11 个" "${HOME}/.claude/settings.json" '^    "' 11
+  expect_count "J1 四档模型键齐备" "${HOME}/.claude/settings.json" '^    "ANTHROPIC_DEFAULT_(OPUS|SONNET|HAIKU|FABLE)_MODEL"' 4
+  expect_count "J1 四档显示名齐备" "${HOME}/.claude/settings.json" '_MODEL_NAME"' 4
+  expect_grep "J1 兜底 ANTHROPIC_MODEL 保留 [1M]" "${HOME}/.claude/settings.json" '"ANTHROPIC_MODEL": "claude-sonnet-4-5-20250929\[1M\]"'
+  expect_count "J1 不写 includeCoAuthoredBy" "${HOME}/.claude/settings.json" 'includeCoAuthoredBy' 0
+  expect_count "J1 不写 hasCompletedOnboarding" "${HOME}/.claude/settings.json" 'hasCompletedOnboarding' 0
+  expect_count "J1 不写 *_SUPPORTED_CAPABILITIES" "${HOME}/.claude/settings.json" 'SUPPORTED_CAPABILITIES' 0
+  expect_count "J1 不写 CLAUDE_CODE_SUBAGENT_MODEL" "${HOME}/.claude/settings.json" 'CLAUDE_CODE_SUBAGENT_MODEL' 0
+  expect_count "J1 不写 DISABLE_EXPERIMENTAL_BETAS" "${HOME}/.claude/settings.json" 'DISABLE_EXPERIMENTAL_BETAS' 0
+  expect_count "J1 不写 legacy ANTHROPIC_REASONING_MODEL" "${HOME}/.claude/settings.json" '"ANTHROPIC_REASONING_MODEL"' 0
+  expect_count "J1 不写 legacy ANTHROPIC_SMALL_FAST_MODEL" "${HOME}/.claude/settings.json" '"ANTHROPIC_SMALL_FAST_MODEL"' 0
+  expect_count "J1 未开启 effort 时不写 EFFORT_LEVEL" "${HOME}/.claude/settings.json" 'CLAUDE_CODE_EFFORT_LEVEL' 0
+  expect_count "J1 未选隐藏署名时不写 attribution" "${HOME}/.claude/settings.json" '"attribution"' 0
+
+  # J2 既有配置：保留未知顶层键与 includeCoAuthoredBy / 清理废弃与冲突认证键 / 同一次操作只备份一次
+  claude_seed '{
+  "permissions": { "allow": ["Bash(ls:*)"] },
+  "hooks": { "Stop": [] },
+  "customTopLevel": "KEEP-ME",
+  "includeCoAuthoredBy": true,
+  "attribution": { "commit": "", "pr": "", "sessionUrl": false },
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "seed-token",
+    "ANTHROPIC_API_KEY": "old-api-key",
+    "ANTHROPIC_REASONING_MODEL": "legacy-reasoning",
+    "ANTHROPIC_SMALL_FAST_MODEL": "legacy-small",
+    "CLAUDE_CODE_EFFORT_LEVEL": "max",
+    "API_TIMEOUT_MS": "111"
+  }
+}
+'
+  : > "${CHMOD_LOG}"
+  printf 'y\n\n\n\n\n\n\ny\ny\ny\n' | hapi_config_claude > "${WORK_DIR}/j2.log" 2>&1
+  expect_rc "J2 覆盖既有配置成功" 0 "$?"
+  # ⚠️ 备份是固定一份（`settings.json.bak`，每次覆盖），**不许**按时间戳堆积：
+  #    唯一名写法每写一次就多一个文件，用户得手工清理（2026-09-23 用户明确要求撤销）。
+  expect_count "J2 只保留一份备份（固定名）" <(ls -A "${HOME}/.claude") '^settings\.json\.bak$' 1
+  expect_count "J2 不产生时间戳备份堆" <(ls -A "${HOME}/.claude") '^settings\.json\.bak\.' 0
+  J2_BAK="$(claude_bak)"
+  expect_grep "J2 备份里是修复前的原始配置" "${J2_BAK}" '"ANTHROPIC_AUTH_TOKEN": "seed-token"'
+  expect_grep "J2 备份保留原始 ANTHROPIC_API_KEY" "${J2_BAK}" '"ANTHROPIC_API_KEY": "old-api-key"'
+  expect_count "J2 备份里没有新写的字段（证明不是新配置）" "${J2_BAK}" 'SUPPORTED_CAPABILITIES' 0
+  expect_grep "J2 备份也调用 chmod 600" "${CHMOD_LOG}" "600 ${HOME}/\.claude/settings\.json\.bak$"
+  expect_count "J2 live 保留 permissions" "${HOME}/.claude/settings.json" '"permissions"' 1
+  expect_count "J2 live 保留 customTopLevel" "${HOME}/.claude/settings.json" '"customTopLevel": "KEEP-ME"' 1
+  expect_count "J2 live 保留用户既有 includeCoAuthoredBy=true" "${HOME}/.claude/settings.json" '"includeCoAuthoredBy": true' 1
+  expect_count "J2 live 保留无关键 API_TIMEOUT_MS" "${HOME}/.claude/settings.json" '"API_TIMEOUT_MS"' 1
+  expect_count "J2 清理 ANTHROPIC_API_KEY" "${HOME}/.claude/settings.json" '"ANTHROPIC_API_KEY"' 0
+  expect_count "J2 清理 legacy ANTHROPIC_REASONING_MODEL" "${HOME}/.claude/settings.json" '"ANTHROPIC_REASONING_MODEL"' 0
+  expect_count "J2 清理 legacy ANTHROPIC_SMALL_FAST_MODEL" "${HOME}/.claude/settings.json" '"ANTHROPIC_SMALL_FAST_MODEL"' 0
+  expect_count "J2 effort 答 y 时写入 max" "${HOME}/.claude/settings.json" '"CLAUDE_CODE_EFFORT_LEVEL": "max"' 1
+  expect_grep "J2 署名答 y 时写入 attribution 三项" "${HOME}/.claude/settings.json" '"sessionUrl": false'
+  expect_grep "J2 token 回车沿用原值" "${HOME}/.claude/settings.json" '"ANTHROPIC_AUTH_TOKEN": "seed-token"'
+  expect_count "J2 不写 *_SUPPORTED_CAPABILITIES" "${HOME}/.claude/settings.json" 'SUPPORTED_CAPABILITIES' 0
+
+  # J3 既有文件不是合法 JSON：fail-closed，不动原文件
+  claude_seed '{ "env": {
+'
+  J3_BEFORE="$(cat "${HOME}/.claude/settings.json")"
+  printf 'y\nsk-j3\n\n\n\n\n\nn\nn\n' | hapi_config_claude > "${WORK_DIR}/j3.log" 2>&1
+  expect_rc "J3 坏 JSON 时中止（rc=1）" 1 "$?"
+  expect_eq "J3 原文件字节未被改动" "${J3_BEFORE}" "$(cat "${HOME}/.claude/settings.json")"
+  expect_grep "J3 报出中止原因" "${WORK_DIR}/j3.log" "不是合法 JSON"
+
+  # J4 跳过初次安装确认：写 ~/.claude.json（不是 settings.json），保留其它字段且幂等
+  rm -f "${HOME}/.claude.json"
+  printf '%s' '{"mcpServers":{"demo":{"type":"stdio"}},"projects":{"/w":{}},"keep":"yes"}
+' > "${HOME}/.claude.json"
+  rm -rf "${HOME}/.claude"
+  printf 'sk-j4\n\n\n\n\n\nn\nn\n' | hapi_config_claude > "${WORK_DIR}/j4.log" 2>&1
+  expect_rc "J4 配置写入成功" 0 "$?"
+  expect_count "J4 settings.json 不得出现 hasCompletedOnboarding" "${HOME}/.claude/settings.json" 'hasCompletedOnboarding' 0
+  expect_count "J4 ~/.claude.json 被置位" "${HOME}/.claude.json" '"hasCompletedOnboarding": true' 1
+  expect_count "J4 ~/.claude.json 其它字段保留" "${HOME}/.claude.json" '"mcpServers"' 1
+  J4_BEFORE="$(cat "${HOME}/.claude.json")"
+  printf 'y\n\n\n\n\n\n\nn\nn\ny\n' | hapi_config_claude > "${WORK_DIR}/j5.log" 2>&1
+  expect_eq "J4 已是 true 时 ~/.claude.json 字节不变（幂等）" "${J4_BEFORE}" "$(cat "${HOME}/.claude.json")"
+
+  # J5 profile 预览必须与 live 预览同一套递归脱敏（菜单 4/5 在「确认」之前就会打印它）
+  node <<'JS'
+const fs = require("fs");
+const dir = process.env.HOME + "/.claude";
+fs.mkdirSync(dir, { recursive: true });
+const leaky = { env: {
+  ANTHROPIC_AUTH_TOKEN: 'sk-a\\"B_TOKEN_VISIBLE',
+  OPENROUTER_API_KEY: "or-PROFILE_VISIBLE",
+  OPENAI_API_KEY: "oa-PROFILE_VISIBLE",
+  CUSTOM_SECRET: "sec-PROFILE_VISIBLE",
+  SOME_PASSWORD: "pw-PROFILE_VISIBLE",
+  PLAIN_MODEL: "claude-sonnet-4-5",
+  NESTED: { deep_token: "dt-PROFILE_VISIBLE" },
+} };
+fs.writeFileSync(dir + "/hapi_config_profiles.json", JSON.stringify({ profiles: [{ name: "p1", createdAt: "t", updatedAt: "t", config: leaky }] }, null, 2) + "\n");
+JS
+  hapi_show_claude_profile_by_index 1 > "${WORK_DIR}/j6.log" 2>&1
+  expect_rc "J5 profile 预览成功" 0 "$?"
+  expect_count "J5 预览里不得出现任何明文凭据" "${WORK_DIR}/j6.log" "VISIBLE" 0
+  expect_count "J5 profile 名照常显示" "${WORK_DIR}/j6.log" "名称: p1" 1
+  expect_count "J5 非敏感字段保留" "${WORK_DIR}/j6.log" '"PLAIN_MODEL": "claude-sonnet-4-5"' 1
+  expect_count "J5 嵌套敏感键已打码" "${WORK_DIR}/j6.log" '"deep_token": "\*\*\*\*\*\*"' 1
+
+  # J6 配置库损坏时：保存必须 fail-closed（不许静默吃掉旧库），列表必须如实报损坏
+  printf '%s' '{broken OLD_PROFILE_BYTES' > "${HOME}/.claude/hapi_config_profiles.json"
+  printf '%s' '{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-j6"}}' > "${WORK_DIR}/j6-source.json"
+  hapi_save_claude_profile_from_file new "${WORK_DIR}/j6-source.json" > "${WORK_DIR}/j7.log" 2>&1
+  expect_rc "J6 坏库时保存中止" 1 "$?"
+  expect_count "J6 旧库未被覆盖" "${HOME}/.claude/hapi_config_profiles.json" "broken OLD_PROFILE_BYTES" 1
+  expect_grep "J6 给出中止说明" "${WORK_DIR}/j7.log" "已中止保存"
+  hapi_list_claude_profiles > "${WORK_DIR}/j8.log" 2>&1
+  expect_rc "J6 坏库时列表返回失败" 1 "$?"
+  expect_grep "J6 列表提示配置库已损坏" "${WORK_DIR}/j8.log" "配置库已损坏"
+  expect_count "J6 列表不伪装成「暂无配置」" "${WORK_DIR}/j8.log" "暂无已储存" 0
+
+# J7 合法 JSON / 坏 schema：profiles 不是数组（旧写法会静默重置成空库再覆盖）
+  printf '%s' '{"profiles":{"legacy":{"name":"legacy","config":{"keep":1}}}}' > "${HOME}/.claude/hapi_config_profiles.json"
+  J7_BEFORE="$(cat "${HOME}/.claude/hapi_config_profiles.json")"
+  printf '%s' '{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-j7"}}' > "${WORK_DIR}/j7-source.json"
+  hapi_save_claude_profile_from_file new "${WORK_DIR}/j7-source.json" > "${WORK_DIR}/j9.log" 2>&1
+  expect_rc "J7 profiles 非数组时保存中止" 1 "$?"
+  expect_eq "J7 旧配置库字节未变" "${J7_BEFORE}" "$(cat "${HOME}/.claude/hapi_config_profiles.json")"
+  expect_grep "J7 给出 profiles 类型说明" "${WORK_DIR}/j9.log" "profiles 必须是数组"
+  hapi_list_claude_profiles > "${WORK_DIR}/j10.log" 2>&1
+  expect_rc "J7 profiles 非数组时列表报损坏" 1 "$?"
+  expect_grep "J7 列表提示已损坏" "${WORK_DIR}/j10.log" "profiles 不是数组（文件已损坏）"
+
+  # J8 根类型：settings.json = [] 必须 fail-closed（writer 与 extra-env 两处）
+  printf '%s' '[]' > "${HOME}/.claude/settings.json"
+  # ⚠️ settings.json 已存在 → 第 1 个 read 是「是否继续修改？[y/N]」，必须先把 `y` 喂掉；
+  #    否则 `sk-j8` 会被当成这个回答（≠y → 走「已取消配置」并**正常返回 0**），
+  #    writer 的根类型检查根本执行不到，断言就成了假红。
+  printf 'y\nsk-j8\n\n\n\n\n\nn\nn\n' | hapi_config_claude > "${WORK_DIR}/j11.log" 2>&1
+  expect_rc "J8 settings.json=[] 时菜单 1 中止" 1 "$?"
+  expect_eq "J8 文件仍是 []（未被重建成对象）" "$(cat "${HOME}/.claude/settings.json")" "[]"
+  printf 'y\n' | hapi_prompt_add_extra_env "${HOME}/.claude/settings.json" > "${WORK_DIR}/j12.log" 2>&1
+  expect_rc "J8 extra-env 同样拒绝非对象根" 1 "$?"
+  expect_eq "J8 extra-env 未改动文件" "$(cat "${HOME}/.claude/settings.json")" "[]"
+  expect_count "J8 extra-env 不谎报成功" "${WORK_DIR}/j12.log" "额外参数已添加" 0
+
+  # J9 profile.config 是数组 → 切换必须拒绝，且不得写出 live
+  printf '%s' '{"profiles":[{"name":"bad","createdAt":"t","updatedAt":"t","config":[]}]}' > "${HOME}/.claude/hapi_config_profiles.json"
+  rm -f "${HOME}/.claude/settings.json"
+  printf '1\ny\n' | hapi_switch_claude_profile > "${WORK_DIR}/j13.log" 2>&1
+  expect_rc "J9 config 非对象时切换被拒" 1 "$?"
+  expect_count "J9 未写出 live settings.json" <(ls -A "${HOME}/.claude") '^settings\.json$' 0
+  expect_grep "J9 给出 config 根类型说明" "${WORK_DIR}/j13.log" "config 根必须是 JSON 对象"
+
+  # J10 备份失败注入（cp → 42）：菜单 1 与菜单 4 都必须中止、不谎报「已备份」
+  CP_DEF="$(declare -f cp)"
+  cp(){ return 42; }
+  printf '%s' '{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-seed"}}' > "${HOME}/.claude/settings.json"
+  J10_BEFORE="$(cat "${HOME}/.claude/settings.json")"
+  printf 'y\n' | hapi_config_claude > "${WORK_DIR}/j14.log" 2>&1
+  expect_rc "J10 cp 失败时菜单 1 中止" 1 "$?"
+  expect_eq "J10 live 未改动" "${J10_BEFORE}" "$(cat "${HOME}/.claude/settings.json")"
+  expect_count "J10 不打印「已备份原配置到」" "${WORK_DIR}/j14.log" "已备份原配置到" 0
+  expect_count "J10 不打印「配置已写入」" "${WORK_DIR}/j14.log" "配置已写入" 0
+  printf '%s' '{"profiles":[{"name":"p1","createdAt":"t","updatedAt":"t","config":{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-p1"}}}]}' > "${HOME}/.claude/hapi_config_profiles.json"
+  printf '1\ny\n' | hapi_switch_claude_profile > "${WORK_DIR}/j15.log" 2>&1
+  expect_rc "J10 cp 失败时菜单 4 中止" 1 "$?"
+  expect_count "J10 菜单 4 也不打印「已备份原配置到」" "${WORK_DIR}/j15.log" "已备份原配置到" 0
+  eval "${CP_DEF}"
+
+  # J11 备份只保留一份：连跑两次仍然只有一个 `.bak`（不按时间戳堆积），
+  #     且它已被第二次操作覆盖成「第二次写盘前的 live」，不是最早那份（覆盖语义）。
+  printf '%s' '{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-seed"}}' > "${HOME}/.claude/settings.json"
+  rm -f "${HOME}/.claude"/settings.json.bak*
+  printf 'y\n\n\n\n\n\n\nn\nn\nn\n' | hapi_config_claude > /dev/null 2>&1
+  printf 'y\n\n\n\n\n\n\nn\nn\nn\n' | hapi_config_claude > /dev/null 2>&1
+  expect_count "J11 连跑两次仍只有一份备份" <(ls -A "${HOME}/.claude") '^settings\.json\.bak$' 1
+  expect_count "J11 不产生时间戳备份堆" <(ls -A "${HOME}/.claude") '^settings\.json\.bak\.' 0
+  # 断言里必须带上收尾的引号：`ANTHROPIC_DEFAULT_OPUS_MODEL` 是 `…_MODEL_NAME` 的子串，
+  # 不带引号会数到 2 行（键 + 显示名），断言就永远红。
+  expect_count "J11 .bak 已被最近一次操作覆盖（不是最早那份）" "${HOME}/.claude/settings.json.bak" 'ANTHROPIC_DEFAULT_OPUS_MODEL"' 1
+
+  # J12 写 live 的「四处 plain-object 校验」之第三处：profile save 的 source 根类型。
+  #     source 是 [] 时若照存不误，配置库里就多出一条「config 为数组」的 profile；
+  #     它切换不出去（切换侧会拒绝），等于给用户埋一个坏配置。
+  printf '%s' '{"profiles":[{"name":"keep","createdAt":"t","updatedAt":"t","config":{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-keep"}}}]}' > "${HOME}/.claude/hapi_config_profiles.json"
+  J12_BEFORE="$(cat "${HOME}/.claude/hapi_config_profiles.json")"
+  printf '%s' '[]' > "${WORK_DIR}/j16-source.json"
+  hapi_save_claude_profile_from_file bad "${WORK_DIR}/j16-source.json" > "${WORK_DIR}/j16.log" 2>&1
+  expect_rc "J12 profile save source=[] 时中止" 1 "$?"
+  expect_eq "J12 原配置库字节未变" "${J12_BEFORE}" "$(cat "${HOME}/.claude/hapi_config_profiles.json")"
+  expect_count "J12 没有写进任何新 profile" "${HOME}/.claude/hapi_config_profiles.json" '"name": "bad"' 0
+  expect_grep "J12 报出「待保存的配置根必须是 JSON 对象」" "${WORK_DIR}/j16.log" "待保存的配置根必须是 JSON 对象"
+fi
+
+# ============================================================
+# K) Codex 配置库：schema 级损坏必须 fail-closed；备份 cp 失败必须中止
+#
+#    与 J 组同构，但落在 Codex 侧（2026-09-23 审查发现的两个 P1）：
+#      ① `readStore()` 里的 `if (!Array.isArray(store.profiles)) store.profiles = [];` 会把
+#         {"profiles":{"legacy":{…}}}（合法 JSON、顶层也是对象）静默重置成空库，
+#         紧接着用「只有新 profile」的对象覆盖整个旧库 → 历史配置全丢；
+#      ② 列表侧 `try { JSON.parse } catch {}` 把坏库显示成「暂无已储存的 Codex 配置」，
+#         用户以为「没配过」而不是「库坏了」；
+#      ③ 备份 `cp -a` 不看返回值：cp 失败时仍打印「已备份」、live 已被覆盖、rc=0。
+#
+#    每条注入都断言日志里出现「备份失败，已中止修改」——只断 rc=1 会被「因为别的原因
+#    提前 return」假绿（例如 profile 没过 loadable 卡点）。
+#
+#    反例自证（手工，改完记得还原）：
+#      · 把 readStore 退回无条件 `store.profiles = []` → K1/K2/K3 必须变红；
+#      · 把 `hapi_backup_or_fail …` 调用退回裸 `cp -a` → K5 必须变红（G 组扫描也会红）。
+# ============================================================
+if group_on K; then
+  head_ "K) Codex 配置库 schema fail-closed 与备份 fail-fast"
+
+  codex_store_file(){ printf '%s' "${HOME}/.codex/hapi_config_profiles.json"; }
+  seed_codex_live(){   # 最小合法 live（校验只要求 auth 是对象、toml 的 section 合法）
+    rm -rf "${HOME}/.codex"; mkdir -p "${HOME}/.codex"
+    printf '%s' '{"OPENAI_API_KEY":"sk-live-before"}' > "${HOME}/.codex/auth.json"
+    printf '%s' 'model = "gpt-5.5"\n' > "${HOME}/.codex/config.toml"
+  }
+
+  # K1 合法 JSON / 坏 schema：profiles 不是数组
+  seed_codex_live
+  printf '%s' '{"profiles":{"legacy":{"name":"legacy","config":{"keep":1}}}}' > "$(codex_store_file)"
+  K1_BEFORE="$(cat "$(codex_store_file)")"
+  printf '%s' '{"OPENAI_API_KEY":"sk-k-source"}' > "${WORK_DIR}/k-auth.json"
+  printf '%s' 'model = "gpt-5.5"\n' > "${WORK_DIR}/k-config.toml"
+  hapi_save_codex_profile_from_files new "${WORK_DIR}/k-auth.json" "${WORK_DIR}/k-config.toml" > "${WORK_DIR}/k1.log" 2>&1
+  expect_rc "K1 Codex profiles 非数组时保存中止" 1 "$?"
+  expect_eq "K1 旧配置库字节未变" "${K1_BEFORE}" "$(cat "$(codex_store_file)")"
+  expect_grep "K1 给出 profiles 类型说明" "${WORK_DIR}/k1.log" "profiles 必须是数组"
+  hapi_list_codex_profiles > "${WORK_DIR}/k2.log" 2>&1
+  expect_rc "K1 profiles 非数组时列表返回失败" 1 "$?"
+  expect_grep "K1 列表提示配置库已损坏" "${WORK_DIR}/k2.log" "配置库已损坏"
+  expect_count "K1 列表不伪装成「暂无配置」" "${WORK_DIR}/k2.log" "暂无已储存" 0
+
+  # K2 菜单 3「新建配置」是第二份 readStore 实现，同样不许把坏库当空库
+  printf 'p-k2\nsk-k2\n\n\n' | hapi_create_codex_profile > "${WORK_DIR}/k3.log" 2>&1
+  expect_rc "K2 坏 schema 库时新建配置中止" 1 "$?"
+  expect_eq "K2 旧配置库字节未变" "${K1_BEFORE}" "$(cat "$(codex_store_file)")"
+  expect_grep "K2 新建也给出 profiles 类型说明" "${WORK_DIR}/k3.log" "profiles 必须是数组"
+
+  # K3 语法级损坏：保存 / 列表都要 fail-closed，且不许覆盖
+  printf '%s' 'broken OLD_CODEX_PROFILE_BYTES' > "$(codex_store_file)"
+  hapi_save_codex_profile_from_files new "${WORK_DIR}/k-auth.json" "${WORK_DIR}/k-config.toml" > "${WORK_DIR}/k4.log" 2>&1
+  expect_rc "K3 坏 JSON 库时保存中止" 1 "$?"
+  expect_count "K3 旧库未被覆盖" "$(codex_store_file)" "broken OLD_CODEX_PROFILE_BYTES" 1
+  expect_grep "K3 保存报「不是合法 JSON」" "${WORK_DIR}/k4.log" "不是合法 JSON"
+  hapi_list_codex_profiles > "${WORK_DIR}/k5.log" 2>&1
+  expect_rc "K3 坏 JSON 库时列表返回失败" 1 "$?"
+  expect_grep "K3 列表提示配置库已损坏" "${WORK_DIR}/k5.log" "配置库已损坏"
+
+  # K4 正向对照：profiles 缺失按空库补 []、库不存在报「暂无」而不是「损坏」
+  #    （防止把 fail-closed 修成「一律拒绝」）
+  printf '%s' '{}' > "$(codex_store_file)"
+  hapi_save_codex_profile_from_files keep "${WORK_DIR}/k-auth.json" "${WORK_DIR}/k-config.toml" > "${WORK_DIR}/k6.log" 2>&1
+  expect_rc "K4 profiles 缺失时按空库补 []" 0 "$?"
+  expect_count "K4 新 profile 已写入" "$(codex_store_file)" '"name": "keep"' 1
+  hapi_list_codex_profiles > "${WORK_DIR}/k7.log" 2>&1
+  expect_rc "K4 正常库列表返回 0" 0 "$?"
+  expect_grep "K4 列表显示已存 profile" "${WORK_DIR}/k7.log" "keep"
+  rm -f "$(codex_store_file)"
+  hapi_list_codex_profiles > "${WORK_DIR}/k8.log" 2>&1
+  expect_rc "K4 库不存在时列表报「暂无」（rc=1）" 1 "$?"
+  expect_count "K4 库不存在时不报「损坏」" "${WORK_DIR}/k8.log" "配置库已损坏" 0
+
+  # K5 备份失败注入（cp → 42）：五个「先备份再覆盖 live」的入口都必须中止
+  CP_DEF="$(declare -f cp)"
+  cp(){ return 42; }
+  seed_codex_live
+  K5_AUTH_BEFORE="$(cat "${HOME}/.codex/auth.json")"
+  K5_CFG_BEFORE="$(cat "${HOME}/.codex/config.toml")"
+
+  hapi_write_codex_current_config "sk-new" "https://api.example.com/v1" "gpt-5.6" > "${WORK_DIR}/k9.log" 2>&1
+  expect_rc "K5 writer 备份失败时中止" 1 "$?"
+  expect_grep "K5 writer 报出备份失败" "${WORK_DIR}/k9.log" "备份失败，已中止修改"
+  expect_eq "K5 writer 未覆盖 live auth.json" "${K5_AUTH_BEFORE}" "$(cat "${HOME}/.codex/auth.json")"
+  expect_eq "K5 writer 未覆盖 live config.toml" "${K5_CFG_BEFORE}" "$(cat "${HOME}/.codex/config.toml")"
+  expect_count "K5 writer 不谎报「已备份」" "${WORK_DIR}/k9.log" "已备份原配置到" 0
+  expect_count "K5 不产生 .bak 文件" <(ls -A "${HOME}/.codex") '\.bak$' 0
+
+  printf 'y\n' | hapi_config_codex > "${WORK_DIR}/k10.log" 2>&1
+  expect_rc "K5 菜单 1 备份失败时中止" 1 "$?"
+  expect_grep "K5 菜单 1 报出备份失败" "${WORK_DIR}/k10.log" "备份失败，已中止修改"
+  expect_count "K5 菜单 1 不谎报「已备份」" "${WORK_DIR}/k10.log" "已备份原配置到" 0
+  expect_eq "K5 菜单 1 未覆盖 live auth.json" "${K5_AUTH_BEFORE}" "$(cat "${HOME}/.codex/auth.json")"
+
+  printf '1\n' | hapi_toggle_codex_recommended_values > "${WORK_DIR}/k11.log" 2>&1
+  expect_rc "K5 推荐值切换备份失败时中止" 1 "$?"
+  expect_grep "K5 推荐值报出备份失败" "${WORK_DIR}/k11.log" "备份失败，已中止修改"
+  expect_eq "K5 推荐值未改动 config.toml" "${K5_CFG_BEFORE}" "$(cat "${HOME}/.codex/config.toml")"
+
+  # profile 切换：auth 取 ok_official 夹具，确保能过 loadable 卡点、真的走到备份那一步
+  node -e 'const fs = require("fs"); const auth = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); fs.writeFileSync(process.argv[2], JSON.stringify({ profiles: [{ name: "p1", createdAt: "t", updatedAt: "t", config: { auth: auth, config: "model = \"gpt-5.5\"\n" } }] }, null, 2) + "\n");' "$(fx_path ok_official)" "$(codex_store_file)"
+  printf '1\ny\n' | hapi_switch_codex_profile > "${WORK_DIR}/k12.log" 2>&1
+  expect_rc "K5 profile 切换备份失败时中止" 1 "$?"
+  expect_count "K5 profile 切换未卡在别的卡点（假绿护栏）" "${WORK_DIR}/k12.log" "不符合 Codex 的加载要求" 0
+  expect_grep "K5 profile 切换报出备份失败" "${WORK_DIR}/k12.log" "备份失败，已中止修改"
+  expect_count "K5 profile 切换不谎报「已备份」" "${WORK_DIR}/k12.log" "已备份原配置到" 0
+  expect_eq "K5 profile 切换未覆盖 live auth.json" "${K5_AUTH_BEFORE}" "$(cat "${HOME}/.codex/auth.json")"
+
+  # 菜单 7：粘贴路径（blank）与「载入现有 auth.json」（existing）两条都要 fail-fast
+  export HAPI_EDITOR="bash ${BIN_DIR}/editor.sh"
+  export FAKE_EDITOR_SOURCE="$(fx_path ok_official)"
+  unset FAKE_EDITOR_SEQ FAKE_EDITOR_STATUS FAKE_EDITOR_TERM
+  printf '1\n\ny\nn\n' | hapi_edit_codex_official_auth > "${WORK_DIR}/k13.log" 2>&1
+  expect_rc "K5 菜单 7 备份失败时中止" 1 "$?"
+  expect_grep "K5 菜单 7 报出备份失败" "${WORK_DIR}/k13.log" "备份失败，已中止修改"
+  expect_count "K5 菜单 7 不谎报「已备份」" "${WORK_DIR}/k13.log" "已备份原配置到" 0
+  expect_eq "K5 菜单 7 未覆盖 live auth.json" "${K5_AUTH_BEFORE}" "$(cat "${HOME}/.codex/auth.json")"
+  : > "${EDITOR_TARGET_LOG}"
+  printf '2\n' | hapi_edit_codex_official_auth > "${WORK_DIR}/k14.log" 2>&1
+  expect_rc "K5 菜单 7「载入现有 auth」失败时中止" 1 "$?"
+  expect_grep "K5 载入失败给出中止说明" "${WORK_DIR}/k14.log" "载入现有 auth.json 失败"
+  expect_count "K5 载入失败后不进编辑器（不会在空白内容上编辑）" "${EDITOR_TARGET_LOG}" "hapi_codex_auth" 0
+  expect_count "K5 载入失败后清理敏感临时文件" <(ls "${TMPDIR}") "hapi_codex_auth" 0
+  unset HAPI_EDITOR FAKE_EDITOR_SOURCE
+  eval "${CP_DEF}"
+
+  # K6 正向对照：cp 正常时 writer 必须成功并留下备份（证明 K5 不是「一律中止」）
+  seed_codex_live
+  hapi_write_codex_current_config "sk-new" "https://api.example.com/v1" "gpt-5.6" > "${WORK_DIR}/k15.log" 2>&1
+  expect_rc "K6 正常路径 writer 成功" 0 "$?"
+  expect_count "K6 正常路径产生 auth.json.bak" <(ls -A "${HOME}/.codex") '^auth\.json\.bak$' 1
+  expect_count "K6 正常路径产生 config.toml.bak" <(ls -A "${HOME}/.codex") '^config\.toml\.bak$' 1
+  expect_count "K6 正常路径打印两条「已备份」" "${WORK_DIR}/k15.log" "已备份原配置到" 2
+  expect_count "K6 备份里是原始 auth（不是刚写入的新值）" "${HOME}/.codex/auth.json.bak" "sk-live-before" 1
 fi
 
 done_

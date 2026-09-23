@@ -157,8 +157,37 @@ hapi_generate_secure_password() {
     printf '%s' "${generated}"
 }
 
-hapi_json_escape() {
-    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+# 去掉首尾空白（空格 / TAB / 换行）。用户输入先规范化再做空值判断，
+# 避免「只敲了空格」被当成有效值写进配置。
+hapi_trim() {
+    local value="$1"
+
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "${value}"
+}
+
+# 备份是「destructive write 的恢复保障」，因此 cp 失败必须让调用方立刻中止。
+#
+# ⚠️ 旧写法是裸 `cp -a …`，不看返回值：cp 失败时用户会看到「已备份」、其实一份备份都没有，
+#    而 live 已经被后面的 node 写入覆盖，外层还返回 0（2026-09-23 用 `cp(){ return 42; }`
+#    在真实 hapi_write_codex_current_config 上实测：两份备份都不存在、auth/config 都已改、
+#    终端打印两条「已备份」、rc=0）。
+#
+# 约定：**所有**「先备份再覆盖 live」的路径都写成
+#     hapi_backup_or_fail "${source}" "${target}" || return 1
+# 不要再逐点复制 `if ! cp -a …; then … fi`（改一处要同步十处的教训见 AGENTS.md）。
+hapi_backup_or_fail() {
+    local source="$1"
+    local target="$2"
+
+    if ! cp -a "${source}" "${target}"; then
+        echo -e "${red}备份失败，已中止修改: ${target}${background}"
+        return 1
+    fi
+    # 备份文件里可能有凭据（auth.json / settings.json / config.toml），与源文件同级收紧权限。
+    chmod 600 "${target}" 2>/dev/null
+    return 0
 }
 
 hapi_report_install_failure() {
@@ -239,6 +268,13 @@ hapi_install_opencode() {
     fi
 }
 
+# 预览 Claude Code settings.json。
+#
+# ⚠️ 这里是「先预览、后清理」的路径（hapi_config_claude 先调本函数才去读旧认证键），
+#    所以脱敏必须彻底，不能只认三个固定键：旧实现用 sed 正则，token 里带 JSON escaped
+#    quote 时后半段明文泄漏，OPENROUTER_API_KEY / OPENAI_API_KEY / 任意 *_SECRET / *_TOKEN
+#    也全部明文打印。现在改为 Node 递归脱敏（与 hapi_show_codex_config 同一套键名规则）。
+#    JSON 解析失败**不回退打原文**：宁可只报错，也不把未脱敏的凭据打进终端 / 会话日志。
 hapi_show_claude_config() {
     local settings_file="${1:-${HOME}/.claude/settings.json}"
 
@@ -248,7 +284,54 @@ hapi_show_claude_config() {
         return 1
     fi
 
-    sed -E 's#("(ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)"[[:space:]]*:[[:space:]]*")[^"]*#\1******#g' "${settings_file}"
+    hapi_ensure_node_json || return
+    CLAUDE_SETTINGS_FILE="${settings_file}" node <<'NODE'
+const fs = require("fs");
+const settingsFile = process.env.CLAUDE_SETTINGS_FILE;
+
+// 与 hapi_show_codex_config 的脱敏规则保持一致（改这里就要同步那边）。
+function isSensitiveKey(key) {
+  const normalized = String(key).toLowerCase();
+  return normalized.includes("api_key")
+    || normalized.includes("apikey")
+    || normalized.includes("token")
+    || normalized.includes("secret")
+    || normalized.includes("password")
+    || normalized.includes("experimental_bearer_token");
+}
+
+function sanitizeJson(value, key = "") {
+  if (isSensitiveKey(key) && value !== undefined && value !== null) return "******";
+  if (Array.isArray(value)) return value.map((item) => sanitizeJson(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
+  }
+  return value;
+}
+
+let raw;
+try {
+  raw = fs.readFileSync(settingsFile, "utf8");
+} catch (error) {
+  console.error(`读取失败: ${error.message}`);
+  process.exit(1);
+}
+
+if (!raw.trim()) {
+  console.log("(空文件)");
+  process.exit(0);
+}
+
+let config;
+try {
+  config = JSON.parse(raw);
+} catch (error) {
+  console.error(`settings.json 不是合法 JSON，为避免泄露敏感字段，不显示原始内容: ${error.message}`);
+  process.exit(1);
+}
+
+console.log(JSON.stringify(sanitizeJson(config), null, 2));
+NODE
 }
 
 hapi_claude_current_value() {
@@ -274,6 +357,12 @@ try {
 NODE
 }
 
+# 写入 Claude Code settings.json。
+#
+# 写盘只负责「认证 + 四档模型 + 兜底模型 + effort/署名」这几项：读取现有 JSON →
+# 保留所有未知顶层键（permissions / hooks / statusLine / enabledPlugins ...）→
+# 合并 env → 删除已废弃或冲突的字段 → JSON.stringify 写回。
+# 因此 JSON 生成交给 node：TAB、换行等控制字符不会再破坏文件。
 hapi_write_claude_settings_file() {
     local output_file="$1"
     local default_auth_token="$2"
@@ -282,10 +371,11 @@ hapi_write_claude_settings_file() {
     local default_sonnet_model="${5:-claude-sonnet-4-5-20250929[1M]}"
     local default_opus_model="${6:-claude-opus-4-8[1M]}"
     local default_fable_model="${7:-claude-fable-5[1M]}"
-    local default_max_effort="$8"
-    local auth_token base_url haiku_model sonnet_model opus_model fable_model enable_max_effort
-    local reasoning_suffix effort_line
-    local auth_token_json base_url_json haiku_json sonnet_json sonnet_name_json opus_json opus_name_json fable_json fable_name_json
+    local current_max_effort="$8"
+    local auth_token base_url haiku_model sonnet_model opus_model fable_model enable_max_effort hide_attribution
+    local values_file write_status
+
+    hapi_ensure_node_json || return 1
 
     while [ -z "${auth_token}" ]; do
         if [ -n "${default_auth_token}" ]; then
@@ -295,8 +385,9 @@ hapi_write_claude_settings_file() {
         fi
         read -rs auth_token
         echo
+        auth_token=$(hapi_trim "${auth_token}")
         if [ -z "${auth_token}" ] && [ -n "${default_auth_token}" ]; then
-            auth_token="${default_auth_token}"
+            auth_token=$(hapi_trim "${default_auth_token}")
         fi
         if [ -z "${auth_token}" ]; then
             echo -e "${red}ANTHROPIC_AUTH_TOKEN 不能为空。${background}"
@@ -305,83 +396,183 @@ hapi_write_claude_settings_file() {
 
     echo -en "${cyan}请输入 ANTHROPIC_BASE_URL (默认 ${default_base_url}): ${background}"
     read -r base_url
+    base_url=$(hapi_trim "${base_url}")
     base_url=${base_url:-${default_base_url}}
 
     echo -e "${yellow}如需开启 [1m] 或 [1M] 上下文，请自行在模型名后添加。${background}"
     echo -e "${yellow}示例: claude-opus-4-8[1M] 或 claude-opus-4-8[1m]${background}"
-    echo -e "${yellow}对应的 *_MODEL_NAME 字段会自动生成（去掉 [1M]/[1m] 后缀）。${background}"
+    echo -e "${yellow}对应的 *_MODEL_NAME 字段会自动生成（去掉尾部 [1M]/[1m] 后缀）。${background}"
 
     echo -en "${cyan}请输入 HAIKU_MODEL (默认 ${default_haiku_model}): ${background}"
     read -r haiku_model
+    haiku_model=$(hapi_trim "${haiku_model}")
     haiku_model=${haiku_model:-${default_haiku_model}}
 
     echo -en "${cyan}请输入 SONNET_MODEL (默认 ${default_sonnet_model}): ${background}"
     read -r sonnet_model
+    sonnet_model=$(hapi_trim "${sonnet_model}")
     sonnet_model=${sonnet_model:-${default_sonnet_model}}
 
     echo -en "${cyan}请输入 OPUS_MODEL (默认 ${default_opus_model}): ${background}"
     read -r opus_model
+    opus_model=$(hapi_trim "${opus_model}")
     opus_model=${opus_model:-${default_opus_model}}
 
     echo -en "${cyan}请输入 FABLE_MODEL (默认 ${default_fable_model}): ${background}"
     read -r fable_model
+    fable_model=$(hapi_trim "${fable_model}")
     fable_model=${fable_model:-${default_fable_model}}
 
-    if [[ "${default_max_effort}" == "max" || "${default_max_effort}" == "y" || "${default_max_effort}" == "Y" ]]; then
-        echo -en "${cyan}是否开启最大强度思考？[Y/n]: ${background}"
-    else
-        echo -en "${cyan}是否开启最大强度思考？[y/N]: ${background}"
+    if [ "${current_max_effort}" = "max" ]; then
+        echo -e "${yellow}当前配置已开启最大强度思考，直接回车会关闭它。${background}"
     fi
+    echo -en "${cyan}是否开启最大强度思考？[y/N]: ${background}"
     read -r enable_max_effort
-    if [ -z "${enable_max_effort}" ]; then
-        enable_max_effort="${default_max_effort}"
+    enable_max_effort=$(hapi_trim "${enable_max_effort}")
+    case "${enable_max_effort}" in
+    y | Y) enable_max_effort="max" ;;
+    *) enable_max_effort="" ;;
+    esac
+
+    if [ -f "${output_file}" ] && grep -q '"attribution"' "${output_file}" 2>/dev/null; then
+        echo -e "${yellow}当前配置已有 attribution 字段，直接回车会把它移除。${background}"
     fi
-    reasoning_suffix=""
-    effort_line=""
-    if [[ "${enable_max_effort}" == "max" || "${enable_max_effort}" == "y" || "${enable_max_effort}" == "Y" ]]; then
-        reasoning_suffix=","
-        effort_line='    "CLAUDE_CODE_EFFORT_LEVEL": "max"'
-    fi
+    echo -e "${yellow}「隐藏 AI 署名」会写入 attribution: {commit, pr, sessionUrl}，清掉提交/PR 署名与 claude.ai 会话链接。${background}"
+    echo -en "${cyan}是否隐藏 AI 署名？[y/N]: ${background}"
+    read -r hide_attribution
+    hide_attribution=$(hapi_trim "${hide_attribution}")
+    case "${hide_attribution}" in
+    y | Y) hide_attribution="1" ;;
+    *) hide_attribution="" ;;
+    esac
 
-    auth_token_json=$(hapi_json_escape "${auth_token}")
-    base_url_json=$(hapi_json_escape "${base_url}")
-    haiku_json=$(hapi_json_escape "${haiku_model}")
-    sonnet_json=$(hapi_json_escape "${sonnet_model}")
-    sonnet_name_json=$(hapi_json_escape "${sonnet_model%%\[*}")
-    opus_json=$(hapi_json_escape "${opus_model}")
-    opus_name_json=$(hapi_json_escape "${opus_model%%\[*}")
-    fable_json=$(hapi_json_escape "${fable_model}")
-    fable_name_json=$(hapi_json_escape "${fable_model%%\[*}")
+    # 交互值经 NUL 分隔的临时文件传给 node：bash 变量不可能包含 NUL，因此 TAB /
+    # 换行等任意内容都能无损传递；不走环境变量或 argv，避免凭据出现在
+    # /proc/<pid>/environ 或 ps 中。该文件含 token，按敏感临时文件挂退出清理。
+    values_file=$(mktemp "${TMPDIR:-/tmp}/hapi_claude_values.XXXXXX") || {
+        echo -e "${red}临时文件创建失败，请确认系统有可用的 mktemp。${background}"
+        return 1
+    }
+    chmod 600 "${values_file}" 2>/dev/null
+    HAPI_CLAUDE_VALUES_TMP="${values_file}"
+    hapi_install_sensitive_tmp_traps
 
-    # 该文件含 ANTHROPIC_AUTH_TOKEN：先以 0600 建好（umask 077）再覆盖写入，
-    # 避免出现「先 0644 再 chmod」的可读窗口。
-    (umask 077; : > "${output_file}") || return 1
-    chmod 600 "${output_file}" 2>/dev/null
+    printf '%s\0' \
+        "${auth_token}" \
+        "${base_url}" \
+        "${haiku_model}" \
+        "${sonnet_model}" \
+        "${opus_model}" \
+        "${fable_model}" \
+        "${enable_max_effort}" \
+        "${hide_attribution}" > "${values_file}"
 
-    cat > "${output_file}" << EOF
-{
-  "env": {
-    "ANTHROPIC_AUTH_TOKEN": "${auth_token_json}",
-    "ANTHROPIC_BASE_URL": "${base_url_json}",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL": "${fable_json}",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "${fable_name_json}",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${haiku_json}",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "${opus_json}",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "${opus_name_json}",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "${sonnet_json}",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "${sonnet_name_json}",
-    "ANTHROPIC_MODEL": "${sonnet_name_json}",
-    "ANTHROPIC_REASONING_MODEL": "${opus_json}"${reasoning_suffix}
-${effort_line}
-  },
-  "includeCoAuthoredBy": false
+    CLAUDE_SETTINGS_FILE="${output_file}" CLAUDE_VALUES_FILE="${values_file}" node <<'NODE'
+const fs = require("fs");
+
+const settingsFile = process.env.CLAUDE_SETTINGS_FILE;
+const valuesFile = process.env.CLAUDE_VALUES_FILE;
+
+function readValues(file) {
+  const parts = fs.readFileSync(file, "utf8").split("\0");
+  if (parts.length > 0 && parts[parts.length - 1] === "") parts.pop();
+  return parts;
 }
-EOF
+
+// 只剥掉尾部的 1M 标记：模型名中间出现 '[' 时不能误截断（旧实现按第一个 '[' 截断）。
+function stripOneMSuffix(model) {
+  return String(model).trim().replace(/\[1m\]\s*$/i, "").trim();
+}
+
+const [authToken, baseUrl, haiku, sonnet, opus, fable, maxEffort, hideAttribution] = readValues(valuesFile);
+const effortOn = String(maxEffort).trim() === "max";
+const hideAttributionOn = String(hideAttribution).trim() === "1";
+
+const env = {
+  ANTHROPIC_AUTH_TOKEN: authToken,
+  ANTHROPIC_BASE_URL: baseUrl,
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: haiku,
+  ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME: stripOneMSuffix(haiku),
+  ANTHROPIC_DEFAULT_SONNET_MODEL: sonnet,
+  ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: stripOneMSuffix(sonnet),
+  ANTHROPIC_DEFAULT_OPUS_MODEL: opus,
+  ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: stripOneMSuffix(opus),
+  ANTHROPIC_DEFAULT_FABLE_MODEL: fable,
+  ANTHROPIC_DEFAULT_FABLE_MODEL_NAME: stripOneMSuffix(fable),
+  // 兜底模型：承接未落到具体角色档的请求（含 Haiku 后台子任务），与 Sonnet 档保持
+  // 同一字符串，包括 [1M] 声明——这里不再把后缀剥掉。
+  ANTHROPIC_MODEL: sonnet,
+};
+if (effortOn) env.CLAUDE_CODE_EFFORT_LEVEL = "max";
+
+let config = {};
+if (fs.existsSync(settingsFile)) {
+  const raw = fs.readFileSync(settingsFile, "utf8");
+  if (raw.trim()) {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      console.error("现有 settings.json 不是合法 JSON，已中止写入以免覆盖: " + error.message);
+      process.exit(1);
+    }
+    // 根必须是 plain object：非空的 [] / null / "foo" / 123 一律 fail-closed。
+    // 旧写法对非对象保持 config={} 然后照写，等于 rc=0 静默把用户原文件重建成一个空对象（P2）。
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      config = parsed;
+    } else {
+      console.error(`现有 settings.json 根必须是 JSON 对象（当前为 ${Array.isArray(parsed) ? "数组" : JSON.stringify(parsed)}），已中止写入以免覆盖: 请人工修复或删除该文件`);
+      process.exit(1);
+    }
+  }
+}
+
+const oldEnv = config.env && typeof config.env === "object" && !Array.isArray(config.env) ? config.env : {};
+const mergedEnv = Object.assign({}, oldEnv, env);
+
+// 已废弃字段与非目标认证键：留着会让 Claude Code 报 "Both ANTHROPIC_AUTH_TOKEN and
+// ANTHROPIC_API_KEY set"，或让模型菜单 / 路由读到上一家供应商的残留值。
+for (const key of [
+  "ANTHROPIC_REASONING_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+  "ANTHROPIC_API_KEY",
+  "OPENROUTER_API_KEY",
+  "OPENAI_API_KEY",
+]) {
+  delete mergedEnv[key];
+}
+if (!effortOn) delete mergedEnv.CLAUDE_CODE_EFFORT_LEVEL;
+
+config.env = mergedEnv;
+// 顶层不写 includeCoAuthoredBy（旧写法）等任何固定字段：用户已有值原样保留，
+// 要隐藏署名走下面的 attribution 开关。也不写 hasCompletedOnboarding——
+// 它按 cc-switch 语义属于 ~/.claude.json，写在这里没有效果（见 AGENTS.md）。
+if (hideAttributionOn) {
+  config.attribution = { commit: "", pr: "", sessionUrl: false };
+} else {
+  delete config.attribution;
+}
+
+try {
+  fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+  try { fs.chmodSync(settingsFile, 0o600); } catch {}
+} catch (error) {
+  console.error("写入 Claude Code 配置失败: " + error.message);
+  process.exit(1);
+}
+NODE
+    write_status=$?
+    rm -f "${values_file}"
+    HAPI_CLAUDE_VALUES_TMP=""
+
+    if [ "${write_status}" -ne 0 ]; then
+        return "${write_status}"
+    fi
 }
 
 hapi_prompt_add_extra_env() {
     local settings_file="${1:-${HOME}/.claude/settings.json}"
-    local confirm backup_file
+    local confirm
 
     echo -e "${white}=====${green}Claude Code 额外参数${white}=====${background}"
     echo -e "${yellow}以下参数可优化 Claude Code 的性能和行为：${background}"
@@ -412,11 +603,10 @@ hapi_prompt_add_extra_env() {
     fi
 
     hapi_ensure_node_json || return
-    backup_file="${settings_file}.bak"
-    cp -a "${settings_file}" "${backup_file}"
-    chmod 600 "${backup_file}" 2>/dev/null
-    echo -e "${green}已备份原配置到: ${backup_file}${background}"
 
+    # 这里只做合并，不再备份：备份统一由最外层调用者在同一次用户操作开始时完成一次
+    # （hapi_config_claude / hapi_switch_claude_profile）。在这里再备份会把那份原始
+    # 备份覆盖成刚写好的新配置，等于同时丢掉 live 与唯一的 .bak。
     CLAUDE_SETTINGS_FILE="${settings_file}" node <<'NODE'
 const fs = require("fs");
 const settingsFile = process.env.CLAUDE_SETTINGS_FILE;
@@ -425,7 +615,15 @@ try {
   const raw = fs.readFileSync(settingsFile, "utf8");
   const config = raw.trim() ? JSON.parse(raw) : {};
 
-  if (!config.env || typeof config.env !== "object") {
+  // 根必须是 plain object：给数组设 config.env 运行时成立，但 JSON.stringify(array) 不序列化
+  // 命名属性 → 表现为「rc=0、提示已添加、文件却一个字节没变」（P2）。
+  if (config === null || typeof config !== "object" || Array.isArray(config)) {
+    console.error(`settings.json 根必须是 JSON 对象（当前为 ${Array.isArray(config) ? "数组" : JSON.stringify(config)}），已中止: 请人工修复或删除该文件`);
+    process.exit(1);
+  }
+
+  // 数组也是 typeof "object"：不排掉的话 {"env": []} 会"成功但什么都不写"（rc=0 却零改动）
+  if (!config.env || typeof config.env !== "object" || Array.isArray(config.env)) {
     config.env = {};
   }
 
@@ -457,6 +655,56 @@ NODE
     fi
 }
 
+# ~/.claude.json 根对象增量置 hasCompletedOnboarding=true（跳过 Claude Code 初次安装确认）。
+#
+# 依据 cc-switch：`src-tauri/src/claude_mcp.rs:148-173` set_has_completed_onboarding
+# （「仅增量写入该字段，其他字段保持不变」）+ `commands/plugin.rs:38-42` + 设置里的
+# skipClaudeOnboarding 开关（`src/types.ts:368`）。语义逐条对齐：
+#   · 文件不存在 → 以 {} 起手（cc-switch read_json_value 同样如此）；
+#   · 根不是对象 → 报错不写；
+#   · 已经是 true → 直接不碰文件（幂等，与它的 already 早退一致）；
+#   · 只写这一个键，绝不重建文件——~/.claude.json 里还有 Claude Code 的项目历史 / mcpServers 等用户状态。
+# 坏 JSON 一律 fail-closed（只报警告）。本仓库约定凭据一律 0600：mcpServers[].env 里可能带密钥。
+hapi_ensure_claude_onboarding() {
+    local config_file="${HOME}/.claude.json"
+
+    hapi_ensure_node_json || return
+    CLAUDE_JSON_FILE="${config_file}" node <<'NODE'
+const fs = require("fs");
+const configFile = process.env.CLAUDE_JSON_FILE;
+
+let root = {};
+if (fs.existsSync(configFile)) {
+  const raw = fs.readFileSync(configFile, "utf8");
+  if (raw.trim()) {
+    try {
+      root = JSON.parse(raw);
+    } catch (error) {
+      console.error(`~/.claude.json 不是合法 JSON，已跳过（未改动原文件）: ${error.message}`);
+      process.exit(1);
+    }
+  }
+}
+
+if (!root || typeof root !== "object" || Array.isArray(root)) {
+  console.error("~/.claude.json 根不是 JSON 对象，已跳过（未改动原文件）");
+  process.exit(1);
+}
+
+if (root.hasCompletedOnboarding === true) process.exit(0);
+
+root.hasCompletedOnboarding = true;
+try {
+  fs.writeFileSync(configFile, JSON.stringify(root, null, 2) + "\n", { mode: 0o600 });
+  try { fs.chmodSync(configFile, 0o600); } catch {}
+} catch (error) {
+  console.error("写入 ~/.claude.json 失败: " + error.message);
+  process.exit(1);
+}
+console.log("已置 hasCompletedOnboarding=true: " + configFile);
+NODE
+}
+
 hapi_config_claude() {
     local config_dir="${HOME}/.claude"
     local settings_file="${config_dir}/settings.json"
@@ -466,15 +714,18 @@ hapi_config_claude() {
     hapi_show_claude_config "${settings_file}" || true
 
     if [ -f "${settings_file}" ]; then
-        echo -en "${yellow}检测到已存在 Claude Code 配置，继续修改将覆盖原有配置！是否继续？[y/N]: ${background}"
+        echo -en "${yellow}检测到已存在 Claude Code 配置：继续只会更新认证与模型相关字段，其它配置保留。是否继续？[y/N]: ${background}"
         read -r overwrite
         if [[ "${overwrite}" != "y" && "${overwrite}" != "Y" ]]; then
             echo -e "${yellow}已取消配置。${background}"
             return
         fi
+        # 备份固定一份、**每次覆盖**（`settings.json.bak`）；不要用时间戳 / 随机后缀：
+        # 那种写法每写一次就多一个文件，无限堆积、最后要用户手工清理
+        # （2026-09-23 用户明确要求撤销唯一名）。语义 = 「最近一次写入前」的状态，与 Codex / ~/.hapi 一致。
         backup_file="${settings_file}.bak"
-        cp -a "${settings_file}" "${backup_file}"
-        chmod 600 "${backup_file}" 2>/dev/null
+        # ⚠️ 备份失败必须中止：否则用户收到「已备份」、其实没有备份，live 却已被覆盖（P1）。
+        hapi_backup_or_fail "${settings_file}" "${backup_file}" || return 1
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
 
@@ -520,7 +771,13 @@ hapi_config_claude() {
     chmod 600 "${settings_file}"
     echo -e "${green}Claude Code 配置已写入: ${settings_file}${background}"
 
-    hapi_prompt_add_extra_env "${settings_file}"
+    # 必须 || return：否则 onboarding 那行的 echo 会把它擦成成功码，
+    # extra-env 明明失败、外层函数却报成功（P2 控制流回归，2026-09-23 审查环境实跑证实）。
+    hapi_prompt_add_extra_env "${settings_file}" || return
+
+    # 跳过 Claude Code 初次安装确认（写 ~/.claude.json；失败不影响上面已写好的 Claude Code 配置）
+    hapi_ensure_claude_onboarding ||
+        echo -e "${yellow}未能写入「跳过初次安装确认」，不影响上面的 Claude Code 配置。${background}"
 }
 
 hapi_ensure_node_json() {
@@ -534,21 +791,95 @@ hapi_claude_profile_store_file() {
     printf '%s' "${HOME}/.claude/hapi_config_profiles.json"
 }
 
+# 把 source_file 里的配置存进配置库（同名则更新）。
+#
+# ⚠️ 配置库损坏时必须 fail-closed：旧实现用 `try { … } catch {}` 把坏库当空库读，
+#    紧接着 writeFileSync 会用「只有新 profile」的 {profiles:[new]} 覆盖整个旧库——
+#    等于截断/手改/异常写盘之后，下一次「储存当前配置」静默吃掉全部历史配置（P1 数据丢失）。
 hapi_save_claude_profile_from_file() {
     local profile_name="$1"
     local source_file="$2"
-    local store_file
+    local store_file save_status
     store_file=$(hapi_claude_profile_store_file)
 
     hapi_ensure_node_json || return
     mkdir -p "$(dirname "${store_file}")"
-    node -e 'const fs = require("fs"); const path = require("path"); const storeFile = process.argv[1]; const name = process.argv[2]; const sourceFile = process.argv[3]; const config = JSON.parse(fs.readFileSync(sourceFile, "utf8")); let store = { profiles: [] }; if (fs.existsSync(storeFile)) { try { store = JSON.parse(fs.readFileSync(storeFile, "utf8")); } catch {} } if (!Array.isArray(store.profiles)) store.profiles = []; const now = new Date().toISOString(); const idx = store.profiles.findIndex((item) => item && item.name === name); if (idx >= 0) { store.profiles[idx] = { ...store.profiles[idx], name, updatedAt: now, config }; } else { store.profiles.push({ name, createdAt: now, updatedAt: now, config }); } fs.mkdirSync(path.dirname(storeFile), { recursive: true }); fs.writeFileSync(storeFile, JSON.stringify(store, null, 2) + "\n", { mode: 0o600 }); try { fs.chmodSync(storeFile, 0o600); } catch {}' "${store_file}" "${profile_name}" "${source_file}" || return
+    CLAUDE_PROFILE_STORE="${store_file}" CLAUDE_PROFILE_NAME="${profile_name}" CLAUDE_PROFILE_SOURCE="${source_file}" node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const storeFile = process.env.CLAUDE_PROFILE_STORE;
+const name = process.env.CLAUDE_PROFILE_NAME;
+const sourceFile = process.env.CLAUDE_PROFILE_SOURCE;
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+let config;
+try {
+  config = JSON.parse(fs.readFileSync(sourceFile, "utf8"));
+} catch (error) {
+  console.error(`待保存的配置不是合法 JSON，已中止保存: ${error.message}`);
+  process.exit(1);
+}
+// 这份 config 之后会被原样写进 live settings.json，所以必须是 plain object：
+// [] / null / "foo" / 123 存进去后切换出来的 live 就是无效配置（P2）
+if (!isPlainObject(config)) {
+  console.error(`待保存的配置根必须是 JSON 对象（当前为 ${Array.isArray(config) ? "数组" : JSON.stringify(config)}），已中止保存`);
+  process.exit(1);
+}
+
+let store = { profiles: [] };
+if (fs.existsSync(storeFile)) {
+  const raw = fs.readFileSync(storeFile, "utf8");
+  if (raw.trim()) {
+    try {
+      store = JSON.parse(raw);
+    } catch (error) {
+      console.error(`Claude 配置库不是合法 JSON，已中止保存以免覆盖旧配置库: ${error.message}`);
+      process.exit(1);
+    }
+  }
+}
+if (!isPlainObject(store)) {
+  console.error("Claude 配置库顶层必须是 JSON 对象，已中止保存以免覆盖旧配置库");
+  process.exit(1);
+}
+// ⚠️ profiles 类型错误同样算「库损坏」：旧写法无条件 `if (!Array.isArray(store.profiles)) store.profiles = [];`
+//    会把 {"profiles":{...}} 静默重置成空库、紧接着写入新 profile —— 又是一次静默丢历史配置（P1）。
+if (store.profiles === undefined) {
+  store.profiles = [];
+} else if (!Array.isArray(store.profiles)) {
+  console.error("Claude 配置库 profiles 必须是数组，已中止保存以免覆盖旧配置库");
+  process.exit(1);
+}
+
+const now = new Date().toISOString();
+const index = store.profiles.findIndex((item) => item && item.name === name);
+if (index >= 0) {
+  store.profiles[index] = { ...store.profiles[index], name, updatedAt: now, config };
+} else {
+  store.profiles.push({ name, createdAt: now, updatedAt: now, config });
+}
+
+fs.mkdirSync(path.dirname(storeFile), { recursive: true });
+fs.writeFileSync(storeFile, JSON.stringify(store, null, 2) + "\n", { mode: 0o600 });
+try { fs.chmodSync(storeFile, 0o600); } catch {}
+NODE
+    save_status=$?
+    if [ "${save_status}" -ne 0 ]; then
+        return "${save_status}"
+    fi
     chmod 600 "${store_file}" 2>/dev/null
     echo -e "${green}配置已保存到配置库: ${profile_name}${background}"
 }
 
+# 列出配置库里的 profile。
+# 损坏态必须与「空库」区分开：旧实现同样 `catch {}`，坏库会被显示成「暂无已储存的配置」，
+# 用户以为丢的是「没配过」而不是「配置库坏了」。（写入侧已 fail-closed，这里只负责如实报告。）
 hapi_list_claude_profiles() {
-    local store_file
+    local store_file list_status
     store_file=$(hapi_claude_profile_store_file)
 
     hapi_ensure_node_json || return
@@ -556,19 +887,112 @@ hapi_list_claude_profiles() {
         echo -e "${yellow}暂无已储存的 Claude Code 配置。${background}"
         return 1
     fi
-    node -e 'const fs = require("fs"); const storeFile = process.argv[1]; let store = { profiles: [] }; try { store = JSON.parse(fs.readFileSync(storeFile, "utf8")); } catch {} const profiles = Array.isArray(store.profiles) ? store.profiles : []; if (profiles.length === 0) process.exit(1); profiles.forEach((item, index) => { console.log(`${index + 1}. ${item.name}    更新: ${item.updatedAt || "-"}`); });' "${store_file}" || {
-        echo -e "${yellow}暂无已储存的 Claude Code 配置。${background}"
-        return 1
-    }
+    CLAUDE_PROFILE_STORE="${store_file}" node <<'NODE'
+const fs = require("fs");
+
+const storeFile = process.env.CLAUDE_PROFILE_STORE;
+const raw = fs.readFileSync(storeFile, "utf8");
+
+let store = { profiles: [] };
+if (raw.trim()) {
+  try {
+    store = JSON.parse(raw);
+  } catch (error) {
+    console.error(`Claude 配置库不是合法 JSON（文件已损坏）: ${error.message}`);
+    process.exit(2);
+  }
+}
+if (store === null || typeof store !== "object" || Array.isArray(store)) {
+  console.error("Claude 配置库顶层不是 JSON 对象（文件已损坏）");
+  process.exit(2);
+}
+// profiles 类型错误同样算损坏：当空库处理会让用户以为是「没配过」而不是「库坏了」
+if (store.profiles !== undefined && !Array.isArray(store.profiles)) {
+  console.error("Claude 配置库 profiles 不是数组（文件已损坏）");
+  process.exit(2);
 }
 
+const profiles = Array.isArray(store.profiles) ? store.profiles : [];
+if (profiles.length === 0) process.exit(1);
+profiles.forEach((item, index) => {
+  console.log(`${index + 1}. ${item.name}    更新: ${item.updatedAt || "-"}`);
+});
+NODE
+    list_status=$?
+    if [ "${list_status}" -eq 2 ]; then
+        echo -e "${red}Claude 配置库已损坏: ${store_file}${background}"
+        echo -e "${yellow}请先修复或删除该文件；为避免覆盖旧配置，储存 / 切换 / 删除都会中止。${background}"
+        return 1
+    fi
+    if [ "${list_status}" -ne 0 ]; then
+        echo -e "${yellow}暂无已储存的 Claude Code 配置。${background}"
+        return 1
+    fi
+}
+
+# 预览配置库里的第 N 个 profile。
+#
+# ⚠️ 必须与 hapi_show_claude_config 用同一套递归脱敏：旧实现只手工打码三个固定键，
+#    OPENROUTER_API_KEY / OPENAI_API_KEY / 任意 *_SECRET / *_PASSWORD / 嵌套与数组内的敏感键
+#    全部明文；而菜单 4（切换）与菜单 5（删除）在「确认」之前就会调用它，是真实可达的泄漏路径。
 hapi_show_claude_profile_by_index() {
     local profile_index="$1"
     local store_file
     store_file=$(hapi_claude_profile_store_file)
 
     hapi_ensure_node_json || return
-    node -e 'const fs = require("fs"); const storeFile = process.argv[1]; const index = Number(process.argv[2]) - 1; const store = JSON.parse(fs.readFileSync(storeFile, "utf8")); const profiles = Array.isArray(store.profiles) ? store.profiles : []; const profile = profiles[index]; if (!profile || !profile.config) { console.error("配置序号不存在"); process.exit(1); } const config = JSON.parse(JSON.stringify(profile.config)); if (config.env) { for (const key of ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]) { if (config.env[key]) config.env[key] = "******"; } } console.log(`名称: ${profile.name}`); console.log(JSON.stringify(config, null, 2));' "${store_file}" "${profile_index}"
+    CLAUDE_PROFILE_STORE="${store_file}" CLAUDE_PROFILE_INDEX="${profile_index}" node <<'NODE'
+const fs = require("fs");
+
+const storeFile = process.env.CLAUDE_PROFILE_STORE;
+const index = Number(process.env.CLAUDE_PROFILE_INDEX) - 1;
+
+// 与 hapi_show_claude_config / hapi_show_codex_config 的脱敏规则保持一致（改一处要同步全部）
+function isSensitiveKey(key) {
+  const normalized = String(key).toLowerCase();
+  return normalized.includes("api_key")
+    || normalized.includes("apikey")
+    || normalized.includes("token")
+    || normalized.includes("secret")
+    || normalized.includes("password")
+    || normalized.includes("experimental_bearer_token");
+}
+
+function sanitizeJson(value, key = "") {
+  if (isSensitiveKey(key) && value !== undefined && value !== null) return "******";
+  if (Array.isArray(value)) return value.map((item) => sanitizeJson(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
+  }
+  return value;
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+let store;
+try {
+  store = JSON.parse(fs.readFileSync(storeFile, "utf8"));
+} catch (error) {
+  console.error(`Claude 配置库不是合法 JSON，无法预览: ${error.message}`);
+  process.exit(1);
+}
+
+const profiles = store && Array.isArray(store.profiles) ? store.profiles : [];
+const profile = profiles[index];
+if (!profile || !profile.config) {
+  console.error("配置序号不存在");
+  process.exit(1);
+}
+
+console.log(`名称: ${profile.name}`);
+// 预览只是展示，但要让用户知道这份 config 切不出去（切换侧会拒绝非对象的根）
+if (!isPlainObject(profile.config)) {
+  console.error(`注意：该配置的 config 根不是 JSON 对象（当前为 ${Array.isArray(profile.config) ? "数组" : JSON.stringify(profile.config)}），切换会被拒绝，请删除或重建。`);
+}
+console.log(JSON.stringify(sanitizeJson(profile.config), null, 2));
+NODE
 }
 
 hapi_store_current_claude_config() {
@@ -643,13 +1067,58 @@ hapi_switch_claude_profile() {
 
     mkdir -p "${config_dir}"
     if [ -f "${settings_file}" ]; then
+        # 备份固定一份、**每次覆盖**（`settings.json.bak`）；不要用时间戳 / 随机后缀：
+        # 那种写法每写一次就多一个文件，无限堆积、最后要用户手工清理
+        # （2026-09-23 用户明确要求撤销唯一名）。语义 = 「最近一次写入前」的状态，与 Codex / ~/.hapi 一致。
         backup_file="${settings_file}.bak"
-        cp -a "${settings_file}" "${backup_file}"
-        chmod 600 "${backup_file}" 2>/dev/null
+        # ⚠️ 备份失败必须中止：否则用户收到「已备份」、其实没有备份，live 却已被覆盖（P1）。
+        hapi_backup_or_fail "${settings_file}" "${backup_file}" || return 1
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
     hapi_ensure_node_json || return
-    node -e 'const fs = require("fs"); const storeFile = process.argv[1]; const settingsFile = process.argv[2]; const index = Number(process.argv[3]) - 1; const store = JSON.parse(fs.readFileSync(storeFile, "utf8")); const profiles = Array.isArray(store.profiles) ? store.profiles : []; if (!profiles[index] || !profiles[index].config) { console.error("配置序号不存在"); process.exit(1); } fs.writeFileSync(settingsFile, JSON.stringify(profiles[index].config, null, 2) + "\n", { mode: 0o600 }); try { fs.chmodSync(settingsFile, 0o600); } catch {} console.log(profiles[index].name);' "${store_file}" "${settings_file}" "${num}"
+    CLAUDE_PROFILE_STORE="${store_file}" CLAUDE_SETTINGS_TARGET="${settings_file}" CLAUDE_PROFILE_INDEX="${num}" node <<'NODE'
+const fs = require("fs");
+
+const storeFile = process.env.CLAUDE_PROFILE_STORE;
+const settingsFile = process.env.CLAUDE_SETTINGS_TARGET;
+const index = Number(process.env.CLAUDE_PROFILE_INDEX) - 1;
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+let store;
+try {
+  store = JSON.parse(fs.readFileSync(storeFile, "utf8"));
+} catch (error) {
+  console.error(`Claude 配置库不是合法 JSON，无法切换: ${error.message}`);
+  process.exit(1);
+}
+if (!isPlainObject(store)) {
+  console.error("Claude 配置库顶层必须是 JSON 对象，无法切换");
+  process.exit(1);
+}
+if (store.profiles !== undefined && !Array.isArray(store.profiles)) {
+  console.error("Claude 配置库 profiles 不是数组（文件已损坏），无法切换");
+  process.exit(1);
+}
+
+const profiles = Array.isArray(store.profiles) ? store.profiles : [];
+const profile = profiles[index];
+if (!profile || !profile.config) {
+  console.error("配置序号不存在");
+  process.exit(1);
+}
+// 这份 config 会原样写进 live settings.json，必须是 plain object（P2：[] / null / "foo" 写进去就是无效配置）
+if (!isPlainObject(profile.config)) {
+  console.error(`该配置的 config 根必须是 JSON 对象（当前为 ${Array.isArray(profile.config) ? "数组" : JSON.stringify(profile.config)}），已拒绝切换`);
+  process.exit(1);
+}
+
+fs.writeFileSync(settingsFile, JSON.stringify(profile.config, null, 2) + "\n", { mode: 0o600 });
+try { fs.chmodSync(settingsFile, 0o600); } catch {}
+console.log(profile.name);
+NODE
     local switch_status=$?
     if [ "${switch_status}" -ne 0 ]; then
         echo -e "${red}切换配置失败。${background}"
@@ -658,7 +1127,13 @@ hapi_switch_claude_profile() {
     chmod 600 "${settings_file}"
     echo -e "${green}Claude Code 配置已切换: ${settings_file}${background}"
 
-    hapi_prompt_add_extra_env "${settings_file}"
+    # 必须 || return：否则 onboarding 那行的 echo 会把它擦成成功码，
+    # extra-env 明明失败、外层函数却报成功（P2 控制流回归，2026-09-23 审查环境实跑证实）。
+    hapi_prompt_add_extra_env "${settings_file}" || return
+
+    # 跳过 Claude Code 初次安装确认（写 ~/.claude.json；失败不影响上面已写好的 Claude Code 配置）
+    hapi_ensure_claude_onboarding ||
+        echo -e "${yellow}未能写入「跳过初次安装确认」，不影响上面的 Claude Code 配置。${background}"
 }
 
 hapi_delete_claude_profile() {
@@ -751,6 +1226,7 @@ function isSensitiveKey(key) {
     || normalized.includes("apikey")
     || normalized.includes("token")
     || normalized.includes("secret")
+    || normalized.includes("password")
     || normalized.includes("experimental_bearer_token");
 }
 
@@ -1056,14 +1532,12 @@ hapi_write_codex_current_config() {
     if [ "${route_only}" -eq 0 ]; then
         if [ -f "${auth_file}" ]; then
             backup_file="${auth_file}.bak"
-            cp -a "${auth_file}" "${backup_file}"
-            chmod 600 "${backup_file}" 2>/dev/null
+            hapi_backup_or_fail "${auth_file}" "${backup_file}" || return 1
             echo -e "${green}已备份原配置到: ${backup_file}${background}"
         fi
         if [ -f "${config_file}" ]; then
             backup_file="${config_file}.bak"
-            cp -a "${config_file}" "${backup_file}"
-            chmod 600 "${backup_file}" 2>/dev/null
+            hapi_backup_or_fail "${config_file}" "${backup_file}" || return 1
             echo -e "${green}已备份原配置到: ${backup_file}${background}"
         fi
     fi
@@ -1760,14 +2234,12 @@ hapi_config_codex() {
         fi
         if [ -f "${auth_file}" ]; then
             auth_backup_file="${auth_file}.bak"
-            cp -a "${auth_file}" "${auth_backup_file}"
-            chmod 600 "${auth_backup_file}" 2>/dev/null
+            hapi_backup_or_fail "${auth_file}" "${auth_backup_file}" || return 1
             echo -e "${green}已备份原配置到: ${auth_backup_file}${background}"
         fi
         if [ -f "${config_file}" ]; then
             config_backup_file="${config_file}.bak"
-            cp -a "${config_file}" "${config_backup_file}"
-            chmod 600 "${config_backup_file}" 2>/dev/null
+            hapi_backup_or_fail "${config_file}" "${config_backup_file}" || return 1
             echo -e "${green}已备份原配置到: ${config_backup_file}${background}"
         fi
     fi
@@ -1839,8 +2311,7 @@ hapi_toggle_codex_recommended_values() {
     }
     mkdir -p "${config_dir}"
     if [ -f "${config_file}" ]; then
-        cp -a "${config_file}" "${config_file}.bak"
-        chmod 600 "${config_file}.bak" 2>/dev/null
+        hapi_backup_or_fail "${config_file}" "${config_file}.bak" || return 1
         echo -e "${green}已备份原配置到: ${config_file}.bak${background}"
     fi
 
@@ -1959,11 +2430,33 @@ function validateToml(text) {
   text.split(/\r?\n/).forEach((line, index) => parseSectionHeader(line, index + 1));
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// ⚠️ 配置库损坏（语法级**或** schema 级）必须 fail-closed。
+//    旧写法 `catch {}` + `if (!Array.isArray(store.profiles)) store.profiles = [];` 会把
+//    坏 JSON 与 {"profiles":{"legacy":{…}}}（合法 JSON、顶层也是对象）都当成空库，
+//    紧接着用「只有新 profile」的对象覆盖整个旧库 → 静默吃掉全部历史配置（P1 数据丢失，
+//    2026-09-23 实跑复现：合法 JSON + 错误 schema → rc=0、旧 profile 消失）。
 function readStore() {
   if (!fs.existsSync(storeFile)) return { profiles: [] };
   const raw = fs.readFileSync(storeFile, "utf8");
-  const store = raw.trim() ? JSON.parse(raw) : { profiles: [] };
-  if (!Array.isArray(store.profiles)) store.profiles = [];
+  if (!raw.trim()) return { profiles: [] };
+  let store;
+  try {
+    store = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`Codex 配置库不是合法 JSON，已中止保存以免覆盖旧配置库: ${error.message}`);
+  }
+  if (!isPlainObject(store)) {
+    throw new Error("Codex 配置库顶层必须是 JSON 对象，已中止保存以免覆盖旧配置库");
+  }
+  if (store.profiles === undefined) {
+    store.profiles = [];
+  } else if (!Array.isArray(store.profiles)) {
+    throw new Error("Codex 配置库 profiles 必须是数组，已中止保存以免覆盖旧配置库");
+  }
   return store;
 }
 
@@ -2004,7 +2497,7 @@ NODE
 }
 
 hapi_list_codex_profiles() {
-    local store_file
+    local store_file list_status
     store_file=$(hapi_codex_profile_store_file)
 
     hapi_ensure_node_json || return
@@ -2014,21 +2507,45 @@ hapi_list_codex_profiles() {
     fi
     CODEX_STORE_FILE="${store_file}" node <<'NODE'
 const fs = require("fs");
+
 const storeFile = process.env.CODEX_STORE_FILE;
+const raw = fs.readFileSync(storeFile, "utf8");
+
 let store = { profiles: [] };
-try {
-  store = JSON.parse(fs.readFileSync(storeFile, "utf8"));
-} catch {}
+if (raw.trim()) {
+  try {
+    store = JSON.parse(raw);
+  } catch (error) {
+    console.error(`Codex 配置库不是合法 JSON（文件已损坏）: ${error.message}`);
+    process.exit(2);
+  }
+}
+if (store === null || typeof store !== "object" || Array.isArray(store)) {
+  console.error("Codex 配置库顶层不是 JSON 对象（文件已损坏）");
+  process.exit(2);
+}
+// profiles 类型错误同样算损坏：当空库处理会让用户以为是「没配过」而不是「库坏了」
+if (store.profiles !== undefined && !Array.isArray(store.profiles)) {
+  console.error("Codex 配置库 profiles 不是数组（文件已损坏）");
+  process.exit(2);
+}
+
 const profiles = Array.isArray(store.profiles) ? store.profiles : [];
 if (profiles.length === 0) process.exit(1);
 profiles.forEach((item, index) => {
   console.log(`${index + 1}. ${item.name}    更新: ${item.updatedAt || "-"}`);
 });
 NODE
-    local list_status=$?
+    list_status=$?
+    # 三态与 Claude 侧一致：rc=2 = 库损坏（如实报损坏），其它非零 = 空库/无配置。
+    if [ "${list_status}" -eq 2 ]; then
+        echo -e "${red}Codex 配置库已损坏: ${store_file}${background}"
+        echo -e "${yellow}请先修复或删除该文件；为避免覆盖旧配置，储存 / 新建 / 切换 / 删除都会中止。${background}"
+        return 1
+    fi
     if [ "${list_status}" -ne 0 ]; then
         echo -e "${yellow}暂无已储存的 Codex 配置。${background}"
-        return "${list_status}"
+        return 1
     fi
 }
 
@@ -2050,6 +2567,7 @@ function isSensitiveKey(key) {
     || normalized.includes("apikey")
     || normalized.includes("token")
     || normalized.includes("secret")
+    || normalized.includes("password")
     || normalized.includes("experimental_bearer_token");
 }
 
@@ -2166,11 +2684,30 @@ function tomlString(value) {
   return JSON.stringify(String(value));
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// 与 hapi_save_codex_profile_from_files 的 readStore 保持一致（改一处必须同步另一处）：
+// 坏 JSON / 顶层非对象 / profiles 非数组一律中止，不许当空库重置后覆盖旧配置库。
 function readStore() {
   if (!fs.existsSync(storeFile)) return { profiles: [] };
   const raw = fs.readFileSync(storeFile, "utf8");
-  const store = raw.trim() ? JSON.parse(raw) : { profiles: [] };
-  if (!Array.isArray(store.profiles)) store.profiles = [];
+  if (!raw.trim()) return { profiles: [] };
+  let store;
+  try {
+    store = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`Codex 配置库不是合法 JSON，已中止保存以免覆盖旧配置库: ${error.message}`);
+  }
+  if (!isPlainObject(store)) {
+    throw new Error("Codex 配置库顶层必须是 JSON 对象，已中止保存以免覆盖旧配置库");
+  }
+  if (store.profiles === undefined) {
+    store.profiles = [];
+  } else if (!Array.isArray(store.profiles)) {
+    throw new Error("Codex 配置库 profiles 必须是数组，已中止保存以免覆盖旧配置库");
+  }
   return store;
 }
 
@@ -2293,14 +2830,12 @@ hapi_switch_codex_profile() {
     mkdir -p "${config_dir}"
     if [ -f "${auth_file}" ]; then
         backup_file="${auth_file}.bak"
-        cp -a "${auth_file}" "${backup_file}"
-        chmod 600 "${backup_file}" 2>/dev/null
+        hapi_backup_or_fail "${auth_file}" "${backup_file}" || return 1
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
     if [ -f "${config_file}" ]; then
         backup_file="${config_file}.bak"
-        cp -a "${config_file}" "${backup_file}"
-        chmod 600 "${backup_file}" 2>/dev/null
+        hapi_backup_or_fail "${config_file}" "${backup_file}" || return 1
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
     hapi_ensure_node_json || return
@@ -2632,7 +3167,8 @@ function isSensitiveKey(key) {
     || normalized.includes("api_key")
     || normalized.includes("apikey")
     || normalized.includes("token")
-    || normalized.includes("secret");
+    || normalized.includes("secret")
+    || normalized.includes("password");
 }
 
 function sanitizeJson(value, key = "") {
@@ -2859,19 +3395,22 @@ NODE
 
 # 只在正常返回路径删临时文件是不够的：Ctrl+C / 断线 / kill 都可能留下凭据副本，
 # 因此敏感临时文件统一用 mktemp 生成不可预测路径，并挂上退出清理
-# （见 hapi_edit_codex_official_auth / hapi_create_claude_profile）。
+# （见 hapi_edit_codex_official_auth / hapi_create_claude_profile /
+#   hapi_write_claude_settings_file 的 NUL 分隔取值文件）。
 HAPI_CODEX_AUTH_TMP=""
 HAPI_CLAUDE_SETTINGS_TMP=""
+HAPI_CLAUDE_VALUES_TMP=""
 
 hapi_cleanup_sensitive_tmp() {
     local tmp_file
-    for tmp_file in "${HAPI_CODEX_AUTH_TMP}" "${HAPI_CLAUDE_SETTINGS_TMP}"; do
+    for tmp_file in "${HAPI_CODEX_AUTH_TMP}" "${HAPI_CLAUDE_SETTINGS_TMP}" "${HAPI_CLAUDE_VALUES_TMP}"; do
         if [ -n "${tmp_file}" ] && [ -f "${tmp_file}" ]; then
             rm -f "${tmp_file}"
         fi
     done
     HAPI_CODEX_AUTH_TMP=""
     HAPI_CLAUDE_SETTINGS_TMP=""
+    HAPI_CLAUDE_VALUES_TMP=""
 }
 
 hapi_cleanup_sensitive_tmp_and_exit() {
@@ -2957,7 +3496,13 @@ hapi_edit_codex_official_auth() {
     hapi_install_sensitive_tmp_traps
 
     if [ "${edit_mode}" = "existing" ]; then
-        cp -a "${auth_file}" "${tmp_file}"
+        # 载入失败必须中止：临时文件是 mktemp 出来的**空文件**，用户会在「空白内容」上编辑，
+        # 保存后写回的就是一份不含任何凭据的 auth.json（等于把官方登录态清空）。
+        if ! cp -a "${auth_file}" "${tmp_file}"; then
+            echo -e "${red}载入现有 auth.json 失败，已中止（避免在空白内容上编辑后覆盖 ${auth_file}）。${background}"
+            hapi_cleanup_sensitive_tmp
+            return 1
+        fi
         chmod 600 "${tmp_file}" 2>/dev/null
         echo -e "${green}已载入现有 auth.json 内容，可直接修改后保存。${background}"
     else
@@ -3028,8 +3573,7 @@ hapi_edit_codex_official_auth() {
     mkdir -p "${config_dir}"
     if [ -f "${auth_file}" ]; then
         backup_file="${auth_file}.bak"
-        cp -a "${auth_file}" "${backup_file}"
-        chmod 600 "${backup_file}" 2>/dev/null
+        hapi_backup_or_fail "${auth_file}" "${backup_file}" || return 1
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
     if ! hapi_write_codex_auth_file "${tmp_file}" "${auth_file}"; then
@@ -3494,8 +4038,7 @@ hapi_set_listen_config() {
     mkdir -p "${settings_dir}"
     if [ -f "${settings_file}" ]; then
         backup_file="${settings_file}.bak"
-        cp -a "${settings_file}" "${backup_file}"
-        chmod 600 "${backup_file}" 2>/dev/null
+        hapi_backup_or_fail "${settings_file}" "${backup_file}" || return 1
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
     if ! node -e 'const fs = require("fs"); const path = require("path"); const file = process.argv[1]; const host = process.argv[2]; const port = Number(process.argv[3]); let data = {}; if (fs.existsSync(file)) { try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch {} } data.listenHost = host; data.listenPort = port; fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");' "${settings_file}" "${listen_host}" "${listen_port}"; then
@@ -3555,8 +4098,7 @@ hapi_set_cli_api_token() {
     mkdir -p "${settings_dir}"
     if [ -f "${settings_file}" ]; then
         backup_file="${settings_file}.bak"
-        cp -a "${settings_file}" "${backup_file}"
-        chmod 600 "${backup_file}" 2>/dev/null
+        hapi_backup_or_fail "${settings_file}" "${backup_file}" || return 1
         echo -e "${green}已备份原配置到: ${backup_file}${background}"
     fi
     if ! node -e 'const fs = require("fs"); const path = require("path"); const file = process.argv[1]; const token = process.argv[2]; let data = {}; if (fs.existsSync(file)) { try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch {} } data.cliApiToken = token; fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 }); try { fs.chmodSync(file, 0o600); } catch {}' "${settings_file}" "${token}"; then
