@@ -86,6 +86,60 @@ mainbak
    回归断言：唯一一条 cron 必须删成功、无该任务幂等、**stderr-only 读取错误必须失败**、读不到时 append/toggle 拒绝写入；
    对应变异：`grep -v | crontab -` 老写法，以及把「非零」一律当成「没有 crontab」。
 
+### 镜像源与「现场拉取再执行」入口（2026-09-29 gitee 451 事件）
+
+分发方式是 `bash <(curl -sL ${URL}/xxx.sh)`——**没有 `-f`、没有内容校验**，所以只要远端返回 4xx 的**纯文本 body**，
+bash 就会把它当脚本执行。2026-09-29 的真实事故：
+
+```text
+root@hcss-ecs-bb6f:~# xdm cc
+/dev/fd/63: line 1: The: command not found
+```
+
+原因：gitee 对 `Manage/Hapi_Claude_Manage.sh` 返回 **HTTP 451**，body 只有一行
+`The content may contain violation information` → `bash` 把第一个词 `The` 当成了命令。
+
+**实测拦截面（2026-09-29，逐个文件 curl 核对；sha 为实测过的版本）**：
+
+| 文件 | gitee raw 状态 | 处置 |
+| --- | --- | --- |
+| `Manage/Hapi_Claude_Manage.sh` | `43092da` **451**；`6eecceb` / `4cca832` / `b06f1fa` 200 | 入口固定走 GitHub 源（`xdm cc` + 主菜单 `H` 两处） |
+| `Manage/OtherFunctions.sh` | `43092da` / `6eecceb` 均 **451** | 入口（主菜单 → BOT → 其他功能）固定走 GitHub 源 |
+| `AGENTS.md` | `43092da` / `6eecceb` 均 **451** | 无脚本引用它；gitee 上的文档链接会打不开 |
+| `Manage/BOT-PlugIn.sh` | `43092da` / `6eecceb` 均 **451** | 仓库内**没有任何引用**（孤儿文件），未处理 |
+| 其余 14 个 `Manage/*.sh` | master 路径全部 200 | 其中被 `Main.sh` 引用的 6 个（meme_generator / SYS_Manage / BOT_INSTALL / Sayu_Bot / Lagrange_OneBot / NapCat）保持 `${GitMirror}`（gitee）不动 |
+
+⚠️ 拦截面会变，而且判定是**按 blob**：同一个文件可以"新推送的那一版 451、历史版本仍 200"
+（`Hapi_Claude_Manage.sh` 这次就是这样）。**别把上表当永久结论**，改相关入口前复核一次：
+
+```sh
+# 逐个看 gitee raw 是否可用；输出非 200 的入口就必须改走 GitHub 源
+grep -n 'GitMirror}/raw/master/Manage' Manage/Main.sh | while IFS=: read -r l _; do
+  f=$(sed -n "$((l + 1))p" Manage/Main.sh | grep -oE '[A-Za-z_0-9-]+\.sh')
+  printf '%-24s %s\n' "${f}" "$(curl -sL -o /dev/null -w '%{http_code}' --max-time 20 \
+    "https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/${f}")"
+done
+```
+
+**写新入口的规则**：目标文件在 gitee 不是 200，就固定写成
+`bash <(curl -sL ${Git_proxy}https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/xxx.sh)`，
+但 **`MirrorCheck` 仍必须调用**——它负责设置 `Git_proxy`（CN / 探测失败 = `https://gh-proxy.com/`，海外 = 空串直连）。
+`git clone` 类走 `GithubMirror_*`，与本条无关。
+
+**代理变量**：全局代理已由 `ghfast.top` 换成 **`https://gh-proxy.com/`**（`MirrorCheck` 的 CN 分支与
+「探测失败」兜底分支各一处；`install.sh` 的手动选项 2 同样是 gh-proxy.com）。
+换代理必须**全仓库一起换**（`grep -rn "ghfast" .` 除了注释文字应为空），别只改一处。
+
+⚠️ **更根治的做法（尚未做）**：这些 `bash <(curl -sL …)` 本身违反下面「失败路径」第 5 条——
+没有 `-f`（4xx 会被当成功继续）、没有 `bash -n` / 关键标记校验（空文件、拦截页面会被直接执行）。
+要修就统一成 `mktemp` + `curl -fL --connect-timeout … --max-time … --retry …` + 内容校验 + 失败明确报错；
+注意**只加 `-f` 反而更糟**：body 变成空，bash 什么都不执行、退出码 0，失败被静默吞掉，
+必须同时补一条明确的失败提示（或回退到另一个源）。
+
+⚠️ **推到服务器还有版本门槛**：见下文「`Manage/Main.sh` 专属约定 → 版本号」——改了 `Manage/Main.sh`
+却不提版本，服务器上的 `/usr/local/bin/xdm` 自更新判据（远端 `version` ≠ `old_version`）永远不成立，
+改动根本不会滚过去。镜像决定能不能下到，版本决定要不要下，少一半都不行。
+
 ### 系统级改动：默认不做
 
 - **不要改写 `/etc/resolv.conf`**：会破坏 systemd-resolved / Docker / 内网 DNS，且卸载不恢复。访问 GitHub 走镜像变量。
@@ -373,6 +427,32 @@ git diff --stat && git diff --check
 
 - **不要主动 `git add` / `commit` / `push`。** 改完把改动留在工作区并汇报；用户明确说「提交 / 推送」才执行。
 - commit message 风格：`fix: 中文描述` / `feat: 中文描述`。
+
+## `Manage/Main.sh` 专属约定
+
+### 版本号（改 Main.sh **必须**一起提版本）
+
+- ⚠️ **凡改动 `Manage/Main.sh`，必须同时 bump 版本号**，两处一起改、且必须**相等**：
+  1. 仓库根 `version` 文件的 `version:` 行（顺手把 `date:` 改成当天；它只在安装界面显示，不参与判定）；
+  2. `Manage/Main.sh` **第 1 行**的 `old_version="…"`。
+- 原因（`UPDATE()` 的判据）：`xdm` 每次启动都会拉远端 `version`，**只有 `new_version != old_version`** 才去下载
+  新的 `Manage/Main.sh` 覆盖 `/usr/local/bin/xdm`。两处相等 = "已是最新" = **服务器永远拿不到本轮修复**，
+  而且**不会有任何红灯**（`install.sh` 也不比版本，它只把远端 `version:` 打印成 `v1.1.106 (date: 20260929)`）。
+  所以「改了 Main.sh 却没提版本」= 改了个只存在于仓库里的版本。
+- 分发链路见本节「分发方式」与上文「镜像源与『现场拉取再执行』入口」——两者是同一件事的两半：
+  **镜像决定能不能下到，版本决定要不要下**。
+- `install.sh` 里**没有**硬编码版本号（版本一律来自远端 `version` 文件），所以提版本只需动上面两处。
+- 历史约定：`version` 与 `date` 一直是一起改的（`git log --format=… -- version` 可核对，如 `1.1.105 / 20260618`）。
+
+### 分发方式（现场拉取再执行）
+
+- `xdm <子命令>`（`cc` / `meme` / `sys` / `sayu` / `lag` / …）与主菜单里的每一项，都是
+  `bash <(curl -sL ${URL}/xxx.sh)`——**现场拉取、不落地**。推论：① 每个 `Manage/*.sh` 必须自包含；
+  ② 拉取源的选择按上文那张 gitee 451 表来（非 200 的固定走 GitHub 源 + `${Git_proxy}`）；
+  ③ 这些 `bash <(curl …)` 没有 `-f`、没有校验，远端返回错误页会被当脚本执行。
+- ⚠️ **同一脚本常有两处入口**：`xdm cc` 与主菜单 `H. Hapi/Claude 管理` 拉的是同一个
+  `Hapi_Claude_Manage.sh`；`OtherFunctions.sh` 在主菜单 → BOT → 其他功能。**改拉取源时两处都要改**，
+  否则会出现"命令行好了、菜单里还是坏的"（2026-09-29 就是这么先漏了一处的）。
 
 ## `Manage/meme_generator.sh` 专属约定
 

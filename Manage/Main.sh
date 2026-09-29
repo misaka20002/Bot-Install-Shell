@@ -1,4 +1,4 @@
-old_version="1.1.105"
+old_version="1.1.106"
 
 cd $HOME
 
@@ -125,7 +125,7 @@ if [ $? -eq 0 ] && [ ! -z "${Address}" ] && [ "${Address}" = "CN" ]
 then
     # echo -e ${cyan}检测到中国大陆地区，使用国内镜像源${background}
     export GitMirror="https://gitee.com/Misaka21011/Yunzai-Bot-Shell"
-    export Git_proxy="https://ghfast.top/"
+    export Git_proxy="https://gh-proxy.com/"
 elif [ $? -eq 0 ] && [ ! -z "${Address}" ] && [ "${Address}" != "CN" ]
 then
     # echo -e ${cyan}检测到海外地区，使用GitHub源${background}
@@ -135,7 +135,7 @@ else
     # 连接失败、超时或返回空值时使用备用镜像
     # echo -e ${yellow}网络检测失败或超时，使用备用镜像源${background}
     export GitMirror="https://gitee.com/Misaka21011/Yunzai-Bot-Shell"
-    export Git_proxy="https://ghfast.top/"
+    export Git_proxy="https://gh-proxy.com/"
 fi
 }
 ##############################
@@ -279,9 +279,13 @@ bash <(curl -sL ${URL}/SYS_Manage.sh)
 exit
 ;;
 cc)
+# ⚠️ 这里**不用 ${GitMirror}（gitee）**：gitee 对这个文件返回 HTTP 451，body 是纯文本
+#    "The content may contain violation information"，而 `bash <(curl -sL …)` 会把这段文本
+#    当脚本执行，报出莫名其妙的 "The: command not found"（2026-09-29 实测）。
+#    因此固定走 GitHub 源；MirrorCheck 仍要调用——它决定 Git_proxy 是走加速代理还是直连。
 MirrorCheck
-URL="${GitMirror}/raw/master/Manage"
-bash <(curl -sL ${URL}/Hapi_Claude_Manage.sh)
+URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage"
+bash <(curl -sL ${Git_proxy}${URL}/Hapi_Claude_Manage.sh)
 exit
 ;;
 SWPKG)
@@ -734,7 +738,7 @@ case $1 in
         # bash <(curl -sL https://gh-proxy.com/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
     ;;
   plugin_2)
-        bash <(curl -sL https://ghfast.top/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
+        bash <(curl -sL https://gh-proxy.com/https://raw.githubusercontent.com/misaka20002/yunzai-LoliconAPI-paimonV2/main/psign/PaimonPluginsManage.sh)
     ;;
 esac
 }
@@ -919,8 +923,10 @@ case $exit_status in
                 OperatingEnvironmentInstall
                 ;;
             OTHER)
+                # 同 cc)：OtherFunctions.sh 在 gitee 也是 451（The content may contain violation
+                # information），bash 会把这段文本当脚本执行。固定走 GitHub 源 + ${Git_proxy} 代理。
                 MirrorCheck
-                bash <(curl -sL ${GitMirror}/raw/master/Manage/OtherFunctions.sh)
+                bash <(curl -sL ${Git_proxy}https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/OtherFunctions.sh)
                 ;;
             HELP)
                 ShowHelpDocument
@@ -1008,9 +1014,10 @@ case $exit_status in
     0) # 用户选择了某项
         case "$CHOICE" in
             H)
+                # 同 xdm cc：Hapi_Claude_Manage.sh 在 gitee 是 451，改走 GitHub 源 + ${Git_proxy} 代理。
                 MirrorCheck
-                URL="${GitMirror}/raw/master/Manage"
-                bash <(curl -sL ${URL}/Hapi_Claude_Manage.sh)
+                URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage"
+                bash <(curl -sL ${Git_proxy}${URL}/Hapi_Claude_Manage.sh)
                 ;;
             S)
                 MirrorCheck

@@ -54,8 +54,8 @@ check_github() {
         echo -e "${green}GitHub 直连成功！${background}"
         GH_PROXY=""
     else
-        echo -e "${yellow}GitHub 直连超时或失败，已自动启用代理 (https://ghfast.top/)${background}"
-        GH_PROXY="https://ghfast.top/"
+        echo -e "${yellow}GitHub 直连超时或失败，已自动启用代理 (https://gh-proxy.com/)${background}"
+        GH_PROXY="https://gh-proxy.com/"
     fi
 }
 

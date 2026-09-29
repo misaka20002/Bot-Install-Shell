@@ -250,7 +250,7 @@ CheckAndInstallNvm() {
         # 安装 NVM - 带反代重试机制
         install_urls=(
             "https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh"
-            "https://ghfast.top/https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh"
+            "https://gh-proxy.at9.net/https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh"
             "https://gh-proxy.com/https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh"
         )
         
@@ -843,7 +843,7 @@ modify_single_repo(){
     echo -e ${cyan}当前地址: ${yellow}$current_url${background}
     echo ""
     echo -e ${green}请选择操作:${background}
-    echo -e  ${green} 1. ${cyan}添加 ghfast.top 加速${background}
+    echo -e  ${green} 1. ${cyan}添加 gh-proxy.at9.net 加速${background}
     echo -e  ${green} 2. ${cyan}添加 gh-proxy.com 加速${background}
     echo -e  ${green} 3. ${cyan}添加自定义加速前缀${background}
     echo -e  ${green} 4. ${cyan}删除加速 \(恢复原始地址\)${background}
@@ -855,17 +855,17 @@ modify_single_repo(){
     
     case $action in
         1)
-            new_url="https://ghfast.top/$current_url"
+            new_url="https://gh-proxy.at9.net/$current_url"
             # 移除已有的加速前缀
-            new_url=$(echo "$new_url" | sed 's|https://ghfast.top/https://ghfast.top/|https://ghfast.top/|g')
-            new_url=$(echo "$new_url" | sed 's|https://ghfast.top/https://gh-proxy.com/|https://ghfast.top/|g')
+            new_url=$(echo "$new_url" | sed 's|https://gh-proxy.at9.net/https://gh-proxy.at9.net/|https://gh-proxy.at9.net/|g')
+            new_url=$(echo "$new_url" | sed 's|https://gh-proxy.at9.net/https://gh-proxy.com/|https://gh-proxy.at9.net/|g')
             # 移除自定义加速前缀（通用处理）
-            new_url=$(echo "$new_url" | sed 's|https://[^/]*/https://ghfast.top/|https://ghfast.top/|g')
+            new_url=$(echo "$new_url" | sed 's|https://[^/]*/https://gh-proxy.at9.net/|https://gh-proxy.at9.net/|g')
             ;;
         2)
             new_url="https://gh-proxy.com/$current_url"
             # 移除已有的加速前缀
-            new_url=$(echo "$new_url" | sed 's|https://gh-proxy.com/https://ghfast.top/|https://gh-proxy.com/|g')
+            new_url=$(echo "$new_url" | sed 's|https://gh-proxy.com/https://gh-proxy.at9.net/|https://gh-proxy.com/|g')
             new_url=$(echo "$new_url" | sed 's|https://gh-proxy.com/https://gh-proxy.com/|https://gh-proxy.com/|g')
             # 移除自定义加速前缀（通用处理）
             new_url=$(echo "$new_url" | sed 's|https://[^/]*/https://gh-proxy.com/|https://gh-proxy.com/|g')
@@ -890,15 +890,15 @@ modify_single_repo(){
             echo -e ${green}使用的加速前缀: ${yellow}$custom_prefix${background}
             new_url="${custom_prefix}$current_url"
             # 移除已有的加速前缀
-            new_url=$(echo "$new_url" | sed 's|https://ghfast.top/||g')
+            new_url=$(echo "$new_url" | sed 's|https://gh-proxy.at9.net/||g')
             new_url=$(echo "$new_url" | sed 's|https://gh-proxy.com/||g')
             # 移除重复的自定义前缀
-            clean_url=$(echo "$current_url" | sed 's|https://ghfast.top/||g' | sed 's|https://gh-proxy.com/||g')
+            clean_url=$(echo "$current_url" | sed 's|https://gh-proxy.at9.net/||g' | sed 's|https://gh-proxy.com/||g')
             new_url="${custom_prefix}${clean_url}"
             ;;
         4)
             # 删除加速前缀
-            new_url=$(echo "$current_url" | sed 's|https://ghfast.top/||g')
+            new_url=$(echo "$current_url" | sed 's|https://gh-proxy.at9.net/||g')
             new_url=$(echo "$new_url" | sed 's|https://gh-proxy.com/||g')
             # 删除可能的自定义加速前缀（保留原始的github.com等地址）
             new_url=$(echo "$new_url" | sed 's|^https://[^/]*/\(https://\)|\1|g')
@@ -955,7 +955,7 @@ batch_modify_repos(){
     
     echo -e ${white}"====="${green}批量操作${white}"====="${background}
     echo -e ${green}请选择批量操作:${background}
-    echo -e  ${green} 1. ${cyan}为所有GitHub仓库添加 ghfast.top 加速${background}
+    echo -e  ${green} 1. ${cyan}为所有GitHub仓库添加 gh-proxy.at9.net 加速${background}
     echo -e  ${green} 2. ${cyan}为所有GitHub仓库添加 gh-proxy.com 加速${background}
     echo -e  ${green} 3. ${cyan}为所有GitHub仓库添加自定义加速前缀${background}
     echo -e  ${green} 4. ${cyan}删除所有仓库的加速${background}
@@ -1085,17 +1085,17 @@ batch_modify_repos(){
         
         case $action in
             1)
-                new_url="https://ghfast.top/$current_url"
+                new_url="https://gh-proxy.at9.net/$current_url"
                 # 移除已有的加速前缀
-                new_url=$(echo "$new_url" | sed 's|https://ghfast.top/https://ghfast.top/|https://ghfast.top/|g')
-                new_url=$(echo "$new_url" | sed 's|https://ghfast.top/https://gh-proxy.com/|https://ghfast.top/|g')
+                new_url=$(echo "$new_url" | sed 's|https://gh-proxy.at9.net/https://gh-proxy.at9.net/|https://gh-proxy.at9.net/|g')
+                new_url=$(echo "$new_url" | sed 's|https://gh-proxy.at9.net/https://gh-proxy.com/|https://gh-proxy.at9.net/|g')
                 # 移除自定义加速前缀（通用处理）
-                new_url=$(echo "$new_url" | sed 's|https://[^/]*/https://ghfast.top/|https://ghfast.top/|g')
+                new_url=$(echo "$new_url" | sed 's|https://[^/]*/https://gh-proxy.at9.net/|https://gh-proxy.at9.net/|g')
                 ;;
             2)
                 new_url="https://gh-proxy.com/$current_url"
                 # 移除已有的加速前缀
-                new_url=$(echo "$new_url" | sed 's|https://gh-proxy.com/https://ghfast.top/|https://gh-proxy.com/|g')
+                new_url=$(echo "$new_url" | sed 's|https://gh-proxy.com/https://gh-proxy.at9.net/|https://gh-proxy.com/|g')
                 new_url=$(echo "$new_url" | sed 's|https://gh-proxy.com/https://gh-proxy.com/|https://gh-proxy.com/|g')
                 # 移除自定义加速前缀（通用处理）
                 new_url=$(echo "$new_url" | sed 's|https://[^/]*/https://gh-proxy.com/|https://gh-proxy.com/|g')
@@ -1103,14 +1103,14 @@ batch_modify_repos(){
             3)
                 # 使用自定义加速前缀
                 # 移除已有的加速前缀
-                clean_url=$(echo "$current_url" | sed 's|https://ghfast.top/||g' | sed 's|https://gh-proxy.com/||g')
+                clean_url=$(echo "$current_url" | sed 's|https://gh-proxy.at9.net/||g' | sed 's|https://gh-proxy.com/||g')
                 # 移除可能的自定义加速前缀（保留原始的github.com等地址）
                 clean_url=$(echo "$clean_url" | sed 's|^https://[^/]*/\(https://\)|\1|g')
                 new_url="${custom_prefix}${clean_url}"
                 ;;
             4)
                 # 删除加速前缀
-                new_url=$(echo "$current_url" | sed 's|https://ghfast.top/||g')
+                new_url=$(echo "$current_url" | sed 's|https://gh-proxy.at9.net/||g')
                 new_url=$(echo "$new_url" | sed 's|https://gh-proxy.com/||g')
                 # 删除可能的自定义加速前缀（保留原始的github.com等地址）
                 new_url=$(echo "$new_url" | sed 's|^https://[^/]*/\(https://\)|\1|g')

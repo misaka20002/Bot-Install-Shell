@@ -1,7 +1,7 @@
 #!/bin/env bash
 if ping -c 1 github.com > /dev/null 2>&1
 then
-  GitMirror="https://ghfast.top/"
+  GitMirror="https://gh-proxy.com/"
   URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage"
 elif ping -c 1 github.com > /dev/null 2>&1
 then

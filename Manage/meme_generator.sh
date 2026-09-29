@@ -50,8 +50,8 @@ Address=$(curl -sL ${CURL_CONNECT_TIMEOUT} ${CURL_MAX_TIME} ${URL} 2>/dev/null |
 if [ "${Address}" = "CN" ]
 then
   GitMirror="gitee.com"
-  GithubMirror_1="https://ghfast.top/"
-  GithubMirror_2="https://gh-proxy.com/"
+  GithubMirror_1="https://gh-proxy.com/"
+  GithubMirror_2="https://gh-proxy.at9.net/"
   # GithubMirror_3="https://git.ppp.ac.cn/"
 else
   GitMirror="github.com"
@@ -1969,8 +1969,8 @@ change_github_proxy(){
     echo -e ${white}"====="${green}更换GitHub代理${white}"====="${background}
     echo -e ${cyan}当前可用的GitHub代理:${background}
     echo -e ${green}1.${cyan} 无代理 \(直接访问github.com\)${background}
-    echo -e ${green}2.${cyan} ghfast.top \(${GithubMirror_1:-"https://ghfast.top/"}\)${background}
-    echo -e ${green}3.${cyan} gh-proxy.com \(${GithubMirror_2:-"https://gh-proxy.com/"}\)${background}
+    echo -e ${green}2.${cyan} gh-proxy.com \(${GithubMirror_1:-"https://gh-proxy.com/"}\)${background}
+    echo -e ${green}3.${cyan} gh-proxy.at9.net \(${GithubMirror_2:-"https://gh-proxy.at9.net/"}\)${background}
     echo -e ${green}4.${cyan} 自定义代理${background}
     echo "========================="
 
@@ -1986,8 +1986,8 @@ change_github_proxy(){
 
     case ${proxy_choice} in
     1) new_proxy=""; proxy_name="无代理" ;;
-    2) new_proxy="${GithubMirror_1:-"https://ghfast.top/"}"; proxy_name="ghfast.top" ;;
-    3) new_proxy="${GithubMirror_2:-"https://gh-proxy.com/"}"; proxy_name="gh-proxy.com" ;;
+    2) new_proxy="${GithubMirror_1:-"https://gh-proxy.com/"}"; proxy_name="gh-proxy.com" ;;
+    3) new_proxy="${GithubMirror_2:-"https://gh-proxy.at9.net/"}"; proxy_name="gh-proxy.at9.net" ;;
     4)
         echo -en ${cyan}请输入自定义代理地址 \(如: https://mirror.example.com/\): ${background};read custom_proxy
         if [[ ! ${custom_proxy} =~ ^https?:// ]]; then
@@ -2007,7 +2007,7 @@ change_github_proxy(){
 
     # 动态构建仓库列表。字段分隔符统一用 `|`：不能用 `:`，因为 URL 本身含冒号，
     # `${repo_info##*:}` 取的是最后一个冒号之后，会把 https: 吃掉，
-    # 进而写出 //github.com/... 或 https://ghfast.top///github.com/... 污染 origin。
+    # 进而写出 //github.com/... 或 https://gh-proxy.com///github.com/... 污染 origin。
     local repo_path original_url new_url repo_info
     local success_count=0
     local total_count=0

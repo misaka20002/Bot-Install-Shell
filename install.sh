@@ -186,14 +186,14 @@ function Script_Install(){
             echo -e "${white}=========================${background}"
             echo -e "${green}请选择备用下载方式:${background}"
             echo -e "${cyan}1) 切换为 Github 原生下载${background}"
-            echo -e "${cyan}2) 切换为 Github 代理下载 (ghfast.top)${background}"
+            echo -e "${cyan}2) 切换为 Github 代理下载 (gh-proxy.com)${background}"
             echo -e "${cyan}3) 切换为 Gitee 原生下载${background}"
             echo -e "${cyan}4) 重试当前线路${background}"
             echo -e "${red}0) 退出安装${background}"
             echo -en "${green}请选择: ${background}"; read retry_choice
             case ${retry_choice} in
                 1) URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/Main.sh" ;;
-                2) URL="https://ghfast.top/https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/Main.sh" ;;
+                2) URL="https://gh-proxy.com/https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/Main.sh" ;;
                 3) URL="https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/Main.sh" ;;
                 4) continue ;;
                 0) exit 1 ;;
