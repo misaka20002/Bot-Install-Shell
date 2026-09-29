@@ -4,7 +4,7 @@
 #   Manage/Hapi_Claude_Manage.sh 的回归测试（Codex / Claude 配置语义 + 凭据写入路径）
 #
 # 用法：
-#   bash tests/Hapi_Claude_Manage/run.sh                  # 全量（A~K）
+#   bash tests/Hapi_Claude_Manage/run.sh                  # 全量（A~L）
 #   bash tests/Hapi_Claude_Manage/run.sh --only A,C       # 只跑指定分组（日常最常用）
 #   bash tests/Hapi_Claude_Manage/run.sh --log /tmp/x.log # 指定进度日志（默认自动生成）
 #
@@ -15,7 +15,8 @@
 #   D 写入器：官方登录路由保护（隐式模式、保留 provider id、experimental token、空 Key）
 #   E 菜单 7：编辑器探测 / vim 参数 / 编辑器失败拦截 / mktemp / 信号清理
 #   F 配置库旁路卡点（菜单 2 储存、菜单 3 新建、菜单 4 切换）
-#   G 凭据权限（备份 0600）与预览脱敏
+#   G 凭据权限（备份 0600）与预览脱敏（1M 数字阈值的例外必须同时满足「顶层 + 精确 key + 纯整数」，
+#     三种不满足的场景各有一条负向断言；live / profile 两份实现都要覆盖）
 #   H 兼容性回归（既有校验 / 展示 / 菜单接线）
 #   I 路由自动收敛（官方登录剥离并暂存第三方路由 / 第三方 base_url 自动恢复 / 保留 id 不动）
 #   J Claude Code settings.json 写入语义（merge 写盘保留未知顶层键 / 备份固定一份不堆积 / 不注入固定补齐项 /
@@ -23,6 +24,8 @@
 #     ~/.claude.json 的 onboarding 幂等写入 / 写 live 的各入口统一 plain-object 校验）
 #   K Codex 配置库 schema fail-closed（save / create / list 三态）+ 备份 fail-fast
 #     （writer / 菜单 1 / 推荐值 / profile 切换 / 菜单 7 粘贴 / 菜单 7 载入现有 auth）
+#   L 1M 上下文窗口（菜单 1 第 4 参数：写入 / 移除 / 保留用户自填值 / 缺省不改动 /
+#     route-only 字节级不参与）+ 默认模型名 gpt-6-astra（含「4 处必须同步」的源码断言）
 #
 # 三条"绝不卡住"的保证（与 tests/meme_generator/run.sh 一致）：
 #   1) harness 里 `exec 0< /dev/null`：漏写重定向的 read 立刻 EOF，不会永久阻塞；
@@ -410,7 +413,7 @@ if [ "${HOME}" != "${WORK_DIR}/home" ]; then
 fi
 MISSING=""
 for f in hapi_check_codex_auth_file hapi_write_codex_auth_file hapi_write_codex_current_config \
-         hapi_validate_codex_files hapi_codex_current_value hapi_show_codex_config \
+         hapi_validate_codex_files hapi_codex_current_value hapi_codex_context_window_state hapi_show_codex_config \
          hapi_edit_codex_official_auth hapi_detect_editor hapi_editor_program hapi_editor_basename \
          hapi_editor_is_vim_like hapi_run_editor hapi_cleanup_sensitive_tmp \
          hapi_install_sensitive_tmp_traps hapi_extract_codex_profile_auth \
@@ -776,6 +779,97 @@ console.log("SCAN:helper=" + (helperOk ? "ok" : "BAD") + " bare=" + bare + (bare
   hapi_show_codex_config > "${WORK_DIR}/g_show.log" 2>&1
   expect_count "查看配置不泄露 refresh_token" "${WORK_DIR}/g_show.log" "rt\.1\.AAD4M" 0
   expect_grep "查看配置仍能看到 account_id" "${WORK_DIR}/g_show.log" "b4ea17f9"
+
+  # 1M 开关写的两个字段里，model_auto_compact_token_limit 名字含 "token"，会被
+  # isSensitiveKey 的 includes("token") 打成 "******"，看起来像被隐藏的密钥。
+  # 脱敏规则因此给这**一个字段名**开了例外，条件是「顶层 + 精确 key + 纯整数」三者同时成立，
+  # 所以这里必须**正反两个方向**都断言：数字阈值不打码，真 token / 非数字值照旧打码。
+  seed_live ok_official 'model = "gpt-6-astra"
+model_context_window = 1000000
+model_auto_compact_token_limit = 900000
+experimental_bearer_token = "sk-must-be-masked"
+'
+  hapi_show_codex_config > "${WORK_DIR}/g_1m.log" 2>&1
+  expect_count "预览里 1M 数字阈值不打码（数字阈值不是凭据）" "${WORK_DIR}/g_1m.log" \
+    '^model_auto_compact_token_limit = 900000$' 1
+  expect_count "预览里 model_context_window 不打码" "${WORK_DIR}/g_1m.log" \
+    '^model_context_window = 1000000$' 1
+  expect_count "数字阈值例外不放宽真 token 的打码" "${WORK_DIR}/g_1m.log" \
+    'experimental_bearer_token = "\*\*\*\*\*\*"' 1
+  expect_count "预览不泄露被放宽字段附近的真 token 明文" "${WORK_DIR}/g_1m.log" "sk-must-be-masked" 0
+
+  # ⚠️ 负向：例外必须**同时**满足「顶层 + 精确 key（大小写敏感）+ 纯整数」，缺一即照常打码。
+  #    下面三种是 2026-09-29 审查在真实 hapi_show_codex_config 上实测到的「应该打码却整行明文」
+  #    场景（当时的实现只按 key 名放行、且对 key 做了 toLowerCase、sanitizeToml 也不跟踪 section）。
+  #    只测标准顶层 900000 的正向用例抓不到它们。
+  seed_live ok_official 'model = "gpt-6-astra"
+model_auto_compact_token_limit = "sk-nonnumeric-secret"
+'
+  hapi_show_codex_config > "${WORK_DIR}/g_mask1.log" 2>&1
+  expect_count "live 预览：非数字值照常打码" "${WORK_DIR}/g_mask1.log" \
+    '^model_auto_compact_token_limit = "\*\*\*\*\*\*"$' 1
+  expect_count "live 预览：非数字值不泄露明文" "${WORK_DIR}/g_mask1.log" "sk-nonnumeric-secret" 0
+
+  seed_live ok_official 'model = "gpt-6-astra"
+model_auto_compact_token_limit = "900000"
+'
+  hapi_show_codex_config > "${WORK_DIR}/g_mask2.log" 2>&1
+  expect_count "live 预览：带引号的数字照常打码（只认裸整数）" "${WORK_DIR}/g_mask2.log" \
+    '^model_auto_compact_token_limit = "\*\*\*\*\*\*"$' 1
+
+  seed_live ok_official 'model = "gpt-6-astra"
+MODEL_AUTO_COMPACT_TOKEN_LIMIT = "sk-uppercase-secret"
+'
+  hapi_show_codex_config > "${WORK_DIR}/g_mask3.log" 2>&1
+  expect_count "live 预览：大小写变体照常打码（不对 key 做 toLowerCase）" "${WORK_DIR}/g_mask3.log" \
+    '^MODEL_AUTO_COMPACT_TOKEN_LIMIT = "\*\*\*\*\*\*"$' 1
+  expect_count "live 预览：大小写变体不泄露明文" "${WORK_DIR}/g_mask3.log" "sk-uppercase-secret" 0
+
+  seed_live ok_official 'model = "gpt-6-astra"
+model_provider = "foo"
+
+[model_providers.foo]
+model_auto_compact_token_limit = "sk-section-secret"
+'
+  hapi_show_codex_config > "${WORK_DIR}/g_mask4.log" 2>&1
+  expect_count "live 预览：section 内同名字段照常打码（例外只认顶层）" "${WORK_DIR}/g_mask4.log" \
+    '^model_auto_compact_token_limit = "\*\*\*\*\*\*"$' 1
+  expect_count "live 预览：section 内同名字段不泄露明文" "${WORK_DIR}/g_mask4.log" "sk-section-secret" 0
+
+  # 脱敏规则在脚本里有**两份 TOML 副本**（live 预览 / profile 预览），必须同步：
+  # 只改一份时 profile 预览仍会把数字阈值打成密钥，或反过来放宽后漏掉真 token / 非数字值。
+  rm -rf "${HOME}/.codex"; mkdir -p "${HOME}/.codex"
+  printf '%s' '{"profiles":[{"name":"p1m","createdAt":"t","updatedAt":"t","config":{"auth":{"OPENAI_API_KEY":"sk-p1m"},"config":"model = \"gpt-6-astra\"\nmodel_auto_compact_token_limit = 900000\nexperimental_bearer_token = \"sk-profile-must-be-masked\"\n"}}]}' \
+    > "${HOME}/.codex/hapi_config_profiles.json"
+  hapi_show_codex_profile_by_index 1 > "${WORK_DIR}/g_profile_1m.log" 2>&1
+  expect_rc "G profile 预览（1M 场景）返回 0" 0 "$?"
+  expect_count "profile 预览里 1M 数字阈值同样不打码（两份规则必须同步）" "${WORK_DIR}/g_profile_1m.log" \
+    '^model_auto_compact_token_limit = 900000$' 1
+  expect_count "profile 预览仍打码真 token" "${WORK_DIR}/g_profile_1m.log" \
+    'experimental_bearer_token = "\*\*\*\*\*\*"' 1
+  expect_count "profile 预览不泄露真 token 明文" "${WORK_DIR}/g_profile_1m.log" "sk-profile-must-be-masked" 0
+
+  # profile 预览侧的同样三种负向（只同步了 live、漏改 profile 时这里会红）
+  printf '%s' '{"profiles":[{"name":"p1m","createdAt":"t","updatedAt":"t","config":{"auth":{"OPENAI_API_KEY":"sk-p"},"config":"model = \"gpt-6-astra\"\nmodel_auto_compact_token_limit = \"sk-p-nonnumeric\"\n"}}]}' \
+    > "${HOME}/.codex/hapi_config_profiles.json"
+  hapi_show_codex_profile_by_index 1 > "${WORK_DIR}/g_pmask1.log" 2>&1
+  expect_count "profile 预览：非数字值照常打码" "${WORK_DIR}/g_pmask1.log" \
+    '^model_auto_compact_token_limit = "\*\*\*\*\*\*"$' 1
+  expect_count "profile 预览：非数字值不泄露明文" "${WORK_DIR}/g_pmask1.log" "sk-p-nonnumeric" 0
+
+  printf '%s' '{"profiles":[{"name":"p1m","createdAt":"t","updatedAt":"t","config":{"auth":{"OPENAI_API_KEY":"sk-p"},"config":"model = \"gpt-6-astra\"\nMODEL_AUTO_COMPACT_TOKEN_LIMIT = \"sk-p-uppercase\"\n"}}]}' \
+    > "${HOME}/.codex/hapi_config_profiles.json"
+  hapi_show_codex_profile_by_index 1 > "${WORK_DIR}/g_pmask2.log" 2>&1
+  expect_count "profile 预览：大小写变体照常打码" "${WORK_DIR}/g_pmask2.log" \
+    '^MODEL_AUTO_COMPACT_TOKEN_LIMIT = "\*\*\*\*\*\*"$' 1
+  expect_count "profile 预览：大小写变体不泄露明文" "${WORK_DIR}/g_pmask2.log" "sk-p-uppercase" 0
+
+  printf '%s' '{"profiles":[{"name":"p1m","createdAt":"t","updatedAt":"t","config":{"auth":{"OPENAI_API_KEY":"sk-p"},"config":"model = \"gpt-6-astra\"\nmodel_provider = \"foo\"\n\n[model_providers.foo]\nmodel_auto_compact_token_limit = \"sk-p-section\"\n"}}]}' \
+    > "${HOME}/.codex/hapi_config_profiles.json"
+  hapi_show_codex_profile_by_index 1 > "${WORK_DIR}/g_pmask3.log" 2>&1
+  expect_count "profile 预览：section 内同名字段照常打码" "${WORK_DIR}/g_pmask3.log" \
+    '^model_auto_compact_token_limit = "\*\*\*\*\*\*"$' 1
+  expect_count "profile 预览：section 内同名字段不泄露明文" "${WORK_DIR}/g_pmask3.log" "sk-p-section" 0
 fi
 
 # ============================================================
@@ -1399,6 +1493,117 @@ if group_on K; then
   expect_count "K6 正常路径产生 config.toml.bak" <(ls -A "${HOME}/.codex") '^config\.toml\.bak$' 1
   expect_count "K6 正常路径打印两条「已备份」" "${WORK_DIR}/k15.log" "已备份原配置到" 2
   expect_count "K6 备份里是原始 auth（不是刚写入的新值）" "${HOME}/.codex/auth.json.bak" "sk-live-before" 1
+fi
+
+# ============================================================
+# L) 1M 上下文窗口开关（菜单 1 的第 4 个参数）+ 默认模型名
+# ============================================================
+if group_on L; then
+  head_ "L) Codex 1M 上下文窗口（对照 cc-switch contextWindow1M）与默认模型名"
+  CFG="${HOME}/.codex/config.toml"
+  l_codex_store(){ printf '%s' "${HOME}/.codex/hapi_config_profiles.json"; }
+
+  # --- L1 全新配置 + 回答 y：写 1M 声明与自动压缩阈值；默认模型名 gpt-6-astra ---
+  # 目录新建、无 auth.json / config.toml → 不出现「是否继续修改」那一问，
+  # 所以 stdin 只有 4 行：Key / base_url / model / 1M。
+  rm -rf "${HOME}/.codex"; mkdir -p "${HOME}/.codex"
+  printf 'sk-l1\n\n\ny\n' | hapi_config_codex > "${WORK_DIR}/l1.log" 2>&1
+  expect_rc "L1 全新配置 + 开启 1M 成功" 0 "$?"
+  expect_count "L1 写入 model_context_window = 1000000" "${CFG}" '^model_context_window = 1000000$' 1
+  expect_count "L1 补写 model_auto_compact_token_limit = 900000" "${CFG}" '^model_auto_compact_token_limit = 900000$' 1
+  expect_count "L1 默认模型名是 gpt-6-astra" "${CFG}" '^model = "gpt-6-astra"$' 1
+  expect_grep "L1 提示语里的默认模型名同步成 gpt-6-astra" "${WORK_DIR}/l1.log" '请输入 model \(默认 gpt-6-astra\)'
+  expect_grep "L1 当前没有 1M 时默认答案提示为 y/N" "${WORK_DIR}/l1.log" '\[y/N\]'
+
+  # --- L2 已有 1M + 直接回车：默认答案跟随现状（Y/n），且不重复写字段 ---
+  seed_live c_apikey_ok 'model = "gpt-6-astra"
+model_context_window = 1000000
+model_auto_compact_token_limit = 900000
+
+[features]
+goals = true
+'
+  printf 'y\n\n\n\n\n' | hapi_config_codex > "${WORK_DIR}/l2.log" 2>&1
+  expect_rc "L2 已有 1M 时直接回车成功" 0 "$?"
+  expect_grep "L2 已有 1M 时默认答案提示为 Y/n" "${WORK_DIR}/l2.log" '\[Y/n\]'
+  expect_count "L2 不重复写 model_context_window" "${CFG}" '^model_context_window = 1000000$' 1
+  expect_count "L2 不重复写 model_auto_compact_token_limit" "${CFG}" '^model_auto_compact_token_limit = 900000$' 1
+
+  # --- L3 已有 1M + 回答 n：两个字段一并移除（cc-switch 取消勾选的行为）---
+  printf 'y\n\n\n\nn\n' | hapi_config_codex > "${WORK_DIR}/l3.log" 2>&1
+  expect_rc "L3 关闭 1M 成功" 0 "$?"
+  expect_count "L3 移除 model_context_window" "${CFG}" "model_context_window" 0
+  expect_count "L3 移除 model_auto_compact_token_limit" "${CFG}" "model_auto_compact_token_limit" 0
+  expect_count "L3 其余字段不受影响" "${CFG}" '^model = "gpt-6-astra"$' 1
+  expect_count "L3 [features] 段不受影响" "${CFG}" "^\[features\]$" 1
+
+  # --- L4 回答 n 但字段是用户自填的值：原样保留 + 明确提示（不许静默清掉）---
+  seed_live c_apikey_ok 'model = "gpt-6-astra"
+model_context_window = 200000
+model_auto_compact_token_limit = 150000
+'
+  printf 'y\n\n\n\nn\n' | hapi_config_codex > "${WORK_DIR}/l4.log" 2>&1
+  expect_rc "L4 关闭 1M 成功（自定义值场景）" 0 "$?"
+  expect_count "L4 保留自定义 model_context_window" "${CFG}" '^model_context_window = 200000$' 1
+  expect_count "L4 保留自定义 model_auto_compact_token_limit" "${CFG}" '^model_auto_compact_token_limit = 150000$' 1
+  expect_grep "L4 明确提示自定义值已保留" "${WORK_DIR}/l4.log" "已原样保留"
+
+  # --- L5 开启时已有的自定义 compact limit 不被默认值覆盖（cc-switch：只在缺失时补）---
+  seed_live c_apikey_ok 'model = "gpt-6-astra"
+model_auto_compact_token_limit = 150000
+'
+  printf 'y\n\n\n\ny\n' | hapi_config_codex > "${WORK_DIR}/l5.log" 2>&1
+  expect_rc "L5 开启 1M 成功（自定义 compact 场景）" 0 "$?"
+  expect_count "L5 写入 model_context_window" "${CFG}" '^model_context_window = 1000000$' 1
+  expect_count "L5 不覆盖已有的 compact limit" "${CFG}" '^model_auto_compact_token_limit = 150000$' 1
+  expect_count "L5 不写入默认 compact limit" "${CFG}" '^model_auto_compact_token_limit = 900000$' 0
+  expect_count "L5 不产生重复的 compact limit 行" "${CFG}" "model_auto_compact_token_limit" 1
+
+  # --- L6 route-only 收敛：1M 字段是全局设置，不参与路由剥离，**字节级**零改动 ---
+  seed_live ok_official 'model = "gpt-6-astra"
+model_context_window = 1000000
+model_auto_compact_token_limit = 900000
+'
+  # 真·字节级：`$(cat f)` 会被 command substitution 吞掉文件末尾换行，文件"少了最后一个 \n"
+  # 也照样相等——那就不叫字节级了。这里读原始字节做 base64 比较（只依赖 node，不依赖 cmp 在不在 PATH）。
+  bytes_of() { node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1]).toString("base64"))' "$1"; }
+  cp "${CFG}" "${WORK_DIR}/l6-before.toml"
+  hapi_sync_codex_route > "${WORK_DIR}/l6.log" 2>&1
+  expect_rc "L6 route-only 同步成功" 0 "$?"
+  expect_eq "L6 route-only 字节级不改动含 1M 的 config.toml" \
+    "$(bytes_of "${WORK_DIR}/l6-before.toml")" "$(bytes_of "${CFG}")"
+
+  # --- L7 向后兼容：不传第 4 个参数 = 一个字节都不碰（既不添加也不移除）---
+  seed_live c_apikey_ok 'model = "gpt-6-astra"
+'
+  hapi_write_codex_current_config "sk-l7" "https://api.openai.com/v1" "gpt-6-astra" > "${WORK_DIR}/l7a.log" 2>&1
+  expect_rc "L7 三参数调用成功" 0 "$?"
+  expect_count "L7 缺省参数不会凭空开启 1M" "${CFG}" "model_context_window" 0
+  seed_live c_apikey_ok 'model = "gpt-6-astra"
+model_context_window = 1000000
+model_auto_compact_token_limit = 900000
+'
+  hapi_write_codex_current_config "sk-l7" "https://api.openai.com/v1" "gpt-6-astra" > "${WORK_DIR}/l7b.log" 2>&1
+  expect_rc "L7 三参数调用成功（已有 1M）" 0 "$?"
+  expect_count "L7 缺省参数不会顺手关闭 1M" "${CFG}" '^model_context_window = 1000000$' 1
+  expect_count "L7 缺省参数不会顺手删掉 compact limit" "${CFG}" '^model_auto_compact_token_limit = 900000$' 1
+
+  # --- L8 菜单 3「新建配置」的默认模型名同步（否则两处默认值会分叉）---
+  rm -f "$(l_codex_store)"
+  printf 'l8-profile\nsk-l8\n\n\n' | hapi_create_codex_profile > "${WORK_DIR}/l8.log" 2>&1
+  expect_rc "L8 新建配置成功" 0 "$?"
+  expect_count "L8 新配置里的默认模型名是 gpt-6-astra" "$(l_codex_store)" 'model = \\"gpt-6-astra\\"' 1
+  expect_count "L8 不再写入旧默认模型名" "$(l_codex_store)" "gpt-5\.5" 0
+
+  # --- L9 「默认模型名共 4 处必须同步」的不变量 ---
+  # L1/L8 走的是 shell 已经填好的默认值，**命中不到两个 Node fallback**（`process.env.CODEX_MODEL ||`）：
+  # 2026-09-29 审查把 writer 里的 fallback 临时退回 gpt-5.5，L 组仍然 34/0 —— 说明这个不变量
+  # 当时只有文档约束。这里直接对源码断言，4 处缺任何一处都变红。
+  expect_count "L9 两个 shell default_model 都是 gpt-6-astra" "${TARGET_SCRIPT}" \
+    '^    local default_model="gpt-6-astra"$' 2
+  expect_count "L9 两个 Node fallback 都是 gpt-6-astra" "${TARGET_SCRIPT}" \
+    'process\.env\.CODEX_MODEL \|\| "gpt-6-astra"' 2
+  expect_count "L9 全文件已无旧默认模型名 gpt-5.5" "${TARGET_SCRIPT}" "gpt-5\.5" 0
 fi
 
 done_

@@ -1267,10 +1267,38 @@ function commentSuffix(rest) {
   return "";
 }
 
+// config.toml 侧的**唯一例外**：1M 开关写出来的 `model_auto_compact_token_limit = <整数>` 是数字阈值，
+// 不是凭据；按 isSensitiveKey 的 "token" 子串规则打成 `= "******"` 反而误导（看起来像被隐藏的密钥）。
+//
+// ⚠️ 例外必须**同时**满足三个条件才放行，缺一即照常打码（P1，2026-09-29 审查在真实
+//    hapi_show_codex_config 上实测：只看 key 名放行时，下面三种都会整行明文输出）：
+//      ① 处于**顶层区域**（第一个 `[section]` 之前）——所以 sanitizeToml 必须一路跟踪 section；
+//      ② key **精确等于** `model_auto_compact_token_limit`——不做 toLowerCase，大小写变体照码；
+//      ③ 值的形态是**纯整数**（可带行尾注释）——带引号 / 非数字一律照码。
+//    不放宽 "token" 子串规则：漏码一个真密钥的代价远高于多码一个数字。
+// ⚠️ 与 Codex profile 预览里的同名实现必须同步（同 isSensitiveKey 五副本的规矩）。
+const TOML_INT_ONLY_PLAINTEXT_KEY = "model_auto_compact_token_limit";
+
+// 值是不是「纯整数（+ 可选行尾注释）」——例外只认本开关会写出的那一种形态
+function isPlainIntegerValue(raw) {
+  return /^\d+\s*(?:#.*)?$/.test(String(raw).trim());
+}
+
 function sanitizeToml(text) {
-  return text.split(/\r?\n/).map((line) => {
+  let section = "";
+  return String(text).split(/\r?\n/).map((line) => {
+    // 任何以 `[` 开头的行都按「已进入 section」处理（含格式不规范的 header）——fail-closed：
+    // 判不准就当非顶层，宁可多打一次码。
+    if (line.trim().startsWith("[")) {
+      section = line.trim();
+      return line;
+    }
     const match = line.match(/^(\s*([A-Za-z0-9_.-]+)\s*=\s*)(.*)$/);
-    if (match && isSensitiveKey(match[2])) {
+    if (!match) return line;
+    const isPlaintextIntField = section === ""
+      && match[2] === TOML_INT_ONLY_PLAINTEXT_KEY
+      && isPlainIntegerValue(match[3]);
+    if (isSensitiveKey(match[2]) && !isPlaintextIntField) {
       return `${match[1]}"******"${commentSuffix(match[3])}`;
     }
     return line;
@@ -1510,6 +1538,49 @@ if (field === "OPENAI_API_KEY") {
 NODE
 }
 
+# 菜单 1 的「1M 上下文窗口」默认答案：读 config.toml 顶层 model_context_window 是否已是 1000000。
+# 输出 "1m" / "off"（唯一输出，调用方直接 ${} 取值）。
+# 判定与写入侧 topLevelIntValue 同一规则：只认「顶层 + 纯整数」形态；
+# 文件不存在 / 为空 / 值带引号或非数字 / 字段落在 section 内，一律 "off"——
+# 默认落在「不开启」这一侧，保证用户直接回车时不会凭空打开 1M。
+hapi_codex_context_window_state() {
+    local config_file="${HOME}/.codex/config.toml"
+
+    hapi_ensure_node_json >/dev/null 2>&1 || {
+        printf '%s' "off"
+        return 0
+    }
+    CODEX_CONFIG_FILE="${config_file}" node <<'NODE'
+const fs = require("fs");
+const configFile = process.env.CODEX_CONFIG_FILE;
+let state = "off";
+try {
+  if (fs.existsSync(configFile)) {
+    const raw = fs.readFileSync(configFile, "utf8");
+    if (raw.trim()) {
+      let section = "";
+      for (const line of raw.replace(/\r\n/g, "\n").split("\n")) {
+        const header = line.trim().match(/^\[\[?\s*([^\[\]]+?)\s*\]?\]\s*(?:#.*)?$/);
+        if (header) {
+          section = header[1].trim();
+          continue;
+        }
+        if (section) continue;
+        const match = line.match(/^\s*model_context_window\s*=\s*(\d+)\s*(?:#.*)?$/);
+        if (match) {
+          state = Number(match[1]) === 1000000 ? "1m" : "off";
+          break;
+        }
+      }
+    }
+  }
+} catch {
+  state = "off";
+}
+process.stdout.write(state);
+NODE
+}
+
 hapi_write_codex_current_config() {
     local route_only=0
     if [ "$1" = "route-only" ]; then
@@ -1519,6 +1590,9 @@ hapi_write_codex_current_config() {
     local api_key="${1:-}"
     local base_url="${2:-}"
     local model="${3:-}"
+    # 第 4 个参数：1M 上下文窗口的处置，只认 "1m" / "off"（不传 = 不改动）。
+    # 现有调用点都只传 3 个参数，因此默认值必须是「不改动」，而不是「关闭」。
+    local context_window="${4:-keep}"
     local config_dir auth_file config_file stash_file backup_file
     config_dir="${HOME}/.codex"
     auth_file="${config_dir}/auth.json"
@@ -1542,7 +1616,7 @@ hapi_write_codex_current_config() {
         fi
     fi
 
-    CODEX_AUTH_FILE="${auth_file}" CODEX_CONFIG_FILE="${config_file}" CODEX_STASH_FILE="${stash_file}" CODEX_API_KEY="${api_key}" CODEX_BASE_URL="${base_url}" CODEX_MODEL="${model}" CODEX_ROUTE_ONLY="${route_only}" node <<'NODE'
+    CODEX_AUTH_FILE="${auth_file}" CODEX_CONFIG_FILE="${config_file}" CODEX_STASH_FILE="${stash_file}" CODEX_API_KEY="${api_key}" CODEX_BASE_URL="${base_url}" CODEX_MODEL="${model}" CODEX_CONTEXT_WINDOW="${context_window}" CODEX_ROUTE_ONLY="${route_only}" node <<'NODE'
 const fs = require("fs");
 const path = require("path");
 const authFile = process.env.CODEX_AUTH_FILE;
@@ -1550,7 +1624,10 @@ const configFile = process.env.CODEX_CONFIG_FILE;
 const stashFile = process.env.CODEX_STASH_FILE;
 const apiKey = process.env.CODEX_API_KEY || "";
 const baseUrlInput = (process.env.CODEX_BASE_URL || "").trim();
-const model = process.env.CODEX_MODEL || "gpt-5.5";
+const model = process.env.CODEX_MODEL || "gpt-6-astra";
+// 1M 上下文窗口：由菜单 1 的第 4 个参数传入 "1m" / "off"；
+// 其它调用方（route-only、脚本内旧调用点）不传 → "keep"，即一个字节都不碰。
+const contextWindowMode = process.env.CODEX_CONTEXT_WINDOW || "keep";
 const routeOnly = process.env.CODEX_ROUTE_ONLY === "1";
 // 菜单 1 的 base_url 提示语给出的默认值。只在「真的要写 base_url」的分支用它，
 // route-only 不写 base_url，避免把官方默认值当成用户输入。
@@ -1921,6 +1998,113 @@ function ensureTopLevelRawLine(lines, rawLine) {
   lines.splice(firstSectionIndex(lines), 0, rawLine);
 }
 
+// ---- 1M 上下文窗口（对照 cc-switch：CodexConfigSections 的 contextWindow1M 开关）----
+//
+// cc-switch 的语义（src/components/providers/forms/CodexConfigSections.tsx +
+// src/utils/providerConfigUtils.ts 的 extractCodexTopLevelInt / setCodexTopLevelInt /
+// removeCodexTopLevelField）：
+//   · 勾选   → 顶层 `model_context_window = 1000000`；`model_auto_compact_token_limit`
+//               **缺失时**才补默认 900000（已存在则不覆盖）。
+//   · 取消勾选 → 把 model_context_window 与 model_auto_compact_token_limit 一并删除。
+// 三个动作都只扫「顶层区域」（第一个 section header 之前），section 内的同名 key 不动——
+// 本文件同样只认顶层，保持与 cc-switch 一致。
+//
+// 与 cc-switch 唯一的有意差异（取消勾选这一侧）：cc-switch 的表单里两个字段的值它自己
+// 全程可见，删掉不会丢东西；本脚本面对的是用户手改过的 config.toml，所以只删
+// 「本来就是本开关写入的默认值」：
+//   · 值为 1000000 的 model_context_window  → 删
+//   · 值为 900000 的 model_auto_compact_token_limit → 删
+//   · 其它数字（用户自填的 200000 / 150000 等）→ 原样保留 + stderr 提示一次
+// 否则「回答 n」会变成静默清掉别人调过的上限，与本仓库其它写入路径的
+// 「不静默覆盖用户数据」原则（见 readStash / writeStash 的注释）相冲突。
+const CODEX_CONTEXT_WINDOW_1M = 1000000;
+const CODEX_AUTO_COMPACT_LIMIT_DEFAULT = 900000;
+
+// 顶层区域里 key 所在的行号；不在顶层（缺失或在 section 内）返回 -1
+function topLevelKeyIndex(lines, key) {
+  let section = "";
+  for (let i = 0; i < lines.length; i += 1) {
+    const sectionName = parseSectionHeader(lines[i], i + 1);
+    if (sectionName !== null) {
+      section = sectionName;
+      continue;
+    }
+    if (section) continue;
+    if (keyOf(lines[i]) === key) return i;
+  }
+  return -1;
+}
+
+// 顶层整数字段的值：不存在 → null；存在但不是 `key = <纯数字>`（带引号 / 非数字）→ NaN。
+// 调用方必须区分这三种情况，不能把 NaN 当 null（NaN 说明「字段在，只是不是我们写的形态」）。
+function topLevelIntValue(lines, key) {
+  const index = topLevelKeyIndex(lines, key);
+  if (index < 0) return null;
+  const match = lines[index].match(new RegExp(`^\\s*${key}\\s*=\\s*(\\d+)\\s*(?:#.*)?$`));
+  return match ? Number(match[1]) : NaN;
+}
+
+// 写/更新顶层整数：已存在就替换（保留行尾注释，与 replaceAssignment 同一处理方式），
+// 否则插在顶层区域末尾（插入点见下面的 topLevelTailInsertIndex）。
+function ensureTopLevelInt(lines, key, value) {
+  const index = topLevelKeyIndex(lines, key);
+  if (index >= 0) {
+    lines[index] = `${key} = ${value}${commentSuffix(lines[index].slice(lines[index].indexOf("=") + 1))}`;
+    return;
+  }
+  lines.splice(topLevelTailInsertIndex(lines), 0, `${key} = ${value}`);
+}
+
+// 顶层区域的插入点 = 第一个 section header 之前，再往回跳过空行。
+//
+// 为什么不直接用 firstSectionIndex：顶层末尾常常留着一个空行
+// （`model = "…"` / `model_provider = "…"` + 空行 + `[model_providers.<id>]`），直接插在
+// firstSectionIndex 会把新字段塞到「空行之后、section 之前」——紧贴着 section header，
+// 看起来像是那张表的前导行。语义无差别，纯粹是让产物好读。
+// ⚠️ 别和 `hapi_toggle_codex_recommended_values` 里那个 `topLevelInsertIndex` 混了：那个是插在
+// `model` 行**紧后面**（推荐值是同一段全局配置，要贴着 model）。两者名字故意不同，避免同名不同义。
+// 已有函数（ensureTopLevelString / ensureTopLevelRawLine）保持原样不动，不改变既有断言依赖的字节序列。
+function topLevelTailInsertIndex(lines) {
+  let index = firstSectionIndex(lines);
+  while (index > 0 && lines[index - 1].trim() === "") index -= 1;
+  return index;
+}
+
+// 只有 mode 恰好是 "1m" / "off" 才动手：未知值（含 route-only 的 "keep"）一律零改动，
+// 避免调用方传错参数时把用户配置改坏。
+function applyCodexContextWindow(lines, mode) {
+  if (mode === "1m") {
+    ensureTopLevelInt(lines, "model_context_window", CODEX_CONTEXT_WINDOW_1M);
+    if (topLevelKeyIndex(lines, "model_auto_compact_token_limit") < 0) {
+      ensureTopLevelInt(lines, "model_auto_compact_token_limit", CODEX_AUTO_COMPACT_LIMIT_DEFAULT);
+    }
+    return;
+  }
+  if (mode !== "off") return;
+
+  const contextIndex = topLevelKeyIndex(lines, "model_context_window");
+  const compactIndex = topLevelKeyIndex(lines, "model_auto_compact_token_limit");
+  const contextValue = contextIndex >= 0 ? topLevelIntValue(lines, "model_context_window") : null;
+  const compactValue = compactIndex >= 0 ? topLevelIntValue(lines, "model_auto_compact_token_limit") : null;
+  const removeContext = contextValue === CODEX_CONTEXT_WINDOW_1M;
+  const removeCompact = compactValue === CODEX_AUTO_COMPACT_LIMIT_DEFAULT;
+  // 提示里要原样回显被保留的行，所以先把它读出来（splice 之后行号会变，缓存的 index 不能复用）
+  const kept = [];
+  if (contextIndex >= 0 && !removeContext) kept.push(lines[contextIndex].trim());
+  if (compactIndex >= 0 && !removeCompact) kept.push(lines[compactIndex].trim());
+  if (removeContext) {
+    const index = topLevelKeyIndex(lines, "model_context_window");
+    if (index >= 0) lines.splice(index, 1);
+  }
+  if (removeCompact) {
+    const index = topLevelKeyIndex(lines, "model_auto_compact_token_limit");
+    if (index >= 0) lines.splice(index, 1);
+  }
+  if (kept.length) {
+    console.error(`提示: 未开启 1M 上下文窗口，但以下字段的值不是本开关写入的默认值，已原样保留: ${kept.join(" / ")}`);
+  }
+}
+
 // 摘掉整个段（含它前面的空行），返回段本身（去掉首尾空行），供暂存用
 function takeSection(lines, section) {
   const body = lines.slice(section.start, section.end);
@@ -2142,6 +2326,13 @@ try {
     ensureFeatureGoals(lines);
   }
 
+  // 1M 上下文窗口（model_context_window / model_auto_compact_token_limit）是顶层字段，
+  // 本脚本的路由暂存只搬 model_provider 行与 [model_providers.*] 段，不带这两个字段，
+  // 因此它们不随路由剥离/恢复变动（cc-switch 把它算作「随供应商切换」的字段，本脚本没有
+  // per-provider 数据库，差异见 applyCodexContextWindow 的注释）。
+  // route-only（菜单 7 写完 auth、菜单 4 切换配置后的路由收敛）保持最小改动，一个字节都不碰。
+  if (!routeOnly) applyCodexContextWindow(lines, contextWindowMode);
+
   const nextConfig = `${lines.join("\n")}\n`;
   const configChanged = nextConfig !== rawConfig;
   if (!routeOnly || configChanged) {
@@ -2214,8 +2405,9 @@ hapi_config_codex() {
     local config_file="${config_dir}/config.toml"
     local current_api_key current_base_url current_model api_key base_url model
     local auth_backup_file config_backup_file overwrite
+    local context_window_state context_window_hint context_window_answer context_window_mode
     local default_base_url="https://api.openai.com/v1"
-    local default_model="gpt-5.5"
+    local default_model="gpt-6-astra"
 
     hapi_show_codex_config || true
     hapi_validate_codex_files || {
@@ -2269,7 +2461,30 @@ hapi_config_codex() {
     read -r model
     model=${model:-${current_model}}
 
-    hapi_write_codex_current_config "${api_key}" "${base_url}" "${model}"
+    # 1M 上下文窗口（对照 cc-switch 的 contextWindow1M 开关）：
+    # 开启 = 顶层写 model_context_window = 1000000，并在缺失时补 model_auto_compact_token_limit = 900000；
+    # 不开启 = 移除这两个字段（只移除本开关写入的默认值，用户自填的其它数字保留，见 applyCodexContextWindow）。
+    # 默认答案跟随 config.toml 现状，用户直接回车不会改变当前状态。
+    context_window_state=$(hapi_codex_context_window_state)
+    context_window_hint="y/N"
+    [ "${context_window_state}" = "1m" ] && context_window_hint="Y/n"
+    echo -e "${yellow}1M 上下文窗口：在 config.toml 顶层声明 model_context_window = 1000000（并补 model_auto_compact_token_limit = 900000）。${background}"
+    echo -en "${cyan}是否开启 1M 上下文窗口？[${context_window_hint}]: ${background}"
+    read -r context_window_answer
+    case "${context_window_answer}" in
+    n | N)
+        context_window_mode="off"
+        ;;
+    "")
+        context_window_mode="off"
+        [ "${context_window_state}" = "1m" ] && context_window_mode="1m"
+        ;;
+    *)
+        context_window_mode="1m"
+        ;;
+    esac
+
+    hapi_write_codex_current_config "${api_key}" "${base_url}" "${model}" "${context_window_mode}"
 }
 
 hapi_toggle_codex_recommended_values() {
@@ -2585,10 +2800,27 @@ function sanitizeJson(value, key = "") {
   return value;
 }
 
+// config.toml 侧的唯一例外（顶层 + 精确 key + 纯整数三条件），与 hapi_show_codex_config 里的
+// 同名实现必须同步——两处只改一份时，另一条预览路径照样会泄露明文。理由见那边的注释。
+const TOML_INT_ONLY_PLAINTEXT_KEY = "model_auto_compact_token_limit";
+
+function isPlainIntegerValue(raw) {
+  return /^\d+\s*(?:#.*)?$/.test(String(raw).trim());
+}
+
 function sanitizeToml(text) {
+  let section = "";
   return String(text || "").split(/\r?\n/).map((line) => {
+    if (line.trim().startsWith("[")) {
+      section = line.trim();
+      return line;
+    }
     const match = line.match(/^(\s*([A-Za-z0-9_.-]+)\s*=\s*)(.*)$/);
-    return match && isSensitiveKey(match[2]) ? `${match[1]}"******"` : line;
+    if (!match) return line;
+    const isPlaintextIntField = section === ""
+      && match[2] === TOML_INT_ONLY_PLAINTEXT_KEY
+      && isPlainIntegerValue(match[3]);
+    return isSensitiveKey(match[2]) && !isPlaintextIntField ? `${match[1]}"******"` : line;
   }).join("\n");
 }
 
@@ -2641,7 +2873,7 @@ hapi_store_current_codex_config() {
 hapi_create_codex_profile() {
     local profile_name api_key base_url model store_file
     local default_base_url="https://api.openai.com/v1"
-    local default_model="gpt-5.5"
+    local default_model="gpt-6-astra"
     store_file=$(hapi_codex_profile_store_file)
 
     echo -en "${cyan}请输入新配置名称: ${background}"
@@ -2678,7 +2910,7 @@ const storeFile = process.env.CODEX_STORE_FILE;
 const name = process.env.CODEX_PROFILE_NAME;
 const apiKey = process.env.CODEX_API_KEY || "";
 const baseUrl = process.env.CODEX_BASE_URL || "https://api.openai.com/v1";
-const model = process.env.CODEX_MODEL || "gpt-5.5";
+const model = process.env.CODEX_MODEL || "gpt-6-astra";
 
 function tomlString(value) {
   return JSON.stringify(String(value));
