@@ -86,38 +86,62 @@ mainbak
    回归断言：唯一一条 cron 必须删成功、无该任务幂等、**stderr-only 读取错误必须失败**、读不到时 append/toggle 拒绝写入；
    对应变异：`grep -v | crontab -` 老写法，以及把「非零」一律当成「没有 crontab」。
 
-### 镜像源与「现场拉取再执行」入口（2026-09-29 gitee 451 事件）
+### 镜像源与「现场拉取再执行」入口（gitee 451 事件：2026-09-29 / 2026-10-01）
 
 分发方式是 `bash <(curl -sL ${URL}/xxx.sh)`——**没有 `-f`、没有内容校验**，所以只要远端返回 4xx 的**纯文本 body**，
-bash 就会把它当脚本执行。2026-09-29 的真实事故：
+bash 就会把它当脚本执行。这个坑已经踩过两次，症状一模一样：
 
 ```text
-root@hcss-ecs-bb6f:~# xdm cc
+root@hcss-ecs-bb6f:~# xdm cc     # 2026-09-29
+root@hcss-ecs-bb6f:~# xdm sys    # 2026-10-01
 /dev/fd/63: line 1: The: command not found
 ```
 
-原因：gitee 对 `Manage/Hapi_Claude_Manage.sh` 返回 **HTTP 451**，body 只有一行
-`The content may contain violation information` → `bash` 把第一个词 `The` 当成了命令。
+原因：gitee raw 对该文件返回 **HTTP 451**，body 只有一行
+`The content may contain violation information`（45 字节、无换行）→ `bash` 把第一个词 `The` 当成了命令。
 
-**实测拦截面（2026-09-29，逐个文件 curl 核对；sha 为实测过的版本）**：
+**实测拦截面（两次实测，master 路径）**：
 
-| 文件 | gitee raw 状态 | 处置 |
-| --- | --- | --- |
-| `Manage/Hapi_Claude_Manage.sh` | `43092da` **451**；`6eecceb` / `4cca832` / `b06f1fa` 200 | 入口固定走 GitHub 源（`xdm cc` + 主菜单 `H` 两处） |
-| `Manage/OtherFunctions.sh` | `43092da` / `6eecceb` 均 **451** | 入口（主菜单 → BOT → 其他功能）固定走 GitHub 源 |
-| `AGENTS.md` | `43092da` / `6eecceb` 均 **451** | 无脚本引用它；gitee 上的文档链接会打不开 |
-| `Manage/BOT-PlugIn.sh` | `43092da` / `6eecceb` 均 **451** | 仓库内**没有任何引用**（孤儿文件），未处理 |
-| 其余 14 个 `Manage/*.sh` | master 路径全部 200 | 其中被 `Main.sh` 引用的 6 个（meme_generator / SYS_Manage / BOT_INSTALL / Sayu_Bot / Lagrange_OneBot / NapCat）保持 `${GitMirror}`（gitee）不动 |
+| 文件 | 2026-09-29 | 2026-10-01 | 处置 |
+| --- | --- | --- | --- |
+| `Manage/Hapi_Claude_Manage.sh` | 最新提交 **451**，更早三个 200 | master **451** | 入口固定走 GitHub 源（`xdm cc` + 主菜单 `H`） |
+| `Manage/OtherFunctions.sh` | 新、旧提交均 **451** | master **451** | 入口固定走 GitHub 源（主菜单 → BOT → 其他功能） |
+| `Manage/BOT-PlugIn.sh` | 新、旧提交均 **451** | master **451** | 仓库内**零引用**（孤儿文件），未处理 |
+| `Manage/SYS_Manage.sh` | 200 | 23:37 **451** → 23:46 同一 blob **200** | 入口固定走 GitHub 源（`xdm sys` + 主菜单 `S`） |
+| `AGENTS.md` | **451** | **200** | 无脚本引用它，只影响 gitee 网页端打开文档 |
+| `Main.sh` 实际取用的其余 10 个目标 | 200 | **全部 200** | 保持走 gitee 不动 |
 
-⚠️ 拦截面会变，而且判定是**按 blob**：同一个文件可以"新推送的那一版 451、历史版本仍 200"
-（`Hapi_Claude_Manage.sh` 这次就是这样）。**别把上表当永久结论**，改相关入口前复核一次：
+「其余 10 个目标」= `version` + `Manage/Main.sh` 自身 + 8 个功能脚本（meme_generator / BOT_INSTALL / Sayu_Bot /
+Lagrange_OneBot / NapCat / BOT-PKG / BOT-NODE.JS / GitBot）。
+
+⚠️ **451 不是「某个 blob 被永久拉黑」，状态会在分钟级来回翻**。2026-10-01 实测：同一个文件 10 分钟内从 451 变回 200；
+而 2026-09-29 记着是 200 的**旧** blob，当天再测反而变成了 451。两条推论：
+
+- 别因为一次 451 就断言「gitee 上这个仓库废了」——**正确动作是换源**，不是等它恢复；
+- 也别因为一次 200 就断言「已经修好了」——**入口一旦改走 GitHub 源就不要改回来**（判定阈值是"曾经被拦过"，不是"此刻是否 200"）。
+
+镜像/代理本身的可用性实测快照见 `docs/GitHub加速镜像与源可用性-实测记录-2026-09-29.md`（该文件是**带日期的快照**，不是长期结论）。
+
+**取件点全清单（改源前先看这张表）**——`Manage/Main.sh` 里从 gitee 取件的地方一共 **4 类**，
+上面那版「grep `GitMirror}/raw/master/Manage`」的老脚本**只能覆盖第 1、2 类**，第 3、4 类会漏掉：
+
+| # | 位置 | 取什么 | 现状（2026-10-01） |
+| --- | --- | --- | --- |
+| 1 | `xdm <子命令>` 入口：`sys` / `meme` / `SWPKG` / `sayu` / `lag` / 临时 `NapCat` | `Manage/*.sh` | 除 `sys` 外走 gitee |
+| 2 | 主菜单分发：`H` / `S` / `N` / `E` / 早柚 / 其他功能 | `Manage/*.sh` | 除 `H` / `S` / 其他功能外走 gitee |
+| 3 | **批量安装**（两处：`BOT-PKG.sh BOT_INSTALL.sh BOT-NODE.JS.sh`，另一处再加 `GitBot.sh`） | `URL=` 按 `ping gitee` 二选一 | 走 gitee（4 个文件当前都 200） |
+| 4 | **自更新 `UPDATE()`** | 远端 `version` + `Manage/Main.sh` | 走 gitee（当前都 200） |
+
+复测脚本（覆盖全部 4 类）：
 
 ```sh
-# 逐个看 gitee raw 是否可用；输出非 200 的入口就必须改走 GitHub 源
-grep -n 'GitMirror}/raw/master/Manage' Manage/Main.sh | while IFS=: read -r l _; do
-  f=$(sed -n "$((l + 1))p" Manage/Main.sh | grep -oE '[A-Za-z_0-9-]+\.sh')
-  printf '%-24s %s\n' "${f}" "$(curl -sL -o /dev/null -w '%{http_code}' --max-time 20 \
-    "https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master/Manage/${f}")"
+GITEE=https://gitee.com/Misaka21011/Yunzai-Bot-Shell/raw/master
+for f in version install.sh AGENTS.md README.md \
+         Manage/Main.sh Manage/SYS_Manage.sh Manage/meme_generator.sh \
+         Manage/BOT_INSTALL.sh Manage/Sayu_Bot.sh Manage/Lagrange_OneBot.sh \
+         Manage/NapCat.sh Manage/BOT-PKG.sh Manage/BOT-NODE.JS.sh Manage/GitBot.sh \
+         Manage/Hapi_Claude_Manage.sh Manage/OtherFunctions.sh Manage/BOT-PlugIn.sh; do
+    printf '%-30s %s\n' "$f" "$(curl -sL -o /dev/null -w '%{http_code}' --max-time 20 "$GITEE/$f")"
 done
 ```
 
@@ -125,6 +149,18 @@ done
 `bash <(curl -sL ${Git_proxy}https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage/xxx.sh)`，
 但 **`MirrorCheck` 仍必须调用**——它负责设置 `Git_proxy`（CN / 探测失败 = `https://gh-proxy.com/`，海外 = 空串直连）。
 `git clone` 类走 `GithubMirror_*`，与本条无关。
+
+⚠️ **第 3、4 类没有 GitHub 兜底（当前最大的残留风险）**：它们写的是
+`if ping -c 1 gitee.com … then <gitee 源> elif ping -c 1 github.com … then <GitHub 源> fi`，
+**只要 gitee 能 ping 通就只试 gitee**，返回 451 时不会自动回落到 GitHub：
+
+- **第 3 类（批量安装）**：`bash <(curl …)` 执行到拦截页 → 退出码非 0 → 被 `until` 捕获重试，**试满 3 次后 `exit`**（连 xdm 一起退出）；
+- **第 4 类（自更新）**：`UPDATE()` 的四重校验（`HTTP_CODE=200` + 文件非空 + `grep -q "old_version="` +
+  `bash <temp> help` 输出含「呆毛版」）会把 451 挡下来，**不会把拦截页装成 `/usr/local/bin/xdm`**；
+  但它只会打印「更新失败，已跳过更新」并**停在旧版**，不会去试 GitHub。
+
+这 4 个文件当前都是 200，所以没动。**但凡改动 `Manage/Main.sh`，必须连带复测第 3、4 类** —— 自更新尤其致命：
+它一旦被拦，等于「修复已经推上去了，但服务器永远刷不到」（再叠加下面那条版本门槛）。
 
 **代理变量**：全局代理已由 `ghfast.top` 换成 **`https://gh-proxy.com/`**（`MirrorCheck` 的 CN 分支与
 「探测失败」兜底分支各一处；`install.sh` 的手动选项 2 同样是 gh-proxy.com）。
