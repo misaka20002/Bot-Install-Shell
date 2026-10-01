@@ -1,4 +1,4 @@
-old_version="1.1.106"
+old_version="1.1.107"
 
 cd $HOME
 
@@ -274,8 +274,8 @@ exit
 ;;
 sys)
 MirrorCheck
-URL="${GitMirror}/raw/master/Manage"
-bash <(curl -sL ${URL}/SYS_Manage.sh)
+URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage"
+bash <(curl -sL ${Git_proxy}${URL}/SYS_Manage.sh)
 exit
 ;;
 cc)
@@ -1020,9 +1020,10 @@ case $exit_status in
                 bash <(curl -sL ${Git_proxy}${URL}/Hapi_Claude_Manage.sh)
                 ;;
             S)
+                # 同 xdm sys：SYS_Manage.sh 在 gitee 是 451，改走 GitHub 源 + ${Git_proxy} 代理。
                 MirrorCheck
-                URL="${GitMirror}/raw/master/Manage"
-                bash <(curl -sL ${URL}/SYS_Manage.sh)
+                URL="https://raw.githubusercontent.com/misaka20002/Bot-Install-Shell/master/Manage"
+                bash <(curl -sL ${Git_proxy}${URL}/SYS_Manage.sh)
                 ;;
             *)
                 ${DialogWhiptail} --title "错误" --msgbox "无效的选择: '$CHOICE'" 6 40
