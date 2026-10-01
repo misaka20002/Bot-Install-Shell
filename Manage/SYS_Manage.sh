@@ -311,13 +311,6 @@ install_fonts() {
             pacman -Sy --noconfirm wget unzip fontconfig
         fi
         
-        mkdir -p ${fonts_dir}/chinese
-        echo -e "${cyan}正在下载思源黑体...${background}"
-        wget -q --show-progress ${GithubMirror}https://github.com/adobe-fonts/source-han-sans/releases/download/2.004R/SourceHanSansSC.zip -O /tmp/SourceHanSansSC.zip
-        unzip -q /tmp/SourceHanSansSC.zip -d /tmp/SourceHanSansSC
-        cp /tmp/SourceHanSansSC/SubsetOTF/SC/*.otf ${fonts_dir}/chinese/
-        rm -rf /tmp/SourceHanSansSC /tmp/SourceHanSansSC.zip
-        
         echo -e "${cyan}正在下载文泉驿字体...${background}"
         if command -v apt >/dev/null 2>&1; then
             apt install -y fonts-wqy-microhei fonts-wqy-zenhei
@@ -329,8 +322,9 @@ install_fonts() {
             pacman -Sy --noconfirm wqy-microhei wqy-zenhei
         fi
         
-        # Noto CJK（思源黑体上游，中日韩全覆盖）。与上面的 GitHub 直下互为备份：
-        # 国内服务器走 ghfast 镜像仍可能失败，而 apt/yum 用的是国内镜像源
+        # Noto CJK：中日韩全覆盖（SC/TC/JP/KR，Sans + Serif），是本步骤覆盖最广的 CJK 来源。
+        # 与上面的文泉驿互补：文泉驿是仓库基线（Linux/Bot-Install-*.sh 也装它），Noto CJK 覆盖更全。
+        # 两步都走 apt/yum 等系统源（国内镜像），本步骤已不再有 GitHub 直下。
         echo -e "${cyan}正在安装Noto CJK字体包...${background}"
         if command -v apt >/dev/null 2>&1; then
             apt install -y fonts-noto-cjk
@@ -342,13 +336,41 @@ install_fonts() {
             pacman -Sy --noconfirm noto-fonts-cjk
         fi
         
+        # ── 非致命步骤：装饰字符兜底字体 ────────────────────────────────────
+        # ꧁ ꧂（U+A9C1 / U+A9C2，爪哇文 Rerenggan）只有 Noto Sans Javanese 覆盖；
+        # ❦（U+2766）/ ♡（U+2661）由 Noto Sans Symbols 2 覆盖。两者都只在 fonts-noto-core 里。
+        # 实测（读字体 cmap）：fonts-noto-cjk(Sans/Serif)、文泉驿(微米黑/正黑)、NotoColorEmoji、
+        # fonts-symbola 都不含 ꧁ ꧂；Noto CJK 连 ❦(U+2766) 也没有，只有 ♡(U+2661)。
+        # 体积约 43MB。失败只影响 ꧁❦♡ 这类装饰字符，中文渲染不受影响 → 仅提示，不中止。
+        echo -e "${cyan}正在安装Noto核心字体包(装饰字符兜底，约43MB)...${background}"
+        noto_core_ok=0
+        if command -v apt >/dev/null 2>&1; then
+            apt install -y fonts-noto-core && noto_core_ok=1
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y google-noto-sans-javanese-fonts google-noto-sans-symbols-2-fonts && noto_core_ok=1
+        elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y google-noto-sans-javanese-fonts google-noto-sans-symbols-2-fonts && noto_core_ok=1
+        elif command -v pacman >/dev/null 2>&1; then
+            pacman -Sy --noconfirm noto-fonts && noto_core_ok=1
+        fi
+        if [ "${noto_core_ok}" != "1" ]; then
+            echo -e "${yellow}警告：装饰字符字体包安装失败（非致命步骤，不影响中文渲染）${background}"
+            echo -e "${yellow}      受影响：꧁ ꧂ (U+A9C1/A9C2)、❦ (U+2766)、♡ (U+2661) 会显示成方块${background}"
+            echo -e "${yellow}      修复：apt update && apt install -y fonts-noto-core && fc-cache -fv${background}"
+        fi
+        
         fc-cache -fv
         echo -e "${cyan}已注册的中文字体:${background}"
         fc-list :lang=zh family | sort -u
         if ! fc-list :lang=zh | grep -q .; then
             echo -e "${yellow}警告：未检测到任何中文字体，上面的安装步骤可能都失败了，渲染中文会显示成方块${background}"
         fi
-        echo -e "${green}中文字体安装完成并已刷新字体缓存${background}"
+        if [ "${noto_core_ok}" = "1" ]; then
+            echo -e "${green}中文字体安装完成并已刷新字体缓存${background}"
+        else
+            echo -e "${green}中文字体（Noto CJK / 文泉驿）安装完成并已刷新字体缓存${background}"
+            echo -e "${yellow}但装饰字符字体包 fonts-noto-core 未安装成功（非致命步骤），见上方提示${background}"
+        fi
         pause
         ;;
     3)
