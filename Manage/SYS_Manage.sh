@@ -852,56 +852,70 @@ start_singbox_docker() {
 }
 
 
-# 自动加载 Clash 环境变量辅助函数， 修复在非交互式脚本中“未检测到 clashctl”的问题
-load_clash_env() {
-    # 如果已经识别到命令，则直接返回
-    if command -v clashctl >/dev/null 2>&1; then return 0; fi
-
-    # 开启 alias 扩展，防止 clashctl 被定义为纯别名而无法解析
-    shopt -s expand_aliases 2>/dev/null
-
-    # 尝试从 ~/.bashrc 中提取加载语句并执行
-    if [ -f ~/.bashrc ]; then
-        local env_cmd
-        env_cmd=$(grep -E '(source|\.) .*clashctl\.sh' ~/.bashrc | tail -n 1)
-        if [ -n "$env_cmd" ]; then
-            eval "$env_cmd" >/dev/null 2>&1
-        fi
-    fi
-
-    # 如果依旧识别不到，尝试硬编码查找默认安装目录并强制加载
-    if ! command -v clashctl >/dev/null 2>&1; then
-        local p
-        for p in /opt/clash /opt/clashctl ~/.local/share/clash ~/clashctl /usr/local/clash; do
-            # 兼容旧版本路径结构
-            if [ -f "$p/script/clashctl.sh" ]; then
-                source "$p/script/common.sh" >/dev/null 2>&1
-                source "$p/script/clashctl.sh" >/dev/null 2>&1
-                break
-            # 兼容新版本路径结构
-            elif [ -f "$p/scripts/cmd/clashctl.sh" ]; then
-                source "$p/scripts/core/common.sh" >/dev/null 2>&1
-                source "$p/scripts/cmd/clashctl.sh" >/dev/null 2>&1
-                break
-            fi
-        done
-    fi
+# 上游入口依赖 CLASHCTL_HOME；不能只检测 clashctl 函数是否存在。
+clash_env_ready() {
+    local name
+    [ -n "${CLASHCTL_HOME:-}" ] && [ -r "$CLASHCTL_HOME/.env" ] || return 1
+    [ -x "${BIN_YQ:-}" ] && [ -x "${BIN_KERNEL:-}" ] || return 1
+    for name in clashctl clashon clashoff clashstatus clashui clashsecret clashsub clashtun clashmixin clashupgrade service_is_active tunstatus; do
+        declare -F "$name" >/dev/null || return 1
+    done
 }
+
+load_clash_env() {
+    clash_env_ready && return 0
+    local line value p file
+    local -a candidates=("${CLASHCTL_HOME:-}")
+    # 只读安装器写入的路径赋值，不执行用户整个 bashrc（含交互守卫）。
+    if [ -r "$HOME/.bashrc" ]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?CLASHCTL_HOME=(.*)$ ]]; then
+                value=${BASH_REMATCH[2]}
+                value=${value%$'\r'}
+                case "$value" in
+                    \"*\") value=${value:1:${#value}-2} ;;
+                    \'*\') value=${value:1:${#value}-2} ;;
+                esac
+                case "$value" in
+                    '~/'*) value="$HOME/${value:2}" ;;
+                    '$HOME/'*) value="$HOME/${value:6}" ;;
+                    '${HOME}/'*) value="$HOME/${value:8}" ;;
+                esac
+                [[ "$value" == /* ]] && candidates+=("$value")
+            fi
+        done < "$HOME/.bashrc"
+    fi
+    candidates+=("$HOME/clashctl" /opt/clash /opt/clashctl "$HOME/.local/share/clash" /usr/local/clash)
+    for p in "${candidates[@]}"; do
+        [ -n "$p" ] && [ -r "$p/.env" ] || continue
+        file="$p/scripts/cmd/clashctl.sh"
+        [ -r "$file" ] && [ -r "$p/scripts/lib/common.sh" ] || continue
+        export CLASHCTL_HOME="$p"
+        # 清空函数的位置参数，避免 source 的命令文件误读菜单参数。
+        set --
+        if source "$file" && clash_env_ready; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Clash for Linux 管理函数
 manage_clash() {
     # 每次进入菜单前，尝试自动加载环境
+    local num up_ans set_sec new_sec sub_num sub_url sub_id del_id tun_op mix_num rm_clash
     load_clash_env
 
     echo -e "${white}=====${green}系统管理-Clash for Linux${white}=====${background}"
-    if command -v clashctl >/dev/null 2>&1; then
+    if clash_env_ready; then
         # --- 检测运行状态与模式 ---
         local proxy_status="${red}● 已关闭${background}"
         local mode_status="${yellow}未运行${background}"
-        
+
         # 使用 systemctl 检测 mihomo 或 clash 服务进程是否在活跃状态
         if systemctl is-active --quiet mihomo 2>/dev/null || systemctl is-active --quiet clash 2>/dev/null; then
             proxy_status="${green}▶ 已开启${background}"
-            
+
             # 进程开启时，判断当前是 Tun 模式还是系统代理模式
             # 通常 mihomo 内核在开启 Tun 模式时，会创建一个名为 Meta 的虚拟网卡（或 utun / clash）
             if ip link show 2>/dev/null | grep -iE "meta|utun|clash" >/dev/null 2>&1; then
@@ -917,18 +931,24 @@ manage_clash() {
         echo -e "  ${yellow}CLI指令: clashctl${background}"
     else
         echo -e "  当前状态: ${yellow}未安装 或 环境变量未生效${background}"
+        echo -e "${red}若已安装，请退出本脚本执行 source ~/.bashrc 后重试。${background}"
     fi
     echo "========================="
-    echo -e  "${green}1.  ${cyan}一键安装 / 更新 Clash 环境${background}"
-    echo -e  "${green}2.  ${cyan}开启代理 (clashon)${background}"
-    echo -e  "${green}3.  ${cyan}关闭代理 (clashoff)${background}"
-    echo -e  "${green}4.  ${cyan}查看状况与升级 (status/upgrade)${background}"
-    echo -e  "${green}5.  ${cyan}Web控制面板与密钥 (ui/secret)${background}"
-    echo -e  "${green}6.  ${cyan}订阅管理 (sub)${background}"
-    echo -e  "${green}7.  ${cyan}Tun模式管理 (tun)${background}"
-    echo -e  "${green}8.  ${cyan}Mixin配置管理 (mixin)${background}"
-    echo -e  "${green}9.  ${cyan}完全卸载${background}"
-    echo -e  "${green}0.  ${cyan}返回主菜单${background}"
+    echo -e "${white}安装与维护${background}"
+    echo -e "${green}1.  ${cyan}安装 Clash 环境${background}"
+    echo -e "${green}2.  ${cyan}运行状态 / 内核升级${background}"
+    echo -e "${green}3.  ${red}完全卸载${background}"
+    echo -e "${white}代理开关${background}"
+    echo -e "${green}4.  ${cyan}开启代理${background}"
+    echo -e "${green}5.  ${cyan}关闭代理${background}"
+    echo -e "${white}节点与网络${background}"
+    echo -e "${green}6.  ${cyan}选择节点${background}"
+    echo -e "${green}7.  ${cyan}订阅管理${background}"
+    echo -e "${green}8.  ${cyan}Tun 模式${background}"
+    echo -e "${white}面板与配置${background}"
+    echo -e "${green}9.  ${cyan}Web 面板与访问密钥${background}"
+    echo -e "${green}10. ${cyan}Mixin 配置${background}"
+    echo -e "${green}0.  ${cyan}返回主菜单${background}"
     echo "========================="
     echo -en "${green}请输入您的选项: ${background}"; read num
 
@@ -943,20 +963,20 @@ manage_clash() {
             elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm git;
             fi
         fi
-        
+
         cd $HOME
         rm -rf clash-for-linux-install
         if git clone --branch master --depth 1 https://gh-proxy.org/https://github.com/nelvko/clash-for-linux-install.git; then
             cd clash-for-linux-install
             bash install.sh
             cd $HOME
-            
+
             # 安装后立刻加载环境变量，无需退出即可继续使用菜单
             load_clash_env
 
             echo -e "${green}======================================${background}"
             echo -e "${green}安装流程结束！${background}"
-            echo -e "${yellow}提示：脚本已尝试自动加载环境。如后续功能仍提示'命令未找到'，请退出本脚本执行 ${cyan}source ~/.bashrc${yellow} 即可生效。${background}"
+            echo -e "${yellow}提示：脚本已尝试自动加载环境。如后续功能仍提示'命令未找到'，请退出本脚本执行 source ~/.bashrc 即可生效。${background}"
             echo -e "${green}======================================${background}"
         else
             echo -e "${red}克隆仓库失败，请检查网络或加速链接可用性。${background}"
@@ -964,13 +984,7 @@ manage_clash() {
         fi
         pause; manage_clash ;;
     2)
-        if command -v clashctl >/dev/null 2>&1; then clashctl on; else echo -e "${red}未检测到 clashctl 命令，请先安装或重新加载环境变量。${background}"; fi
-        pause; manage_clash ;;
-    3)
-        if command -v clashctl >/dev/null 2>&1; then clashctl off; else echo -e "${red}未检测到 clashctl 命令。${background}"; fi
-        pause; manage_clash ;;
-    4)
-        if command -v clashctl >/dev/null 2>&1; then 
+        if clash_env_ready; then
             echo -e "${white}==== 状态与内核 ====${background}"
             clashctl status
             echo "-------------------------"
@@ -978,29 +992,44 @@ manage_clash() {
             if [[ "$up_ans" == "y" || "$up_ans" == "Y" ]]; then
                 clashctl upgrade
             fi
-        else 
+        else
             echo -e "${red}未检测到 clashctl 命令。${background}"
         fi
+        pause; manage_clash ;;
+    3)
+        echo -en "${yellow}确定要完全卸载 Clash for Linux 吗？[y/N]: ${background}"; read rm_clash
+        if [[ "$rm_clash" == "y" || "$rm_clash" == "Y" ]]; then
+            if [ -f "$HOME/clash-for-linux-install/uninstall.sh" ]; then
+                cd $HOME/clash-for-linux-install && bash uninstall.sh
+                cd $HOME
+            else
+                echo -e "${yellow}本地找不到卸载脚本，正在重新拉取...${background}"
+                cd $HOME
+                git clone --branch master --depth 1 https://gh-proxy.org/https://github.com/nelvko/clash-for-linux-install.git
+                cd clash-for-linux-install && bash uninstall.sh
+                cd $HOME
+            fi
+            # 卸载后从当前脚本进程中取消相关函数的定义，防止面板误判“已安装”
+            unset -f clashctl 2>/dev/null
+        fi
+        pause; manage_clash ;;
+    4)
+        if clash_env_ready; then clashctl on; else echo -e "${red}未检测到 clashctl 命令，请先安装或重新加载环境变量。${background}"; fi
         pause; manage_clash ;;
     5)
-        if command -v clashctl >/dev/null 2>&1; then 
-            clashctl ui
-            echo "-------------------------"
-            echo -en "${cyan}是否需要修改 Web 访问密钥？[y/N]: ${background}"; read set_sec
-            if [[ "$set_sec" == "y" || "$set_sec" == "Y" ]]; then
-                echo -en "${cyan}请输入新密钥: ${background}"; read new_sec
-                if [ -n "$new_sec" ]; then
-                    clashctl secret "$new_sec"
-                fi
-            else
-                clashctl secret
-            fi
-        else 
-            echo -e "${red}未检测到 clashctl 命令。${background}"
-        fi
+        if clash_env_ready; then clashctl off; else echo -e "${red}未检测到 clashctl 命令。${background}"; fi
         pause; manage_clash ;;
     6)
-        if command -v clashctl >/dev/null 2>&1; then 
+        if clash_env_ready; then
+            if ! clashctl node; then
+                echo -e "${red}节点选择未完成，请查看上方提示；旧版本请先确认支持 clashctl node。${background}"
+            fi
+        else
+            echo -e "${red}未加载 Clash 环境；若已安装，请退出本脚本执行 source ~/.bashrc 后重试。${background}"
+        fi
+        pause; manage_clash ;;
+    7)
+        if clash_env_ready; then
             echo -e "${white}==== 订阅管理 ====${background}"
             echo -e "  [1] 查看当前订阅 (ls)"
             echo -e "  [2] 添加新订阅 (add)"
@@ -1013,21 +1042,21 @@ manage_clash() {
             echo -en "${cyan}请选择操作: ${background}"; read sub_num
             case $sub_num in
                 1) clashctl sub ls ;;
-                2) 
-                   echo -en "${cyan}请输入订阅链接 (建议用双引号包裹): ${background}"
-                   read sub_url
+                2)
+                   echo -en "${cyan}请输入订阅链接（直接粘贴，无需加引号）: ${background}"
+                   IFS= read -r sub_url
                    if [ -n "$sub_url" ]; then clashctl sub add "$sub_url"; fi
                    ;;
-                3) clashctl sub update ;;
+                3) clashctl sub update --all ;;
                 4)
                    clashctl sub ls
-                   echo -en "${cyan}请输入要使用的订阅 ID: ${background}"
+                   echo -en "${cyan}请输入要使用的订阅名称: ${background}"
                    read sub_id
                    if [ -n "$sub_id" ]; then clashctl sub use "$sub_id"; fi
                    ;;
                 5)
                    clashctl sub ls
-                   echo -en "${cyan}请输入要删除的订阅 ID: ${background}"
+                   echo -en "${cyan}请输入要删除的订阅名称: ${background}"
                    read del_id
                    if [ -n "$del_id" ]; then clashctl sub del "$del_id"; fi
                    ;;
@@ -1035,28 +1064,45 @@ manage_clash() {
                 0) ;;
                 *) echo -e "${red}输入错误${background}" ;;
             esac
-        else 
-            echo -e "${red}未检测到 clashctl 命令。${background}"
-        fi
-        pause; manage_clash ;;
-    7)
-        if command -v clashctl >/dev/null 2>&1; then 
-            clashctl tun
-            echo "-------------------------"
-            echo -en "${cyan}要改变Tun模式状态吗？[on 开启 / off 关闭 / 0 退出]: ${background}"; read tun_op
-            if [[ "$tun_op" == "on" || "$tun_op" == "off" ]]; then
-                clashctl tun "$tun_op"
-                # --- 添加提示用户已自动重启开启代理 ---
-                echo -e "\n${yellow}================ 提示 =================${background}"
-                echo -e "${green}✔ Tun 模式已成功切换！${background}"
-                echo -e "${yellow}=======================================${background}"
-            fi
-        else 
+        else
             echo -e "${red}未检测到 clashctl 命令。${background}"
         fi
         pause; manage_clash ;;
     8)
-        if command -v clashctl >/dev/null 2>&1; then 
+        if clash_env_ready; then
+            clashctl tun
+            echo "-------------------------"
+            echo -en "${cyan}要改变Tun模式状态吗？[on 开启 / off 关闭 / 0 退出]: ${background}"; read tun_op
+            if [[ "$tun_op" == "on" || "$tun_op" == "off" ]]; then
+                if clashctl tun "$tun_op"; then
+                    echo -e "${green}✔ Tun 模式已成功切换！${background}"
+                else
+                    echo -e "${red}Tun 模式切换失败，请查看上方错误信息。${background}"
+                fi
+            fi
+        else
+            echo -e "${red}未检测到 clashctl 命令。${background}"
+        fi
+        pause; manage_clash ;;
+    9)
+        if clash_env_ready; then
+            clashctl ui
+            echo "-------------------------"
+            echo -en "${cyan}是否需要修改 Web 访问密钥？[y/N]: ${background}"; read set_sec
+            if [[ "$set_sec" == "y" || "$set_sec" == "Y" ]]; then
+                echo -en "${cyan}请输入新密钥: ${background}"; IFS= read -rs new_sec; echo
+                if [ -n "$new_sec" ]; then
+                    clashctl secret "$new_sec"
+                fi
+            else
+                clashctl secret
+            fi
+        else
+            echo -e "${red}未检测到 clashctl 命令。${background}"
+        fi
+        pause; manage_clash ;;
+    10)
+        if clash_env_ready; then
             echo -e "${white}==== Mixin配置管理 ====${background}"
             echo -e "  [1] 查看 Mixin 配置"
             echo -e "  [2] 编辑 Mixin 配置 (-e)"
@@ -1073,25 +1119,8 @@ manage_clash() {
                 0) ;;
                 *) echo -e "${red}输入错误${background}" ;;
             esac
-        else 
+        else
             echo -e "${red}未检测到 clashctl 命令。${background}"
-        fi
-        pause; manage_clash ;;
-    9)
-        echo -en "${yellow}确定要完全卸载 Clash for Linux 吗？[y/N]: ${background}"; read rm_clash
-        if [[ "$rm_clash" == "y" || "$rm_clash" == "Y" ]]; then
-            if [ -f "$HOME/clash-for-linux-install/uninstall.sh" ]; then
-                cd $HOME/clash-for-linux-install && bash uninstall.sh
-                cd $HOME
-            else
-                echo -e "${yellow}本地找不到卸载脚本，正在重新拉取...${background}"
-                cd $HOME
-                git clone --branch master --depth 1 https://gh-proxy.org/https://github.com/nelvko/clash-for-linux-install.git
-                cd clash-for-linux-install && bash uninstall.sh
-                cd $HOME
-            fi
-            # 卸载后从当前脚本进程中取消相关函数的定义，防止面板误判“已安装”
-            unset -f clashctl 2>/dev/null
         fi
         pause; manage_clash ;;
     0) return ;;
