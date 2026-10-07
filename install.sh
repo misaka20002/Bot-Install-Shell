@@ -1,5 +1,6 @@
 #!/bin/env bash
-cd $HOME
+set -o pipefail
+cd "$HOME" || exit 1
 export red="\033[31m"
 export green="\033[32m"
 export yellow="\033[33m"
@@ -25,31 +26,42 @@ if [ "$(id -u)" != "0" ]; then
 fi
 
 function Dependency(){
-    InstallDependency(){
-        echo -e ${green}正在安装必要依赖 dialog${background}
-        if [ $(command -v apt) ];then
-            apt install -y dialog curl
-        elif [ $(command -v dnf) ];then
-            dnf install -y dialog curl
-        elif [ $(command -v yum) ];then
-            yum install -y dialog curl
-        elif [ $(command -v pacman) ];then
-            pacman -S --noconfirm --needed dialog curl
+    local dependency
+    local -a missing_dependencies=()
+
+    # Main.sh 使用 dialog 专属的 --colors；已有 whiptail 也必须安装 dialog。
+    for dependency in dialog curl; do
+        if [ ! -x "$(command -v "$dependency")" ]; then
+            missing_dependencies+=("$dependency")
         fi
-    }
-    
-    if [ -x "$(command -v whiptail)" ];then
-        dialog_whiptail=whiptail
-    elif [ -x "$(command -v dialog)" ];then
-        dialog_whiptail=dialog
+    done
+    if [ "${#missing_dependencies[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    echo -e "${green}正在安装必要依赖：${missing_dependencies[*]}${background}"
+    if command -v apt >/dev/null 2>&1; then
+        apt install -y "${missing_dependencies[@]}" || return 1
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y "${missing_dependencies[@]}" || return 1
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y "${missing_dependencies[@]}" || return 1
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -S --noconfirm --needed "${missing_dependencies[@]}" || return 1
+    elif command -v apk >/dev/null 2>&1; then
+        apk add "${missing_dependencies[@]}" || return 1
     else
-        dialog_whiptail=dialog
-        InstallDependency
+        echo -e "${red}未找到支持的系统包管理器，无法安装必要依赖。${background}" >&2
+        return 1
     fi
-    
-    if [ ! -x "$(command -v curl)" ];then
-        InstallDependency
-    fi
+
+    for dependency in dialog curl; do
+        if [ ! -x "$(command -v "$dependency")" ]; then
+            echo -e "${red}安装后仍未找到可执行的 ${dependency}，请检查系统包安装结果。${background}" >&2
+            return 1
+        fi
+    done
+    return 0
 }
 
 function SystemCheck(){
@@ -222,7 +234,10 @@ then
     echo -e ${green}2秒后开始安装${background}
     sleep 1s
     SystemCheck
-    Dependency
+    if ! Dependency; then
+        echo -e "${red}必要依赖安装失败，已中止安装脚本。${background}" >&2
+        exit 1
+    fi
     echo
     Script_Install
 else
