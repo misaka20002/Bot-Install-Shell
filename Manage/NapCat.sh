@@ -1,4 +1,5 @@
 #!/bin/env bash
+set -o pipefail
 export red="\033[31m"
 export green="\033[32m"
 export yellow="\033[33m"
@@ -8,7 +9,7 @@ export cyan="\033[36m"
 export white="\033[37m"
 export background="\033[0m"
 
-cd $HOME
+cd "$HOME" || exit 1
 if [ "$(uname -o)" = "Android" ];then
 echo -e ${red}不支持Android环境${background}
 exit
@@ -37,8 +38,7 @@ esac
 
 # NapCat 安装和管理
 
-INSTALL_SCRIPT="napcat.sh"
-INSTALL_URL="https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh"
+INSTALL_URL="https://raw.githubusercontent.com/NapNeko/NapCat-Installer/main/script/install.sh"
 TMUX_NAME="napcat"
 NAPCAT_CMD="xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox"
 NAPCAT_PATH="/root/Napcat/opt/QQ/qq"
@@ -48,6 +48,30 @@ APP_NAME="NapCat"
 VERSION_INFO_CACHED=false
 VERSION_CACHE_TIME=0
 VERSION_CACHE_TIMEOUT=3600  # 60分钟缓存
+
+# 只读取版本赋值，不执行远端脚本；目标版本允许比本地旧。
+read_qq_target_version() {
+    local target_version
+    target_version=$(sed -nE "s/^[[:space:]]*linuxqq_target_version=['\"]([0-9]+\.[0-9]+\.[0-9]+-[0-9]+)['\"][[:space:]]*(#.*)?$/\1/p" "$1") || return 1
+    [[ "$target_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$ ]] || return 1
+    printf '%s\n' "$target_version"
+}
+
+# 查询和安装共用来源及校验，调用方必须传入本轮 mktemp 创建的文件。
+download_napcat_installer() {
+    local output_file="$1" url
+    for url in "$INSTALL_URL" "https://gh-proxy.com/${INSTALL_URL}"; do
+        if curl -fLsS --connect-timeout 3 --max-time 10 --retry 1 \
+            --output "$output_file" "$url" &&
+            [ -s "$output_file" ] &&
+            bash -n "$output_file" 2>/dev/null &&
+            grep -qE '^function[[:space:]]+install_linuxqq_rootless\(\)[[:space:]]*\{' "$output_file" &&
+            read_qq_target_version "$output_file" >/dev/null; then
+            return 0
+        fi
+    done
+    return 1
+}
 
 # 检查 tmux 是否安装
 check_tmux() {
@@ -135,19 +159,30 @@ install_NapCat() {
     
     # 下载安装脚本
     echo -e ${yellow}正在下载${APP_NAME}安装脚本...${background}
-    if ! curl -o ${INSTALL_SCRIPT} ${INSTALL_URL}; then
-        echo -e ${red}下载安装脚本失败，请检查网络连接${background}
+    local install_script
+    if ! install_script=$(mktemp); then
+        echo -e ${red}无法创建安装脚本临时文件，已中止安装${background}
+        return 1
+    fi
+    if ! chmod 700 "$install_script" || ! download_napcat_installer "$install_script"; then
+        rm -f -- "$install_script"
+        echo -e ${red}下载安装脚本失败或内容校验未通过，请检查网络连接后重试${background}
         echo -en ${cyan}回车返回${background};read
         return 1
     fi
     
     # 执行安装脚本
     echo -e ${yellow}正在执行${APP_NAME}安装脚本...${background}
-    chmod +x ${INSTALL_SCRIPT}
-    bash ${INSTALL_SCRIPT}
+    if ! bash "$install_script"; then
+        rm -f -- "$install_script"
+        clear_version_cache
+        echo -e ${red}${APP_NAME}安装脚本执行失败，已中止，请查看上方错误后重试${background}
+        echo -en ${cyan}回车返回${background};read
+        return 1
+    fi
     
     # 安装后清理
-    rm -f ${INSTALL_SCRIPT}
+    rm -f -- "$install_script"
     
     # 自动运行一次以生成日志文件，便于获取版本信息
     echo -e ${yellow}正在初始化${APP_NAME}以获取版本信息...${background}
@@ -180,6 +215,7 @@ install_NapCat() {
     #     start_NapCat
     #     ;;
     # esac
+    return 0
 }
 
 # 检查 NapCat 是否已安装
@@ -3028,30 +3064,30 @@ save_version_cache() {
 
 # 获取 QQ 目标版本（从远程脚本）
 get_qq_target_version() {
-    local target_version=""
-    
-    # 尝试从远程脚本获取目标版本
-    target_version=$(curl -s --connect-timeout 3 --max-time 5 "$INSTALL_URL" 2>/dev/null | \
-        grep -oP 'linuxqq_target_version="\K[0-9]+\.[0-9]+\.[0-9]+-[0-9]+' | head -1)
-    
-    # 如果获取失败，使用默认版本
-    if [ -z "$target_version" ]; then
-        target_version="3.2.20-40990"
+    local installer_file target_version
+    installer_file=$(mktemp) || return 1
+    if ! download_napcat_installer "$installer_file" ||
+        ! target_version=$(read_qq_target_version "$installer_file"); then
+        rm -f -- "$installer_file"
+        return 1
     fi
-    
-    echo "$target_version"
+    rm -f -- "$installer_file"
+    printf '%s\n' "$target_version"
 }
 
 # 检查是否有更新（QQ版本）
 check_qq_update() {
     local current_version="$1"
-    local target_qq_version=$(get_qq_target_version)
+    local target_qq_version
     
     if [ "$current_version" = "未安装" ] || [ "$current_version" = "未知" ]; then
         echo "${yellow}[需要安装]${background}"
+    elif ! target_qq_version=$(get_qq_target_version 2>/dev/null) || [ -z "$target_qq_version" ]; then
+        echo "${cyan}[无法检查更新]${background}"
     elif [ "$current_version" = "$target_qq_version" ]; then
         echo "${green}[最新]${background}"
     else
+        # 上游可能主动降级 QQ，只要版本不同就提示。
         echo "${yellow}[可更新到 $target_qq_version]${background}"
     fi
 }
@@ -3059,7 +3095,6 @@ check_qq_update() {
 # 检查 NapCat 是否有更新（获取远程最新版本号）
 fetch_napcat_latest_version() {
     local urls=(
-        "https://nclatest.znin.net/"
         "https://jiashu.1win.eu.org/https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
         "https://napcatversion.109834.xyz/https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
         "https://spring-night-57a1.3540746063.workers.dev/https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
