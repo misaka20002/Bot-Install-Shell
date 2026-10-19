@@ -412,10 +412,10 @@ if [ "${HOME}" != "${WORK_DIR}/home" ]; then
   exit 2
 fi
 MISSING=""
-for f in hapi_check_codex_auth_file hapi_write_codex_auth_file hapi_write_codex_current_config \
+for f in hapi_check_codex_auth_file hapi_write_codex_current_config \
          hapi_validate_codex_files hapi_codex_current_value hapi_codex_context_window_state hapi_show_codex_config \
-         hapi_edit_codex_official_auth hapi_detect_editor hapi_editor_program hapi_editor_basename \
-         hapi_editor_is_vim_like hapi_run_editor hapi_cleanup_sensitive_tmp \
+         hapi_ask_codex_context_window hapi_codex_auth_is_empty hapi_migrate_codex_provider_credential \
+         hapi_report_codex_credential hapi_codex_login_stash_file hapi_cleanup_sensitive_tmp \
          hapi_install_sensitive_tmp_traps hapi_extract_codex_profile_auth \
          hapi_save_codex_profile_from_files hapi_store_current_codex_config \
          hapi_create_codex_profile hapi_switch_codex_profile hapi_codex_profile_store_file \
@@ -571,12 +571,19 @@ model_provider = \"${reserved}\"
   expect_count "官方登录 + 残留自定义路由：不再保留第三方路由" "${HOME}/.codex/config.toml" "model_provider" 0
   expect_grep "官方登录剥离路由时给出说明" "${WORK_DIR}/d5.log" "已自动移除 config.toml 里的第三方路由"
 
-  rm -f "$(hapi_codex_route_stash_file)"
+  # 第三方 base_url + Key：Key 必须落在 [model_providers.*] 的段内 token 里。
+  # 这一条是 2026-10-19「Missing environment variable: OPENAI_API_KEY」的正向回归：
+  # 旧实现写的是 env_key（只认进程环境变量），把 Key 塞进 auth.json 对自定义 provider 完全没用。
+  rm -f "$(hapi_codex_route_stash_file)" "$(hapi_codex_login_stash_file)"
   seed_live ok_official
   hapi_write_codex_current_config "sk-third-party" "https://api.example.com/v1" "gpt-5.5" > "${WORK_DIR}/d6.log" 2>&1
   expect_count "官方登录 + 填了 Key + 第三方 base_url 时写 custom 模板" "${HOME}/.codex/config.toml" 'model_provider = "custom"' 1
-  expect_grep "填 Key 时给出风险提示" "${WORK_DIR}/d6.log" "本次仍写入了 OPENAI_API_KEY"
-  expect_count "官方登录字段未被删" "${HOME}/.codex/auth.json" '"refresh_token"' 1
+  expect_count "Key 写进段内 experimental_bearer_token" "${HOME}/.codex/config.toml" '^experimental_bearer_token = "sk-third-party"$' 1
+  expect_count "显式关掉 requires_openai_auth（避免 ChatGPT token 被发到第三方）" "${HOME}/.codex/config.toml" '^requires_openai_auth = false$' 1
+  expect_count "不再写 env_key（Codex 只从环境变量取，auth.json 不参与）" "${HOME}/.codex/config.toml" "env_key" 0
+  expect_count "第三方模式下 auth.json 被移除" <(ls -A "${HOME}/.codex" 2>/dev/null) '^auth\.json$' 0
+  expect_count "官方登录态被暂存（切回官方时会放回）" "$(hapi_codex_login_stash_file)" '"refresh_token"' 1
+  expect_grep "提示 Key 已随第三方路由写进 config.toml" "${WORK_DIR}/d6.log" "experimental_bearer_token"
 
   # 官方登录 + 残留第三方路由 + 已有 token：路由整段剥离并暂存，token 不留在 config.toml
   seed_live ok_official 'model = "gpt-5.5"
@@ -609,82 +616,22 @@ experimental_bearer_token = "sk-existing"
 fi
 
 # ============================================================
-# E) 菜单 7：编辑器流程
+# E) 菜单 7 已移除：官方登录改由 cc-switch 的授权中心绑定，脚本不再编辑 auth.json
 # ============================================================
 if group_on E; then
-  head_ "E) hapi_edit_codex_official_auth：编辑器探测 / 参数 / 失败拦截 / 临时文件"
-  HAPI_EDITOR="/nonexistent/editor-probe" ; detected=$(hapi_detect_editor 2>/dev/null)
-  expect_count "不可用的 HAPI_EDITOR 会被跳过（回退自动探测）" <(printf '%s\n' "${detected}") "nonexistent" 0
-  unset HAPI_EDITOR
-
-  # 注意：探测会先确认"这个程序真的存在"，所以这里必须用确实存在的命令（bash/sh/cp），
-  # 否则测到的是"回退逻辑"而不是"优先级"（踩过：用不存在的 myvim/vis-ed 让三条断言全红）。
-  HAPI_EDITOR="bash --flag"; expect_eq "可用的 HAPI_EDITOR 优先" "bash --flag" "$(hapi_detect_editor)"; unset HAPI_EDITOR
-  VISUAL="sh"; EDITOR="cp"; expect_eq "VISUAL 优先于 EDITOR" "sh" "$(hapi_detect_editor)"; unset VISUAL
-  expect_eq "EDITOR 兜底" "cp" "$(hapi_detect_editor)"; unset EDITOR
-
-  hapi_editor_is_vim_like "vim" && ok "vim 判定为 vim 系" || no "vim 应判定为 vim 系"
-  hapi_editor_is_vim_like "nano" && no "nano 不应判定为 vim 系" || ok "nano 不是 vim 系"
-
-  rm -f "${VIM_ARGS_LOG}"; printf '{}\n' > "${WORK_DIR}/probe.json"
-  FAKE_EDITOR_SOURCE="$(fx_path ok_official)" hapi_run_editor "vim" "${WORK_DIR}/probe.json" > /dev/null 2>&1
-  expect_grep "vim 参数含 set paste" "${VIM_ARGS_LOG}" "\[set paste\]"
-  expect_grep "vim 参数关闭 backup/swap/undo/viminfo" "${VIM_ARGS_LOG}" "\[set nobackup nowritebackup noswapfile noundofile viminfo=\]"
-  rm -f "${WORK_DIR}/probe2.json"
-  FAKE_EDITOR_SOURCE="$(fx_path ok_official)" hapi_run_editor "bash ${BIN_DIR}/editor.sh" "${WORK_DIR}/probe2.json" > /dev/null 2>&1
-  expect_count "非 vim 编辑器不传 -c 但文件被写入" "${WORK_DIR}/probe2.json" "account_id" 1
-
-  export HAPI_EDITOR="bash ${BIN_DIR}/editor.sh"
-  export FAKE_EDITOR_SOURCE="$(fx_path ok_official)"
-  export FAKE_EDITOR_LOG="${EDITOR_TARGET_LOG}"   # 必须 export：假编辑器是子进程，只继承导出变量
-  unset FAKE_EDITOR_SEQ FAKE_EDITOR_STATUS FAKE_EDITOR_TERM
-  rm -f "${EDITOR_TARGET_LOG}"
-
-  seed_live ok_official
-  printf '1\n\ny\nn\n' | hapi_edit_codex_official_auth > /dev/null 2>&1
-  expect_count "正常粘贴写入 auth.json" "${HOME}/.codex/auth.json" '"account_id"' 1
-  expect_count "使用 mktemp 随机后缀" "${EDITOR_TARGET_LOG}" "hapi_codex_auth\.[A-Za-z0-9]{6}$" 1
-  expect_count "不再是 PID 固定名" "${EDITOR_TARGET_LOG}" "hapi_codex_auth_[0-9]+\.json$" 0
-  expect_count "正常结束后无临时文件残留" <(ls "${TMPDIR}") "hapi_codex_auth" 0
-
-  before=$(cat "${HOME}/.codex/auth.json")
-  FAKE_EDITOR_SOURCE="$(fx_path c_truncated)"
-  printf '1\n\nn\n' | hapi_edit_codex_official_auth > "${WORK_DIR}/e_fail.log" 2>&1
-  expect_eq "校验失败放弃后 live 文件未被改动" "${before}" "$(cat "${HOME}/.codex/auth.json")"
-  expect_grep "报出 JSON 解析错误" "${WORK_DIR}/e_fail.log" "JSON 解析失败"
-  expect_count "失败路径也清理临时文件" <(ls "${TMPDIR}") "hapi_codex_auth" 0
-
-  FAKE_EDITOR_SOURCE="$(fx_path ok_official)"; export FAKE_EDITOR_STATUS=1
-  rm -f "${HOME}/.codex/auth.json"
-  printf '1\n\nn\n' | hapi_edit_codex_official_auth > "${WORK_DIR}/e_rc.log" 2>&1
-  expect_count "编辑器失败 + 拒绝 → 不写文件" <(ls "${HOME}/.codex" 2>/dev/null) '^auth\.json$' 0
-  expect_grep "提示编辑器异常退出" "${WORK_DIR}/e_rc.log" "编辑器异常退出"
-  printf '1\n\ny\ny\nn\n' | hapi_edit_codex_official_auth > /dev/null 2>&1
-  expect_count "编辑器失败 + 确认 → 仍可写入" "${HOME}/.codex/auth.json" '"account_id"' 1
-  unset FAKE_EDITOR_STATUS
-
-  seed_live ok_official
-  FAKE_EDITOR_SOURCE="$(fx_path ok_official)"
-  printf '1\n\ny\nn\n' | hapi_edit_codex_official_auth > /dev/null 2>&1
-  FAKE_EDITOR_SOURCE="$(fx_path c_partial_tokens)"
-  printf '1\n\ny\nn\n' | hapi_edit_codex_official_auth > "${WORK_DIR}/e_bak.log" 2>&1
-  expect_count "生成 auth.json.bak" <(ls -A "${HOME}/.codex") "auth.json.bak" 1
-  expect_grep "official 级拦住残缺三件套" "${WORK_DIR}/e_bak.log" "缺少 tokens.id_token"
-
-  rm -f "${WORK_DIR}/term_result"
-  (
-    export HAPI_EDITOR="bash ${BIN_DIR}/editor.sh"
-    export FAKE_EDITOR_SOURCE="$(fx_path ok_official)"
-    export FAKE_EDITOR_TERM=1
-    printf '1\n\n' | hapi_edit_codex_official_auth > /dev/null 2>&1
-    echo "exit=$?" > "${WORK_DIR}/term_result"
-    echo "leftover=$(ls "${TMPDIR}" 2>/dev/null | grep -c 'hapi_codex_auth')" >> "${WORK_DIR}/term_result"
-  )
-  expect_grep "SIGTERM 保持 143 退出语义" "${WORK_DIR}/term_result" "^exit=143$"
-  expect_grep "SIGTERM 后无临时文件残留" "${WORK_DIR}/term_result" "^leftover=0$"
+  head_ "E) 菜单 7（写入/编辑官方 auth.json）已整块移除，且不留下悬空引用"
+  # 这些函数只服务于菜单 7；留着就是死代码，引用它们等于留一个「能加载但没人调用」的陷阱。
+  for fn in hapi_edit_codex_official_auth hapi_detect_editor hapi_editor_program hapi_editor_basename \
+            hapi_editor_is_vim_like hapi_run_editor hapi_write_codex_auth_file hapi_warn_codex_provider_route; do
+    expect_count "生产脚本已无函数 ${fn}" "${TARGET_SCRIPT}" "^${fn}() {" 0
+  done
+  expect_count "菜单不再有第 7 项" "${TARGET_SCRIPT}" "写入/编辑官方 auth.json" 0
+  expect_count "菜单 case 不再分发到菜单 7" "${TARGET_SCRIPT}" "7) hapi_edit_codex_official_auth" 0
+  expect_count "脚本里不再出现「菜单 7」字样" "${TARGET_SCRIPT}" "菜单 7" 0
+  expect_grep "Codex 菜单仍保留第 6 项（推荐值）" "${TARGET_SCRIPT}" "6) hapi_toggle_codex_recommended_values; pause ;;"
+  expect_grep "写不进去时的提示已指向 cc-switch 授权中心" "${TARGET_SCRIPT}" "cc-switch 的授权中心"
 fi
 
-# ============================================================
 # F) 配置库旁路卡点
 # ============================================================
 if group_on F; then
@@ -727,10 +674,10 @@ JS
 fi
 
 # ============================================================
-# G) 凭据权限（备份 0600）与预览脱敏
+# G) 凭据权限（备份 0600）与预览明文
 # ============================================================
 if group_on G; then
-  head_ "G) 凭据文件与备份的 0600，以及预览脱敏"
+  head_ "G) 凭据文件与备份的 0600，以及「查看配置」明文显示 Key"
   # 备份点结构（2026-09-23 起统一走 hapi_backup_or_fail）：
   # ⚠️ 旧断言是「每个 `cp -a "a" "b"` 行后面紧跟 chmod 600 "b"」的**文本**匹配；改用 helper 之后
   #    那些行不再以 `cp -a ` 开头，断言会退化成 0 命中却依然「通过」——静默失效，比没有断言更糟。
@@ -760,119 +707,66 @@ console.log("SCAN:helper=" + (helperOk ? "ok" : "BAD") + " bare=" + bare + (bare
 ' | tail -n 1)
   expect_eq "备份走 helper（内部 fail-fast + chmod 600）且脚本内无裸 cp -a" "SCAN:helper=ok bare=0" "${backup_scan}"
 
+  # 0600：官方 API Key 路径会实际写 auth.json（第三方路径不写，见 D 组），用它来断权限。
   seed_live ok_official
   : > "${CHMOD_LOG}"
-  export HAPI_EDITOR="bash ${BIN_DIR}/editor.sh"
-  export FAKE_EDITOR_SOURCE="$(fx_path ok_official)"; unset FAKE_EDITOR_STATUS FAKE_EDITOR_SEQ FAKE_EDITOR_TERM
-  printf '1\n\ny\nn\n' | hapi_edit_codex_official_auth > /dev/null 2>&1
+  hapi_write_codex_current_config "sk-g-0600" "https://api.openai.com/v1" "gpt-5.5" > /dev/null 2>&1
   expect_grep "auth.json 写入时调用 chmod 600" "${CHMOD_LOG}" "600 ${HOME}/.codex/auth.json"
-  seed_live ok_official $'model = "gpt-5.5"\n'
-  printf '1\n\ny\nn\n' | hapi_edit_codex_official_auth > /dev/null 2>&1
+  expect_count "auth.json 写入时创建权限就是 0600" "${HOME}/.codex/auth.json" '"OPENAI_API_KEY": "sk-g-0600"' 1
+  # 这次要同时存在 config.toml，才能断到 config.toml.bak 的 0600
+  seed_live ok_official $"model = \"gpt-5.5\"\n"
+  hapi_write_codex_current_config "sk-g-bak" "https://api.openai.com/v1" "gpt-5.5" > /dev/null 2>&1
   expect_grep "auth.json.bak 也调用 chmod 600" "${CHMOD_LOG}" "600 ${HOME}/.codex/auth.json.bak"
-  hapi_write_codex_current_config "" "https://api.example.com/v1" "gpt-5.5" > /dev/null 2>&1
   expect_grep "config.toml 备份也调用 chmod 600" "${CHMOD_LOG}" "600 ${HOME}/.codex/config.toml.bak"
 
-  expect_count "预览显示 account_id" <(hapi_check_codex_auth_file "$(fx_path ok_official)" 2>&1) "account_id.*b4ea17f9" 1
-  expect_count "预览打码 access_token" <(hapi_check_codex_auth_file "$(fx_path ok_official)" 2>&1) '"access_token": "\*\*\*\*\*\*"' 1
-  expect_count "预览不出现真实 refresh_token" <(hapi_check_codex_auth_file "$(fx_path ok_official)" 2>&1) "rt\.1\.AAD4M" 0
+  # 校验/诊断输出仍然打码（Q5 的边界：只放宽「查看配置」这两个入口）。
+  expect_count "校验预览显示 account_id" <(hapi_check_codex_auth_file "$(fx_path ok_official)" 2>&1) "account_id.*b4ea17f9" 1
+  expect_count "校验预览打码 access_token" <(hapi_check_codex_auth_file "$(fx_path ok_official)" 2>&1) '"access_token": "\*\*\*\*\*\*"' 1
+  expect_count "校验预览不出现真实 refresh_token" <(hapi_check_codex_auth_file "$(fx_path ok_official)" 2>&1) "rt\.1\.AAD4M" 0
+
+  # ---- live 预览：Key 必须明文（用户 2026-10-19 明确要求，否则无法确认「到底填进去了吗」）----
+  seed_live ok_official 'model = "gpt-6-astra"
+model_provider = "myrelay"
+
+[model_providers.myrelay]
+base_url = "https://api.example.com/v1"
+experimental_bearer_token = "sk-plain-visible"
+requires_openai_auth = false
+'
+  hapi_show_codex_config > "${WORK_DIR}/g_live.log" 2>&1
+  expect_count "live 预览直接显示段内 token（不再 ***）" "${WORK_DIR}/g_live.log" \
+    '^experimental_bearer_token = "sk-plain-visible"$' 1
+  expect_count "live 预览不再出现打码星号" "${WORK_DIR}/g_live.log" '\*\*\*\*\*\*' 0
+  expect_count "live 预览里 1M 数字阈值照常显示" "${WORK_DIR}/g_live.log" "model_auto_compact_token_limit" 0
+
   seed_live ok_official
   hapi_show_codex_config > "${WORK_DIR}/g_show.log" 2>&1
-  expect_count "查看配置不泄露 refresh_token" "${WORK_DIR}/g_show.log" "rt\.1\.AAD4M" 0
-  expect_grep "查看配置仍能看到 account_id" "${WORK_DIR}/g_show.log" "b4ea17f9"
+  expect_grep "live 预览仍能看到 account_id" "${WORK_DIR}/g_show.log" "b4ea17f9"
+  # 这条是**有意**断言明文：改回打码时它会变红，提醒同步用户要求
+  expect_count "live 预览明文显示 auth.json 里的 refresh_token（用户要求）" "${WORK_DIR}/g_show.log" "rt\.1\.AAD4M" 1
 
-  # 1M 开关写的两个字段里，model_auto_compact_token_limit 名字含 "token"，会被
-  # isSensitiveKey 的 includes("token") 打成 "******"，看起来像被隐藏的密钥。
-  # 脱敏规则因此给这**一个字段名**开了例外，条件是「顶层 + 精确 key + 纯整数」三者同时成立，
-  # 所以这里必须**正反两个方向**都断言：数字阈值不打码，真 token / 非数字值照旧打码。
   seed_live ok_official 'model = "gpt-6-astra"
 model_context_window = 1000000
 model_auto_compact_token_limit = 900000
-experimental_bearer_token = "sk-must-be-masked"
 '
   hapi_show_codex_config > "${WORK_DIR}/g_1m.log" 2>&1
-  expect_count "预览里 1M 数字阈值不打码（数字阈值不是凭据）" "${WORK_DIR}/g_1m.log" \
-    '^model_auto_compact_token_limit = 900000$' 1
-  expect_count "预览里 model_context_window 不打码" "${WORK_DIR}/g_1m.log" \
-    '^model_context_window = 1000000$' 1
-  expect_count "数字阈值例外不放宽真 token 的打码" "${WORK_DIR}/g_1m.log" \
-    'experimental_bearer_token = "\*\*\*\*\*\*"' 1
-  expect_count "预览不泄露被放宽字段附近的真 token 明文" "${WORK_DIR}/g_1m.log" "sk-must-be-masked" 0
+  expect_count "1M 数字阈值不打码" "${WORK_DIR}/g_1m.log" '^model_auto_compact_token_limit = 900000$' 1
+  expect_count "model_context_window 不打码" "${WORK_DIR}/g_1m.log" '^model_context_window = 1000000$' 1
 
-  # ⚠️ 负向：例外必须**同时**满足「顶层 + 精确 key（大小写敏感）+ 纯整数」，缺一即照常打码。
-  #    下面三种是 2026-09-29 审查在真实 hapi_show_codex_config 上实测到的「应该打码却整行明文」
-  #    场景（当时的实现只按 key 名放行、且对 key 做了 toLowerCase、sanitizeToml 也不跟踪 section）。
-  #    只测标准顶层 900000 的正向用例抓不到它们。
-  seed_live ok_official 'model = "gpt-6-astra"
-model_auto_compact_token_limit = "sk-nonnumeric-secret"
-'
-  hapi_show_codex_config > "${WORK_DIR}/g_mask1.log" 2>&1
-  expect_count "live 预览：非数字值照常打码" "${WORK_DIR}/g_mask1.log" \
-    '^model_auto_compact_token_limit = "\*\*\*\*\*\*"$' 1
-  expect_count "live 预览：非数字值不泄露明文" "${WORK_DIR}/g_mask1.log" "sk-nonnumeric-secret" 0
-
-  seed_live ok_official 'model = "gpt-6-astra"
-model_auto_compact_token_limit = "900000"
-'
-  hapi_show_codex_config > "${WORK_DIR}/g_mask2.log" 2>&1
-  expect_count "live 预览：带引号的数字照常打码（只认裸整数）" "${WORK_DIR}/g_mask2.log" \
-    '^model_auto_compact_token_limit = "\*\*\*\*\*\*"$' 1
-
-  seed_live ok_official 'model = "gpt-6-astra"
-MODEL_AUTO_COMPACT_TOKEN_LIMIT = "sk-uppercase-secret"
-'
-  hapi_show_codex_config > "${WORK_DIR}/g_mask3.log" 2>&1
-  expect_count "live 预览：大小写变体照常打码（不对 key 做 toLowerCase）" "${WORK_DIR}/g_mask3.log" \
-    '^MODEL_AUTO_COMPACT_TOKEN_LIMIT = "\*\*\*\*\*\*"$' 1
-  expect_count "live 预览：大小写变体不泄露明文" "${WORK_DIR}/g_mask3.log" "sk-uppercase-secret" 0
-
-  seed_live ok_official 'model = "gpt-6-astra"
-model_provider = "foo"
-
-[model_providers.foo]
-model_auto_compact_token_limit = "sk-section-secret"
-'
-  hapi_show_codex_config > "${WORK_DIR}/g_mask4.log" 2>&1
-  expect_count "live 预览：section 内同名字段照常打码（例外只认顶层）" "${WORK_DIR}/g_mask4.log" \
-    '^model_auto_compact_token_limit = "\*\*\*\*\*\*"$' 1
-  expect_count "live 预览：section 内同名字段不泄露明文" "${WORK_DIR}/g_mask4.log" "sk-section-secret" 0
-
-  # 脱敏规则在脚本里有**两份 TOML 副本**（live 预览 / profile 预览），必须同步：
-  # 只改一份时 profile 预览仍会把数字阈值打成密钥，或反过来放宽后漏掉真 token / 非数字值。
+  # ---- profile 预览：同一套明文规则（两份实现必须同步）----
   rm -rf "${HOME}/.codex"; mkdir -p "${HOME}/.codex"
-  printf '%s' '{"profiles":[{"name":"p1m","createdAt":"t","updatedAt":"t","config":{"auth":{"OPENAI_API_KEY":"sk-p1m"},"config":"model = \"gpt-6-astra\"\nmodel_auto_compact_token_limit = 900000\nexperimental_bearer_token = \"sk-profile-must-be-masked\"\n"}}]}' \
+  printf '%s' '{"profiles":[{"name":"p-plain","createdAt":"t","updatedAt":"t","config":{"auth":{"OPENAI_API_KEY":"sk-profile-plain"},"config":"model = \"gpt-6-astra\"\nmodel_context_window = 1000000\nmodel_auto_compact_token_limit = 900000\nmodel_provider = \"foo\"\n\n[model_providers.foo]\nexperimental_bearer_token = \"sk-profile-token\"\n"}}]}' \
     > "${HOME}/.codex/hapi_config_profiles.json"
-  hapi_show_codex_profile_by_index 1 > "${WORK_DIR}/g_profile_1m.log" 2>&1
-  expect_rc "G profile 预览（1M 场景）返回 0" 0 "$?"
-  expect_count "profile 预览里 1M 数字阈值同样不打码（两份规则必须同步）" "${WORK_DIR}/g_profile_1m.log" \
+  hapi_show_codex_profile_by_index 1 > "${WORK_DIR}/g_profile.log" 2>&1
+  expect_rc "profile 预览返回 0" 0 "$?"
+  expect_count "profile 预览明文显示 auth 里的 Key" "${WORK_DIR}/g_profile.log" '"OPENAI_API_KEY": "sk-profile-plain"' 1
+  expect_count "profile 预览明文显示段内 token" "${WORK_DIR}/g_profile.log" \
+    '^experimental_bearer_token = "sk-profile-token"$' 1
+  expect_count "profile 预览不再出现打码星号" "${WORK_DIR}/g_profile.log" '\*\*\*\*\*\*' 0
+  expect_count "profile 预览保留 1M 数字阈值" "${WORK_DIR}/g_profile.log" \
     '^model_auto_compact_token_limit = 900000$' 1
-  expect_count "profile 预览仍打码真 token" "${WORK_DIR}/g_profile_1m.log" \
-    'experimental_bearer_token = "\*\*\*\*\*\*"' 1
-  expect_count "profile 预览不泄露真 token 明文" "${WORK_DIR}/g_profile_1m.log" "sk-profile-must-be-masked" 0
-
-  # profile 预览侧的同样三种负向（只同步了 live、漏改 profile 时这里会红）
-  printf '%s' '{"profiles":[{"name":"p1m","createdAt":"t","updatedAt":"t","config":{"auth":{"OPENAI_API_KEY":"sk-p"},"config":"model = \"gpt-6-astra\"\nmodel_auto_compact_token_limit = \"sk-p-nonnumeric\"\n"}}]}' \
-    > "${HOME}/.codex/hapi_config_profiles.json"
-  hapi_show_codex_profile_by_index 1 > "${WORK_DIR}/g_pmask1.log" 2>&1
-  expect_count "profile 预览：非数字值照常打码" "${WORK_DIR}/g_pmask1.log" \
-    '^model_auto_compact_token_limit = "\*\*\*\*\*\*"$' 1
-  expect_count "profile 预览：非数字值不泄露明文" "${WORK_DIR}/g_pmask1.log" "sk-p-nonnumeric" 0
-
-  printf '%s' '{"profiles":[{"name":"p1m","createdAt":"t","updatedAt":"t","config":{"auth":{"OPENAI_API_KEY":"sk-p"},"config":"model = \"gpt-6-astra\"\nMODEL_AUTO_COMPACT_TOKEN_LIMIT = \"sk-p-uppercase\"\n"}}]}' \
-    > "${HOME}/.codex/hapi_config_profiles.json"
-  hapi_show_codex_profile_by_index 1 > "${WORK_DIR}/g_pmask2.log" 2>&1
-  expect_count "profile 预览：大小写变体照常打码" "${WORK_DIR}/g_pmask2.log" \
-    '^MODEL_AUTO_COMPACT_TOKEN_LIMIT = "\*\*\*\*\*\*"$' 1
-  expect_count "profile 预览：大小写变体不泄露明文" "${WORK_DIR}/g_pmask2.log" "sk-p-uppercase" 0
-
-  printf '%s' '{"profiles":[{"name":"p1m","createdAt":"t","updatedAt":"t","config":{"auth":{"OPENAI_API_KEY":"sk-p"},"config":"model = \"gpt-6-astra\"\nmodel_provider = \"foo\"\n\n[model_providers.foo]\nmodel_auto_compact_token_limit = \"sk-p-section\"\n"}}]}' \
-    > "${HOME}/.codex/hapi_config_profiles.json"
-  hapi_show_codex_profile_by_index 1 > "${WORK_DIR}/g_pmask3.log" 2>&1
-  expect_count "profile 预览：section 内同名字段照常打码" "${WORK_DIR}/g_pmask3.log" \
-    '^model_auto_compact_token_limit = "\*\*\*\*\*\*"$' 1
-  expect_count "profile 预览：section 内同名字段不泄露明文" "${WORK_DIR}/g_pmask3.log" "sk-p-section" 0
 fi
 
-# ============================================================
 # H) 兼容性回归
 # ============================================================
 if group_on H; then
@@ -886,8 +780,8 @@ base_url = "https://api.example.com/v1"
   hapi_validate_codex_files > /dev/null 2>&1
   expect_rc "hapi_validate_codex_files 接受正常配置" 0 "$?"
   expect_eq "hapi_codex_current_value 读取 model_provider" "myrelay" "$(hapi_codex_current_value 'model_provider')"
-  expect_count "菜单项 7 仍在" <(grep -c '7\.  \${cyan}写入/编辑官方 auth.json' "${TARGET_SCRIPT}") "1" 1
-  expect_count "菜单 7 case 分支仍在" <(grep -c '7) hapi_edit_codex_official_auth; pause ;;' "${TARGET_SCRIPT}") "1" 1
+  expect_count "菜单项 7 已移除（官方登录改由 cc-switch 授权中心绑定）" "${TARGET_SCRIPT}" "写入/编辑官方 auth.json" 0
+  expect_count "菜单 7 case 分支已移除" "${TARGET_SCRIPT}" "7) hapi_edit_codex_official_auth; pause ;;" 0
   expect_count "菜单 2 走 loadable 级校验" \
     <(grep -c 'hapi_check_codex_auth_file "${auth_file}" loadable' "${TARGET_SCRIPT}") "1" 1
   expect_count "菜单 4 走 loadable 级校验" \
@@ -956,7 +850,9 @@ goals = true
   expect_count "恢复 model_provider 行（provider id 沿用暂存值）" "${HOME}/.codex/config.toml" '^model_provider = "myrelay"$' 1
   expect_count "恢复 [model_providers.myrelay] 段" "${HOME}/.codex/config.toml" '^\[model_providers\.myrelay\]$' 1
   expect_count "按本次 base_url 更新端点" "${HOME}/.codex/config.toml" 'base_url = "https://relay2.example.com/v1"' 1
-  expect_count "恢复段里的其它字段（env_key）" "${HOME}/.codex/config.toml" 'env_key = "OPENAI_API_KEY"' 1
+  # env_key 现在会被就地迁移成段内 token（Codex 只从环境变量取 env_key，auth.json 不参与）
+  expect_count "恢复段里的 env_key 已迁移成段内 token" "${HOME}/.codex/config.toml" '^experimental_bearer_token = "sk-new-relay"$' 1
+  expect_count "恢复时不再保留 env_key" "${HOME}/.codex/config.toml" "env_key" 0
   expect_count "恢复段里的 token 换成本次填入的 Key" "${HOME}/.codex/config.toml" "sk-new-relay" 1
   expect_grep "提示已自动恢复路由" "${WORK_DIR}/i3.log" "已自动恢复此前的第三方路由"
 
@@ -1101,7 +997,10 @@ query_params = { foo = "bar" }
   expect_count "空配置恢复原 provider id" "${HOME}/.codex/config.toml" '^model_provider = "myrelay"$' 1
   expect_count "空配置恢复 provider 段" "${HOME}/.codex/config.toml" '^\[model_providers\.myrelay\]$' 1
   expect_count "空配置恢复 query_params" "${HOME}/.codex/config.toml" "query_params" 1
-  expect_count "空配置恢复 requires_openai_auth" "${HOME}/.codex/config.toml" "requires_openai_auth = true" 1
+  # 段内有 token 时必须收敛到 false：true 会让 Codex 拿 ChatGPT 登录去请求第三方端点，
+  # 而第三方模式下我们刚把 auth.json 移走（暂存）。
+  expect_count "段内有 token 时 requires_openai_auth 收敛为 false" "${HOME}/.codex/config.toml" "^requires_openai_auth = false$" 1
+  expect_count "不再保留 true（否则请求会带 ChatGPT 凭据）" "${HOME}/.codex/config.toml" "requires_openai_auth = true" 0
   expect_count "空配置按本次 base_url 更新端点" "${HOME}/.codex/config.toml" 'base_url = "https://relay-native.example.com/v1"' 1
   expect_count "空配置下不建 generic custom" "${HOME}/.codex/config.toml" 'name = "custom"' 0
   expect_grep "空配置恢复时提示已恢复路由" "${WORK_DIR}/i13b.log" "已自动恢复此前的第三方路由"
@@ -1268,10 +1167,13 @@ fs.writeFileSync(dir + "/hapi_config_profiles.json", JSON.stringify({ profiles: 
 JS
   hapi_show_claude_profile_by_index 1 > "${WORK_DIR}/j6.log" 2>&1
   expect_rc "J5 profile 预览成功" 0 "$?"
-  expect_count "J5 预览里不得出现任何明文凭据" "${WORK_DIR}/j6.log" "VISIBLE" 0
+  # 2026-10-19 起「查看配置」类预览**有意**明文显示凭据（否则用户无法确认 Key 有没有写进去）。
+  # 这条断言就是那一决定的锚点：改回打码时它会变红，提醒同步用户要求与 G 组。
+  expect_count "J5 profile 预览明文显示 OPENAI_API_KEY" "${WORK_DIR}/j6.log" '"OPENAI_API_KEY": "oa-PROFILE_VISIBLE"' 1
+  expect_count "J5 profile 预览明文显示 OPENROUTER_API_KEY" "${WORK_DIR}/j6.log" '"OPENROUTER_API_KEY": "or-PROFILE_VISIBLE"' 1
+  expect_count "J5 嵌套字段同样明文（预览不再递归脱敏）" "${WORK_DIR}/j6.log" '"deep_token": "dt-PROFILE_VISIBLE"' 1
   expect_count "J5 profile 名照常显示" "${WORK_DIR}/j6.log" "名称: p1" 1
   expect_count "J5 非敏感字段保留" "${WORK_DIR}/j6.log" '"PLAIN_MODEL": "claude-sonnet-4-5"' 1
-  expect_count "J5 嵌套敏感键已打码" "${WORK_DIR}/j6.log" '"deep_token": "\*\*\*\*\*\*"' 1
 
   # J6 配置库损坏时：保存必须 fail-closed（不许静默吃掉旧库），列表必须如实报损坏
   printf '%s' '{broken OLD_PROFILE_BYTES' > "${HOME}/.claude/hapi_config_profiles.json"
@@ -1467,22 +1369,8 @@ if group_on K; then
   expect_count "K5 profile 切换不谎报「已备份」" "${WORK_DIR}/k12.log" "已备份原配置到" 0
   expect_eq "K5 profile 切换未覆盖 live auth.json" "${K5_AUTH_BEFORE}" "$(cat "${HOME}/.codex/auth.json")"
 
-  # 菜单 7：粘贴路径（blank）与「载入现有 auth.json」（existing）两条都要 fail-fast
-  export HAPI_EDITOR="bash ${BIN_DIR}/editor.sh"
-  export FAKE_EDITOR_SOURCE="$(fx_path ok_official)"
-  unset FAKE_EDITOR_SEQ FAKE_EDITOR_STATUS FAKE_EDITOR_TERM
-  printf '1\n\ny\nn\n' | hapi_edit_codex_official_auth > "${WORK_DIR}/k13.log" 2>&1
-  expect_rc "K5 菜单 7 备份失败时中止" 1 "$?"
-  expect_grep "K5 菜单 7 报出备份失败" "${WORK_DIR}/k13.log" "备份失败，已中止修改"
-  expect_count "K5 菜单 7 不谎报「已备份」" "${WORK_DIR}/k13.log" "已备份原配置到" 0
-  expect_eq "K5 菜单 7 未覆盖 live auth.json" "${K5_AUTH_BEFORE}" "$(cat "${HOME}/.codex/auth.json")"
-  : > "${EDITOR_TARGET_LOG}"
-  printf '2\n' | hapi_edit_codex_official_auth > "${WORK_DIR}/k14.log" 2>&1
-  expect_rc "K5 菜单 7「载入现有 auth」失败时中止" 1 "$?"
-  expect_grep "K5 载入失败给出中止说明" "${WORK_DIR}/k14.log" "载入现有 auth.json 失败"
-  expect_count "K5 载入失败后不进编辑器（不会在空白内容上编辑）" "${EDITOR_TARGET_LOG}" "hapi_codex_auth" 0
-  expect_count "K5 载入失败后清理敏感临时文件" <(ls "${TMPDIR}") "hapi_codex_auth" 0
-  unset HAPI_EDITOR FAKE_EDITOR_SOURCE
+  # 菜单 7 已移除（官方登录改由 cc-switch 授权中心绑定），它的两条 fail-fast 断言随之删除；
+  # 「菜单 1 / 推荐值 / profile 切换」三条备份 fail-fast 仍然覆盖所有现存写盘入口。
   eval "${CP_DEF}"
 
   # K6 正向对照：cp 正常时 writer 必须成功并留下备份（证明 K5 不是「一律中止」）
@@ -1537,16 +1425,19 @@ goals = true
   expect_count "L3 其余字段不受影响" "${CFG}" '^model = "gpt-6-astra"$' 1
   expect_count "L3 [features] 段不受影响" "${CFG}" "^\[features\]$" 1
 
-  # --- L4 回答 n 但字段是用户自填的值：原样保留 + 明确提示（不许静默清掉）---
+  # --- L4 回答 n：两个顶层键**无条件**删除（对齐 cc-switch；2026-10-19 用户明确选择）---
+  # 旧实现只删「值等于本开关默认值」的行、保留用户自填的 200000/150000；结果是同一个开关在
+  # cc-switch 与脚本里行为不一致（在 cc-switch 里关了、回来回答 n 却看到字段还在）。
+  # 取舍：1M 是一个开关，不是一个用户字段——要保留自定义值就不要回答 n。
   seed_live c_apikey_ok 'model = "gpt-6-astra"
 model_context_window = 200000
 model_auto_compact_token_limit = 150000
 '
   printf 'y\n\n\n\nn\n' | hapi_config_codex > "${WORK_DIR}/l4.log" 2>&1
   expect_rc "L4 关闭 1M 成功（自定义值场景）" 0 "$?"
-  expect_count "L4 保留自定义 model_context_window" "${CFG}" '^model_context_window = 200000$' 1
-  expect_count "L4 保留自定义 model_auto_compact_token_limit" "${CFG}" '^model_auto_compact_token_limit = 150000$' 1
-  expect_grep "L4 明确提示自定义值已保留" "${WORK_DIR}/l4.log" "已原样保留"
+  expect_count "L4 用户自填的 model_context_window 也被删除" "${CFG}" "model_context_window" 0
+  expect_count "L4 用户自填的 compact limit 也被删除" "${CFG}" "model_auto_compact_token_limit" 0
+  expect_count "L4 其余字段不受影响" "${CFG}" '^model = "gpt-6-astra"$' 1
 
   # --- L5 开启时已有的自定义 compact limit 不被默认值覆盖（cc-switch：只在缺失时补）---
   seed_live c_apikey_ok 'model = "gpt-6-astra"
@@ -1594,6 +1485,28 @@ model_auto_compact_token_limit = 900000
   expect_rc "L8 新建配置成功" 0 "$?"
   expect_count "L8 新配置里的默认模型名是 gpt-6-astra" "$(l_codex_store)" 'model = \\"gpt-6-astra\\"' 1
   expect_count "L8 不再写入旧默认模型名" "$(l_codex_store)" "gpt-5\.5" 0
+  expect_count "L8 Key 写在段内 experimental_bearer_token" "$(l_codex_store)" 'experimental_bearer_token = \\\"sk-l8\\\"' 1
+  expect_count "L8 新配置不再写 env_key" "$(l_codex_store)" "env_key" 0
+  expect_count "L8 新配置显式 requires_openai_auth = false" "$(l_codex_store)" "requires_openai_auth = false" 1
+  expect_count "L8 新配置的 auth 记为空（切换时会移除 live auth.json）" "$(l_codex_store)" '"auth": \{\}' 1
+
+  # --- L8b 新建配置也会问 1M（此前这条路径完全没有这一问，产物与菜单 1 分叉）---
+  rm -f "$(l_codex_store)"
+  printf 'l8b\nsk-l8b\n\n\ny\n' | hapi_create_codex_profile > "${WORK_DIR}/l8b.log" 2>&1
+  expect_rc "L8b 新建配置（开启 1M）成功" 0 "$?"
+  expect_grep "L8b 提问里出现 1M 开关" "${WORK_DIR}/l8b.log" "是否开启 1M 上下文窗口"
+  expect_count "L8b 写入 model_context_window = 1000000" "$(l_codex_store)" "model_context_window = 1000000" 1
+  expect_count "L8b 写入 model_auto_compact_token_limit = 900000" "$(l_codex_store)" "model_auto_compact_token_limit = 900000" 1
+  # 1M 两个键必须是**顶层**（在第一个 section 之前），否则 Codex 会把它们当成 [model_providers.custom] 的字段。
+  l8b_order=$(node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=String(s.profiles[0].config.config||"");const i=c.indexOf("model_context_window");const j=c.indexOf("[model_providers");process.stdout.write(i>=0&&j>i?"ok":"bad")' "$(l_codex_store)")
+  expect_eq "L8b 1M 字段落在第一个 section 之前" "ok" "${l8b_order}"
+
+  # --- L8c 新建配置回答 n：不写 1M 字段 ---
+  rm -f "$(l_codex_store)"
+  printf 'l8c\nsk-l8c\n\n\nn\n' | hapi_create_codex_profile > /dev/null 2>&1
+  expect_rc "L8c 新建配置（关闭 1M）成功" 0 "$?"
+  expect_count "L8c 不写 model_context_window" "$(l_codex_store)" "model_context_window" 0
+  expect_count "L8c 不写 compact limit" "$(l_codex_store)" "model_auto_compact_token_limit" 0
 
   # --- L9 「默认模型名共 4 处必须同步」的不变量 ---
   # L1/L8 走的是 shell 已经填好的默认值，**命中不到两个 Node fallback**（`process.env.CODEX_MODEL ||`）：

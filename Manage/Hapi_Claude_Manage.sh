@@ -289,26 +289,9 @@ hapi_show_claude_config() {
 const fs = require("fs");
 const settingsFile = process.env.CLAUDE_SETTINGS_FILE;
 
-// 与 hapi_show_codex_config 的脱敏规则保持一致（改这里就要同步那边）。
-function isSensitiveKey(key) {
-  const normalized = String(key).toLowerCase();
-  return normalized.includes("api_key")
-    || normalized.includes("apikey")
-    || normalized.includes("token")
-    || normalized.includes("secret")
-    || normalized.includes("password")
-    || normalized.includes("experimental_bearer_token");
-}
-
-function sanitizeJson(value, key = "") {
-  if (isSensitiveKey(key) && value !== undefined && value !== null) return "******";
-  if (Array.isArray(value)) return value.map((item) => sanitizeJson(item));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
-  }
-  return value;
-}
-
+// 这里**不再脱敏**（用户 2026-10-19 明确要求：Key 要能直接看到，否则无法判断「到底填进去了吗」）。
+// 只影响「查看配置」这类面向本人的预览；校验/报错路径（hapi_check_codex_auth_file 等）
+// 仍然按 isSensitiveKey 打码，避免密钥被贴进日志或聊天窗口。
 let raw;
 try {
   raw = fs.readFileSync(settingsFile, "utf8");
@@ -326,11 +309,11 @@ let config;
 try {
   config = JSON.parse(raw);
 } catch (error) {
-  console.error(`settings.json 不是合法 JSON，为避免泄露敏感字段，不显示原始内容: ${error.message}`);
+  console.error(`settings.json 不是合法 JSON，无法解析：${error.message}`);
   process.exit(1);
 }
 
-console.log(JSON.stringify(sanitizeJson(config), null, 2));
+console.log(JSON.stringify(config, null, 2));
 NODE
 }
 
@@ -947,26 +930,7 @@ const fs = require("fs");
 const storeFile = process.env.CLAUDE_PROFILE_STORE;
 const index = Number(process.env.CLAUDE_PROFILE_INDEX) - 1;
 
-// 与 hapi_show_claude_config / hapi_show_codex_config 的脱敏规则保持一致（改一处要同步全部）
-function isSensitiveKey(key) {
-  const normalized = String(key).toLowerCase();
-  return normalized.includes("api_key")
-    || normalized.includes("apikey")
-    || normalized.includes("token")
-    || normalized.includes("secret")
-    || normalized.includes("password")
-    || normalized.includes("experimental_bearer_token");
-}
-
-function sanitizeJson(value, key = "") {
-  if (isSensitiveKey(key) && value !== undefined && value !== null) return "******";
-  if (Array.isArray(value)) return value.map((item) => sanitizeJson(item));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
-  }
-  return value;
-}
-
+// 预览不脱敏（Key 要能直接看到）；校验/报错路径仍然用 isSensitiveKey 打码。
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -991,7 +955,7 @@ console.log(`名称: ${profile.name}`);
 if (!isPlainObject(profile.config)) {
   console.error(`注意：该配置的 config 根不是 JSON 对象（当前为 ${Array.isArray(profile.config) ? "数组" : JSON.stringify(profile.config)}），切换会被拒绝，请删除或重建。`);
 }
-console.log(JSON.stringify(sanitizeJson(profile.config), null, 2));
+console.log(JSON.stringify(profile.config, null, 2));
 NODE
 }
 
@@ -1205,11 +1169,22 @@ hapi_codex_route_stash_file() {
     printf '%s' "${HOME}/.codex/hapi_provider_route.json"
 }
 
+# 官方登录态暂存文件：第三方模式必须让 auth.json 消失——
+#   · Codex 对自定义 provider 的取 key 路径只有「段内 experimental_bearer_token / env_key 环境变量」，
+#     auth.json 里的 OPENAI_API_KEY 根本不参与（见 AGENTS.md 的 Codex 取 key 说明）；
+#   · 但 auth.json 里可能住着 ChatGPT 登录（cc-switch 授权中心绑定），直接删会丢登录态。
+# 所以切第三方时把整份登录态原样搬到这里，切回官方（或用户重新走 cc-switch 绑定）后再放回去。
+# 文件里是凭据，与 auth.json 一样按 0600 处理。
+hapi_codex_login_stash_file() {
+    printf '%s' "${HOME}/.codex/hapi_login_stash.json"
+}
+
 hapi_show_codex_config() {
-    local config_dir auth_file config_file
+    local config_dir auth_file config_file login_stash_file
     config_dir="${HOME}/.codex"
     auth_file="${config_dir}/auth.json"
     config_file="${config_dir}/config.toml"
+    login_stash_file=$(hapi_codex_login_stash_file)
 
     echo -e "${white}=====${green}当前 Codex 配置${white}=====${background}"
     hapi_ensure_node_json || return
@@ -1218,101 +1193,20 @@ const fs = require("fs");
 const authFile = process.env.CODEX_AUTH_FILE;
 const configFile = process.env.CODEX_CONFIG_FILE;
 const stashFile = process.env.CODEX_STASH_FILE;
+const loginStashFile = process.env.CODEX_LOGIN_STASH_FILE;
 
-function isSensitiveKey(key) {
-  const normalized = String(key).toLowerCase();
-  return normalized === "openai_api_key"
-    || normalized.includes("api_key")
-    || normalized.includes("apikey")
-    || normalized.includes("token")
-    || normalized.includes("secret")
-    || normalized.includes("password")
-    || normalized.includes("experimental_bearer_token");
-}
-
-function sanitizeJson(value, key = "") {
-  // tokens 是容器：只对子字段打码（access_token / id_token / refresh_token），
-  // 保留 account_id 之类非密字段，便于人工核对粘贴结构。
-  if (key === "tokens" && value && typeof value === "object" && !Array.isArray(value)) {
-    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
-  }
-  if (isSensitiveKey(key) && value !== undefined && value !== null) return "******";
-  if (Array.isArray(value)) return value.map((item) => sanitizeJson(item));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
-  }
-  return value;
-}
-
-function commentSuffix(rest) {
-  let quote = "";
-  let escaped = false;
-  for (let i = 0; i < rest.length; i += 1) {
-    const char = rest[i];
-    if (quote) {
-      if (quote === '"' && !escaped && char === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (!escaped && char === quote) quote = "";
-      escaped = false;
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === "#") return ` ${rest.slice(i).trimEnd()}`;
-  }
-  return "";
-}
-
-// config.toml 侧的**唯一例外**：1M 开关写出来的 `model_auto_compact_token_limit = <整数>` 是数字阈值，
-// 不是凭据；按 isSensitiveKey 的 "token" 子串规则打成 `= "******"` 反而误导（看起来像被隐藏的密钥）。
-//
-// ⚠️ 例外必须**同时**满足三个条件才放行，缺一即照常打码（P1，2026-09-29 审查在真实
-//    hapi_show_codex_config 上实测：只看 key 名放行时，下面三种都会整行明文输出）：
-//      ① 处于**顶层区域**（第一个 `[section]` 之前）——所以 sanitizeToml 必须一路跟踪 section；
-//      ② key **精确等于** `model_auto_compact_token_limit`——不做 toLowerCase，大小写变体照码；
-//      ③ 值的形态是**纯整数**（可带行尾注释）——带引号 / 非数字一律照码。
-//    不放宽 "token" 子串规则：漏码一个真密钥的代价远高于多码一个数字。
-// ⚠️ 与 Codex profile 预览里的同名实现必须同步（同 isSensitiveKey 五副本的规矩）。
-const TOML_INT_ONLY_PLAINTEXT_KEY = "model_auto_compact_token_limit";
-
-// 值是不是「纯整数（+ 可选行尾注释）」——例外只认本开关会写出的那一种形态
-function isPlainIntegerValue(raw) {
-  return /^\d+\s*(?:#.*)?$/.test(String(raw).trim());
-}
-
-function sanitizeToml(text) {
-  let section = "";
-  return String(text).split(/\r?\n/).map((line) => {
-    // 任何以 `[` 开头的行都按「已进入 section」处理（含格式不规范的 header）——fail-closed：
-    // 判不准就当非顶层，宁可多打一次码。
-    if (line.trim().startsWith("[")) {
-      section = line.trim();
-      return line;
-    }
-    const match = line.match(/^(\s*([A-Za-z0-9_.-]+)\s*=\s*)(.*)$/);
-    if (!match) return line;
-    const isPlaintextIntField = section === ""
-      && match[2] === TOML_INT_ONLY_PLAINTEXT_KEY
-      && isPlainIntegerValue(match[3]);
-    if (isSensitiveKey(match[2]) && !isPlaintextIntField) {
-      return `${match[1]}"******"${commentSuffix(match[3])}`;
-    }
-    return line;
-  }).join("\n");
-}
+// 预览**不脱敏**（用户 2026-10-19 明确要求：Key 要能直接看到，否则无法判断「到底填进去了吗」）。
+// 只影响这个「查看当前配置」入口；校验/报错路径（hapi_check_codex_auth_file）仍按 isSensitiveKey 打码，
+// 因为那些输出会进日志、会被贴进聊天窗口。
 
 console.log("auth.json:");
 if (!fs.existsSync(authFile)) {
-  console.log(`未找到配置文件: ${authFile}`);
+  console.log("(无 auth.json —— 第三方模式下 Key 在 config.toml 的 experimental_bearer_token 里)");
 } else {
   try {
     const raw = fs.readFileSync(authFile, "utf8");
     const auth = raw.trim() ? JSON.parse(raw) : {};
-    console.log(JSON.stringify(sanitizeJson(auth), null, 2));
+    console.log(JSON.stringify(auth, null, 2));
   } catch (error) {
     console.log(`auth.json 读取失败: ${error.message}`);
     process.exitCode = 1;
@@ -1325,7 +1219,7 @@ if (!fs.existsSync(configFile)) {
   console.log(`未找到配置文件: ${configFile}`);
 } else {
   const raw = fs.readFileSync(configFile, "utf8");
-  console.log(sanitizeToml(raw) || "(空文件)");
+  console.log(raw.trim() ? raw : "(空文件)");
 }
 
 // 官方登录/官方 Key 会把第三方路由剥离到暂存文件，这里只报 id 与时间（不打印内容，避免泄露 token）
@@ -1376,6 +1270,23 @@ if (!stashFile || !fs.existsSync(stashFile)) {
   } catch (error) {
     console.log(`暂存文件读取失败: ${error.message}`);
     console.log("写入第三方 base_url 时会被拒绝（fail-closed），请修复或删除该文件。");
+  }
+}
+
+// 官方登录态暂存（第三方模式下 auth.json 会被移走，登录态存在这里）
+console.log("");
+console.log("暂存的官方登录态:");
+if (!loginStashFile || !fs.existsSync(loginStashFile)) {
+  console.log("(无)");
+} else {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(loginStashFile, "utf8"));
+    const mode = parsed && parsed.auth ? String(parsed.auth.auth_mode || "chatgpt") : "-";
+    console.log(`暂存于: ${parsed.savedAt || "-"}    登录模式: ${mode}`);
+    console.log(`暂存文件: ${loginStashFile}`);
+    console.log("auth.json 不存在时会自动放回（切回官方端点即可）。");
+  } catch (error) {
+    console.log(`暂存文件读取失败: ${error.message}（文件: ${loginStashFile}）`);
   }
 }
 NODE
@@ -1501,9 +1412,10 @@ function parseTomlString(line) {
 }
 
 function readConfigFields() {
-  const result = { model: "", model_provider: "", base_url: "" };
+  const result = { model: "", model_provider: "", base_url: "", OPENAI_API_KEY: "" };
   if (!fs.existsSync(configFile)) return result;
   const providerBaseUrls = {};
+  const providerTokens = {};
   let section = "";
   for (const line of fs.readFileSync(configFile, "utf8").split(/\r?\n/)) {
     const sectionName = parseSectionHeader(line);
@@ -1518,18 +1430,26 @@ function readConfigFields() {
       result[key] = parseTomlString(line);
     } else if (section.startsWith("model_providers.") && key === "base_url") {
       providerBaseUrls[section.slice("model_providers.".length).replace(/^"|"$/g, "")] = parseTomlString(line);
+    } else if (section.startsWith("model_providers.") && key === "experimental_bearer_token") {
+      providerTokens[section.slice("model_providers.".length).replace(/^"|"$/g, "")] = parseTomlString(line);
     }
   }
   const providerId = result.model_provider || "custom";
   result.base_url = providerBaseUrls[providerId] || providerBaseUrls.custom || "";
+  // 第三方模式下 Key 在段内 token 里（auth.json 已被移除），这里优先读它。
+  result.OPENAI_API_KEY = providerTokens[providerId] || "";
   return result;
 }
 
 if (field === "OPENAI_API_KEY") {
-  if (fs.existsSync(authFile)) {
+  const configKey = readConfigFields().OPENAI_API_KEY;
+  if (configKey) {
+    process.stdout.write(String(configKey));
+  } else if (fs.existsSync(authFile)) {
     const raw = fs.readFileSync(authFile, "utf8");
     const auth = raw.trim() ? JSON.parse(raw) : {};
-    if (auth.OPENAI_API_KEY) process.stdout.write(String(auth.OPENAI_API_KEY));
+    const authKey = auth.OPENAI_API_KEY;
+    if (authKey) process.stdout.write(String(authKey));
   }
 } else {
   const config = readConfigFields();
@@ -1540,7 +1460,7 @@ NODE
 
 # 菜单 1 的「1M 上下文窗口」默认答案：读 config.toml 顶层 model_context_window 是否已是 1000000。
 # 输出 "1m" / "off"（唯一输出，调用方直接 ${} 取值）。
-# 判定与写入侧 topLevelIntValue 同一规则：只认「顶层 + 纯整数」形态；
+# 判定规则：只认「顶层 + 纯整数」形态；
 # 文件不存在 / 为空 / 值带引号或非数字 / 字段落在 section 内，一律 "off"——
 # 默认落在「不开启」这一侧，保证用户直接回车时不会凭空打开 1M。
 hapi_codex_context_window_state() {
@@ -1593,15 +1513,16 @@ hapi_write_codex_current_config() {
     # 第 4 个参数：1M 上下文窗口的处置，只认 "1m" / "off"（不传 = 不改动）。
     # 现有调用点都只传 3 个参数，因此默认值必须是「不改动」，而不是「关闭」。
     local context_window="${4:-keep}"
-    local config_dir auth_file config_file stash_file backup_file
+    local config_dir auth_file config_file stash_file login_stash_file backup_file
     config_dir="${HOME}/.codex"
     auth_file="${config_dir}/auth.json"
     config_file="${config_dir}/config.toml"
     stash_file=$(hapi_codex_route_stash_file)
+    login_stash_file=$(hapi_codex_login_stash_file)
 
     hapi_ensure_node_json || return
     mkdir -p "${config_dir}"
-    # route-only（菜单 7 写完官方 auth、菜单 4 切换配置之后）只收敛路由，不改 model / base_url / Key，
+    # route-only（菜单 4 切换配置之后）只收敛路由，不改 model / base_url / Key，
     # 也不碰 auth.json，因此不需要备份。
     if [ "${route_only}" -eq 0 ]; then
         if [ -f "${auth_file}" ]; then
@@ -1616,12 +1537,13 @@ hapi_write_codex_current_config() {
         fi
     fi
 
-    CODEX_AUTH_FILE="${auth_file}" CODEX_CONFIG_FILE="${config_file}" CODEX_STASH_FILE="${stash_file}" CODEX_API_KEY="${api_key}" CODEX_BASE_URL="${base_url}" CODEX_MODEL="${model}" CODEX_CONTEXT_WINDOW="${context_window}" CODEX_ROUTE_ONLY="${route_only}" node <<'NODE'
+    CODEX_AUTH_FILE="${auth_file}" CODEX_CONFIG_FILE="${config_file}" CODEX_STASH_FILE="${stash_file}" CODEX_LOGIN_STASH_FILE="${login_stash_file}" CODEX_API_KEY="${api_key}" CODEX_BASE_URL="${base_url}" CODEX_MODEL="${model}" CODEX_CONTEXT_WINDOW="${context_window}" CODEX_ROUTE_ONLY="${route_only}" node <<'NODE'
 const fs = require("fs");
 const path = require("path");
 const authFile = process.env.CODEX_AUTH_FILE;
 const configFile = process.env.CODEX_CONFIG_FILE;
 const stashFile = process.env.CODEX_STASH_FILE;
+const loginStashFile = process.env.CODEX_LOGIN_STASH_FILE;
 const apiKey = process.env.CODEX_API_KEY || "";
 const baseUrlInput = (process.env.CODEX_BASE_URL || "").trim();
 const model = process.env.CODEX_MODEL || "gpt-6-astra";
@@ -1771,6 +1693,94 @@ function updateExistingExperimentalToken(lines) {
   for (let i = 0; i < lines.length; i += 1) {
     if (keyOf(lines[i]) === "experimental_bearer_token") lines[i] = replaceAssignment(lines[i], apiKey);
   }
+}
+
+// ---- 段内字段读写（第三方 provider 的凭据）----
+//
+// Codex 对自定义 provider 只认三种凭据来源（官方 config reference）：
+//   · experimental_bearer_token —— 直接把 token 写在表里（本脚本采用，cc-switch 4.x 直连模式同款）
+//   · env_key                    —— 只从**进程环境变量**取，auth.json 完全不参与
+//   · requires_openai_auth=true  —— 走 OpenAI 认证（auth.json / ChatGPT 登录）
+// 三者互斥；且 env_key 优先于 experimental_bearer_token。旧脚本写 env_key + auth.json 的组合
+// 正是「填了 Key 仍报 Missing environment variable: OPENAI_API_KEY」的根因。
+// 所以这里统一：有 Key 就写段内 token、显式 requires_openai_auth = false，并把 env_key 删掉。
+function sectionKeyValue(lines, section, key) {
+  if (!section) return "";
+  for (let i = section.start + 1; i < section.end; i += 1) {
+    if (keyOf(lines[i]) === key) {
+      try {
+        return parseTomlString(lines[i], i + 1, key);
+      } catch {
+        return "";
+      }
+    }
+  }
+  return "";
+}
+
+function sectionKeyIndex(lines, section, key) {
+  if (!section) return -1;
+  for (let i = section.start + 1; i < section.end; i += 1) {
+    if (keyOf(lines[i]) === key) return i;
+  }
+  return -1;
+}
+
+function ensureSectionKey(lines, section, key, rawValue) {
+  if (!section) return;
+  const existing = sectionKeyIndex(lines, section, key);
+  if (existing >= 0) {
+    lines[existing] = `${key} = ${rawValue}${commentSuffix(lines[existing].slice(lines[existing].indexOf("=") + 1))}`;
+    return;
+  }
+  // 新键追加在段体末尾（跳过段尾空行），不要插到段头——那会把 name / base_url 挤到后面。
+  let insertAt = section.end;
+  while (insertAt > section.start + 1 && lines[insertAt - 1].trim() === "") insertAt -= 1;
+  lines.splice(insertAt, 0, `${key} = ${rawValue}`);
+}
+
+// 删除段内某个 key；返回是否删掉了。必须在**重新 findSection 之后**调用，
+// 因为前面可能刚插过行，缓存的 section.end 会偏。
+function removeSectionKey(lines, section, key) {
+  if (!section) return false;
+  for (let i = section.end - 1; i > section.start; i -= 1) {
+    if (keyOf(lines[i]) === key) {
+      lines.splice(i, 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+// 官方登录态暂存：只暂存「确实带登录材料」的 auth.json（纯 apikey 的 auth 不值得暂存，
+// 因为第三方模式下 Key 已经在 config.toml 里了）。
+function writeLoginStash(loginAuth) {
+  if (!loginStashFile) return;
+  fs.mkdirSync(path.dirname(loginStashFile), { recursive: true });
+  fs.writeFileSync(loginStashFile, `${JSON.stringify({ version: 1, savedAt: new Date().toISOString(), auth: loginAuth }, null, 2)}\n`, { mode: 0o600 });
+  try { fs.chmodSync(loginStashFile, 0o600); } catch {}
+}
+
+// 只在 auth.json 不存在时恢复——否则会拿旧登录覆盖 cc-switch 刚绑定的新登录。
+// 暂存文件损坏时只报错、不删文件、不中止本次写入（config.toml 已经落盘了）。
+function restoreLoginStash() {
+  if (!loginStashFile || !fs.existsSync(loginStashFile) || fs.existsSync(authFile)) return "skip";
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(loginStashFile, "utf8"));
+  } catch (error) {
+    console.error(`警告: 登录态暂存文件不是合法 JSON，已跳过恢复（原文件保留）: ${loginStashFile}`);
+    return "error";
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+      || !parsed.auth || typeof parsed.auth !== "object" || Array.isArray(parsed.auth)) {
+    console.error(`警告: 登录态暂存文件结构异常，已跳过恢复（原文件保留）: ${loginStashFile}`);
+    return "error";
+  }
+  writeAuthJson(parsed.auth);
+  fs.unlinkSync(loginStashFile);
+  console.error(`提示: 已把暂存的官方登录态恢复到 ${authFile}。`);
+  return "restored";
 }
 
 function ensureFeatureGoals(lines) {
@@ -1956,7 +1966,10 @@ function decideCodexRoute(options) {
       if (options.baseUrlClass === "official") return { target: "official", notice: "" };
       return { target: "legacy", notice: "" };
     }
-    // 没有可用登录材料、本次也没填 Key：不确认是官方，沿用旧行为（有路由更新，没有则建 custom 模板）
+    // 没有可用登录材料、本次也没填 Key：
+    //   · 用户明确给了官方端点 → 收敛到官方内置 provider（auth.json 不存在时会恢复暂存的登录态）；
+    //   · 其它情况沿用旧行为（有路由更新，没有则建 custom 模板）。
+    if (options.baseUrlClass === "official") return { target: "official", notice: "" };
     return { target: "legacy", notice: "" };
   }
   // apikey：凭据就在 auth.json 里，官方/第三方只能靠 base_url 判断——
@@ -2009,14 +2022,11 @@ function ensureTopLevelRawLine(lines, rawLine) {
 // 三个动作都只扫「顶层区域」（第一个 section header 之前），section 内的同名 key 不动——
 // 本文件同样只认顶层，保持与 cc-switch 一致。
 //
-// 与 cc-switch 唯一的有意差异（取消勾选这一侧）：cc-switch 的表单里两个字段的值它自己
-// 全程可见，删掉不会丢东西；本脚本面对的是用户手改过的 config.toml，所以只删
-// 「本来就是本开关写入的默认值」：
-//   · 值为 1000000 的 model_context_window  → 删
-//   · 值为 900000 的 model_auto_compact_token_limit → 删
-//   · 其它数字（用户自填的 200000 / 150000 等）→ 原样保留 + stderr 提示一次
-// 否则「回答 n」会变成静默清掉别人调过的上限，与本仓库其它写入路径的
-// 「不静默覆盖用户数据」原则（见 readStash / writeStash 的注释）相冲突。
+// 取消勾选**无条件删除**这两个顶层键（用户 2026-10-19 明确要求对齐 cc-switch）：
+// 之前那版只删「值恰好等于本开关默认值」的行、用户自填的 200000 / 150000 会保留并提示，
+// 结果同一个开关在两处（cc-switch 与本脚本）行为不同，用户开了 cc-switch 的 1M、回来回答 n
+// 却看到字段还在，会以为没关掉。这里记录取舍：1M 是「一个开关」，不是「两个用户字段」，
+// 关掉就该彻底关掉；要保留自定义值就不要回答 n。
 const CODEX_CONTEXT_WINDOW_1M = 1000000;
 const CODEX_AUTO_COMPACT_LIMIT_DEFAULT = 900000;
 
@@ -2033,15 +2043,6 @@ function topLevelKeyIndex(lines, key) {
     if (keyOf(lines[i]) === key) return i;
   }
   return -1;
-}
-
-// 顶层整数字段的值：不存在 → null；存在但不是 `key = <纯数字>`（带引号 / 非数字）→ NaN。
-// 调用方必须区分这三种情况，不能把 NaN 当 null（NaN 说明「字段在，只是不是我们写的形态」）。
-function topLevelIntValue(lines, key) {
-  const index = topLevelKeyIndex(lines, key);
-  if (index < 0) return null;
-  const match = lines[index].match(new RegExp(`^\\s*${key}\\s*=\\s*(\\d+)\\s*(?:#.*)?$`));
-  return match ? Number(match[1]) : NaN;
 }
 
 // 写/更新顶层整数：已存在就替换（保留行尾注释，与 replaceAssignment 同一处理方式），
@@ -2084,24 +2085,14 @@ function applyCodexContextWindow(lines, mode) {
 
   const contextIndex = topLevelKeyIndex(lines, "model_context_window");
   const compactIndex = topLevelKeyIndex(lines, "model_auto_compact_token_limit");
-  const contextValue = contextIndex >= 0 ? topLevelIntValue(lines, "model_context_window") : null;
-  const compactValue = compactIndex >= 0 ? topLevelIntValue(lines, "model_auto_compact_token_limit") : null;
-  const removeContext = contextValue === CODEX_CONTEXT_WINDOW_1M;
-  const removeCompact = compactValue === CODEX_AUTO_COMPACT_LIMIT_DEFAULT;
-  // 提示里要原样回显被保留的行，所以先把它读出来（splice 之后行号会变，缓存的 index 不能复用）
-  const kept = [];
-  if (contextIndex >= 0 && !removeContext) kept.push(lines[contextIndex].trim());
-  if (compactIndex >= 0 && !removeCompact) kept.push(lines[compactIndex].trim());
-  if (removeContext) {
-    const index = topLevelKeyIndex(lines, "model_context_window");
-    if (index >= 0) lines.splice(index, 1);
-  }
-  if (removeCompact) {
+  // 无条件删除（只认顶层，section 内的同名键不碰）。先删下面那行，避免行号漂移。
+  if (compactIndex >= 0) {
     const index = topLevelKeyIndex(lines, "model_auto_compact_token_limit");
     if (index >= 0) lines.splice(index, 1);
   }
-  if (kept.length) {
-    console.error(`提示: 未开启 1M 上下文窗口，但以下字段的值不是本开关写入的默认值，已原样保留: ${kept.join(" / ")}`);
+  if (contextIndex >= 0) {
+    const index = topLevelKeyIndex(lines, "model_context_window");
+    if (index >= 0) lines.splice(index, 1);
   }
 }
 
@@ -2189,26 +2180,14 @@ try {
     auth = rawAuth.trim() ? JSON.parse(rawAuth) : {};
     if (!auth || typeof auth !== "object" || Array.isArray(auth)) throw new Error("auth.json 必须是 JSON 对象");
   }
-  // 先按 cc-switch 的 resolved mode 判定，再决定是否碰 OPENAI_API_KEY：
-  // auth_mode 缺失/null 的隐式 ChatGPT 登录同样适用——cc-switch 的字段存在判定是
-  // 「非 null 即存在」，所以写进空字符串会把隐式模式抢成 apikey，等于毁掉官方登录。
+  // auth.json 只在「官方目标」下才由本写入器改写：
+  //   · 第三方目标：Key 写在 config.toml 的 [model_providers.<id>].experimental_bearer_token，
+  //     auth.json 会在写盘完成后被暂存/移除（见文件末尾的 finalize 段）。
+  //   · 官方目标：填了 Key 就写 apikey 模式（原登录态先暂存）；没填 Key 就把暂存的登录态放回去。
+  // 旧实现无条件把 Key 塞进 auth.json —— 对自定义 provider 而言 Codex 根本不看这份 Key
+  // （env_key 只认环境变量），于是出现「明明填了 Key，却报 Missing environment variable」。
   const resolvedMode = resolveAuthMode(auth);
   const officialLogin = hasOfficialAccountMaterial(auth);
-  if (!routeOnly) {
-    if (resolvedMode === "chatgpt" || resolvedMode === "chatgptAuthTokens") {
-      // 官方 auth.json 里 OPENAI_API_KEY 应为 null；写入空字符串会被 Codex 视为提供了 API Key，
-      // 从而覆盖官方登录路径，因此这里只在用户确实填写了 Key 时才写入。
-      if (apiKey) {
-        console.error("提示: auth.json 当前是官方 ChatGPT 登录缓存，本次仍写入了 OPENAI_API_KEY。");
-        console.error("      如需长期保留官方登录，请让第三方 Key 走 config.toml，或改用「7 写入/编辑官方 auth.json」。");
-        auth.OPENAI_API_KEY = apiKey;
-      } else {
-        console.error("提示: auth.json 当前是官方 ChatGPT 登录缓存，未填写 API Key，已保留原有登录字段不变。");
-      }
-    } else {
-      auth.OPENAI_API_KEY = apiKey;
-    }
-  }
 
   // 空配置 / 不存在的 config.toml 走**同一条**路由流程，不在这里提前 exit：
   // 「只写了第三方路由的 config.toml 被官方同步剥离」正好会把文件变成空文件（或只剩一个换行），
@@ -2300,15 +2279,18 @@ try {
     // route-only 只做路由收敛，连 [features] 这类无关字段也不动（保持最小改动）。
     if (!routeOnly) ensureFeatureGoals(lines);
   } else {
-    // third-party / legacy：沿用原有行为（有 route 就更新 base_url，没有就建默认 custom 模板）
+    // third-party / legacy：有 route 就更新 base_url，没有就建默认 custom 模板。
+    // 凭据一律写进段内 experimental_bearer_token（见 sectionKeyValue 上方的注释）。
     const providerId = routeProviderId || existingProviderId || "custom";
     if (!existingProviderId) ensureTopLevelString(lines, "model_provider", providerId);
 
     const sectionName = `model_providers.${tomlKeySegment(providerId)}`;
-    const section = findSection(lines, sectionName, providerId);
+    let section = findSection(lines, sectionName, providerId);
     if (!section) {
       if (lines.length && lines[lines.length - 1].trim() !== "") lines.push("");
-      lines.push(`[${sectionName}]`, `name = ${tomlString(providerId)}`, `base_url = ${tomlString(writeBaseUrl)}`, 'env_key = "OPENAI_API_KEY"', 'wire_api = "responses"');
+      lines.push(`[${sectionName}]`, `name = ${tomlString(providerId)}`, `base_url = ${tomlString(writeBaseUrl)}`);
+      if (apiKey) lines.push(`experimental_bearer_token = ${tomlString(apiKey)}`);
+      lines.push("requires_openai_auth = false", 'wire_api = "responses"');
     } else {
       let baseLine = -1;
       for (let i = section.start + 1; i < section.end; i += 1) {
@@ -2322,6 +2304,31 @@ try {
       } else {
         lines.splice(section.start + 1, 0, `base_url = ${tomlString(writeBaseUrl)}`);
       }
+
+      // 本次确实填了新 Key：写进段内 token，并删掉旧的 env_key 行。
+      // 只删 env_key、不动别的键；没有新 Key 时保留 env_key（那是用户自己在用环境变量，删了就没凭据）。
+      section = findSection(lines, sectionName, providerId);
+      if (apiKey) {
+        const tokenIndex = sectionKeyIndex(lines, section, "experimental_bearer_token");
+        const envIndex = sectionKeyIndex(lines, section, "env_key");
+        if (tokenIndex >= 0) {
+          lines[tokenIndex] = replaceAssignment(lines[tokenIndex], apiKey);
+        } else if (envIndex >= 0) {
+          // 原位替换，保持原有字段顺序（新建一行插到段头会把 name/base_url 挤到后面）
+          lines[envIndex] = `experimental_bearer_token = ${tomlString(apiKey)}${commentSuffix(lines[envIndex].slice(lines[envIndex].indexOf("=") + 1))}`;
+          console.error(`提示: 已把 [${sectionName}] 里的 env_key 换成段内 experimental_bearer_token。`);
+          console.error("      env_key 只从进程环境变量取值，auth.json 里的 Key 不参与——这是 Codex 报 Missing environment variable 的原因。");
+        } else {
+          lines.splice(section.start + 1, 0, `experimental_bearer_token = ${tomlString(apiKey)}`);
+        }
+        section = findSection(lines, sectionName, providerId);
+        removeSectionKey(lines, section, "env_key");
+      }
+      // 段内有 token 时必须显式关掉 OpenAI 认证，否则 ChatGPT 登录的 token 会被发到第三方端点。
+      section = findSection(lines, sectionName, providerId);
+      if (sectionKeyValue(lines, section, "experimental_bearer_token")) {
+        ensureSectionKey(lines, section, "requires_openai_auth", "false");
+      }
     }
     ensureFeatureGoals(lines);
   }
@@ -2330,7 +2337,7 @@ try {
   // 本脚本的路由暂存只搬 model_provider 行与 [model_providers.*] 段，不带这两个字段，
   // 因此它们不随路由剥离/恢复变动（cc-switch 把它算作「随供应商切换」的字段，本脚本没有
   // per-provider 数据库，差异见 applyCodexContextWindow 的注释）。
-  // route-only（菜单 7 写完 auth、菜单 4 切换配置后的路由收敛）保持最小改动，一个字节都不碰。
+  // route-only（菜单 4 切换配置后的路由收敛）保持最小改动，一个字节都不碰。
   if (!routeOnly) applyCodexContextWindow(lines, contextWindowMode);
 
   const nextConfig = `${lines.join("\n")}\n`;
@@ -2338,8 +2345,46 @@ try {
   if (!routeOnly || configChanged) {
     writeConfigText(nextConfig);
   }
+
+  // ---- auth.json 的去留（对照 cc-switch 4.x：直连第三方时 preserve_codex_official_auth_on_switch=false，
+  //      即「第三方路由旁边不留 auth.json」）----
+  // 判定依据是**写完之后**的 config.toml：当前 model_provider 指向自定义段、且段里有 token，
+  // 才算第三方模式。只看 decision.target 不够——reserved / keep 情形下也可能留着自定义段。
+  let authAction = "unchanged";
   if (!routeOnly) {
-    writeAuthJson(auth);
+    const activeProviderId = getTopLevelString(lines, "model_provider").trim();
+    const activeSection = isCustomProviderId(activeProviderId)
+      ? findSection(lines, `model_providers.${tomlKeySegment(activeProviderId)}`, activeProviderId)
+      : null;
+    const activeToken = sectionKeyValue(lines, activeSection, "experimental_bearer_token");
+
+    if (activeSection && activeToken) {
+      // 第三方模式：先把官方登录态搬走，再整份移除 auth.json。
+      if (fs.existsSync(authFile)) {
+        let liveAuth = null;
+        try {
+          const rawLive = fs.readFileSync(authFile, "utf8");
+          liveAuth = rawLive.trim() ? JSON.parse(rawLive) : null;
+        } catch {
+          liveAuth = null;
+        }
+        if (liveAuth && typeof liveAuth === "object" && !Array.isArray(liveAuth) && hasOfficialAccountMaterial(liveAuth)) {
+          writeLoginStash(liveAuth);
+          console.error(`提示: 已把官方登录态暂存到 ${loginStashFile}（切回官方时会自动放回）。`);
+        }
+        fs.unlinkSync(authFile);
+        authAction = "removed";
+      }
+    } else if (decision.target === "official") {
+      if (apiKey) {
+        // 官方 API Key：登录态先暂存，再整份写成 apikey 模式（混合 tokens + Key 会让 Codex 继续走 OAuth）。
+        if (officialLogin) writeLoginStash(auth);
+        writeAuthJson({ auth_mode: "apikey", OPENAI_API_KEY: apiKey });
+        authAction = "apikey";
+      } else {
+        authAction = restoreLoginStash();
+      }
+    }
   }
 
   if (routeAction === "strip") {
@@ -2365,6 +2410,22 @@ try {
     console.error("提示: config.toml 仍指定第三方 model_provider 且本次未填写 API Key，该路由可能拿不到可用凭据；");
     console.error("      如需完全回到官方，请清空 base_url 指向或改用官方端点。");
   }
+
+  if (authAction === "removed") {
+    console.error("提示: 第三方模式下已移除 auth.json（Key 现在在 config.toml 的 experimental_bearer_token 里）。");
+  } else if (authAction === "apikey") {
+    console.error("提示: auth.json 已整份写成 apikey 模式（原官方登录态已暂存）。");
+  }
+  if (!routeOnly && decision.target !== "official" && decision.notice !== "reserved") {
+    const activeProviderId = getTopLevelString(lines, "model_provider").trim();
+    const activeSection = isCustomProviderId(activeProviderId)
+      ? findSection(lines, `model_providers.${tomlKeySegment(activeProviderId)}`, activeProviderId)
+      : null;
+    if (activeSection && !sectionKeyValue(lines, activeSection, "experimental_bearer_token")) {
+      console.error("警告: 当前第三方 provider 段里没有 experimental_bearer_token，Codex 会拿不到 API Key。");
+      console.error("      请重新运行本菜单并填写 OPENAI_API_KEY（留空不会凭空生成凭据）。");
+    }
+  }
 } catch (error) {
   console.error(error.message);
   process.exit(1);
@@ -2384,11 +2445,15 @@ NODE
         return 0
     fi
     chmod 600 "${auth_file}" "${config_file}" 2>/dev/null
-    echo -e "${green}Codex 配置已写入: ${auth_file} / ${config_file}${background}"
+    if [ -f "${auth_file}" ]; then
+        echo -e "${green}Codex 配置已写入: ${auth_file} / ${config_file}${background}"
+    else
+        echo -e "${green}Codex 配置已写入: ${config_file}（第三方模式，auth.json 未保留）${background}"
+    fi
 }
 
 # 只按 auth.json + config.toml 现状收敛路由：官方登录/官方 Key 会把第三方路由剥离并暂存。
-# 供菜单 7（写完官方 auth.json）与菜单 4（切换配置）调用；不写 model / base_url / Key。
+# 由菜单 4（切换配置）调用；不写 model / base_url / Key。
 hapi_sync_codex_route() {
     local config_file="${HOME}/.codex/config.toml"
 
@@ -2399,13 +2464,252 @@ hapi_sync_codex_route() {
     hapi_write_codex_current_config route-only
 }
 
+# 判断一份 auth.json 是否「没有凭据」：文件不存在 / 空文件 / 只有 {} 都算空。
+# 第三方模式下本脚本不再写 auth.json，所以「空」是合法状态，存储与切换都要认它。
+hapi_codex_auth_is_empty() {
+    local auth_file="$1"
+
+    [ -f "${auth_file}" ] || return 0
+    hapi_ensure_node_json >/dev/null || return 1
+    CODEX_AUTH_FILE="${auth_file}" node -e '
+const fs = require("fs");
+try {
+  const raw = fs.readFileSync(process.env.CODEX_AUTH_FILE, "utf8");
+  if (!raw.trim()) process.exit(0);
+  const value = JSON.parse(raw);
+  const empty = value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
+  process.exit(empty ? 0 : 1);
+} catch {
+  process.exit(1);
+}
+'
+}
+
+# 老配置迁移：把 [model_providers.<id>] 里的 `env_key = "..."` 换成段内
+# `experimental_bearer_token`。Codex 只从**进程环境变量**读 env_key，auth.json 不参与——
+# 2026-10-19 的 "Missing environment variable: OPENAI_API_KEY" 就是这么来的。
+# 菜单 4（切换配置）写完 live 文件后调用；菜单 1 的写入器已在写段时顺手迁移。
+# Key 来源优先级：$1（调用方给的）> 段内已有 token > auth.json 的 OPENAI_API_KEY。
+# 一个都拿不到时**只警告、不删 env_key**（那可能是用户真在用的环境变量）。
+hapi_migrate_codex_provider_credential() {
+    local provided_key="${1:-}"
+    local config_dir config_file auth_file login_stash_file
+
+    config_dir="${HOME}/.codex"
+    config_file="${config_dir}/config.toml"
+    auth_file="${config_dir}/auth.json"
+    login_stash_file=$(hapi_codex_login_stash_file)
+
+    [ -f "${config_file}" ] || return 0
+    hapi_ensure_node_json || return 1
+
+    CODEX_CONFIG_FILE="${config_file}" CODEX_AUTH_FILE="${auth_file}" CODEX_LOGIN_STASH_FILE="${login_stash_file}" CODEX_PROVIDED_KEY="${provided_key}" node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const configFile = process.env.CODEX_CONFIG_FILE;
+const authFile = process.env.CODEX_AUTH_FILE;
+const loginStashFile = process.env.CODEX_LOGIN_STASH_FILE;
+const providedKey = process.env.CODEX_PROVIDED_KEY || "";
+
+function tomlString(value) {
+  return JSON.stringify(String(value));
+}
+
+function parseHeader(line) {
+  const match = line.trim().match(/^\[\[?\s*([^\[\]]+?)\s*\]?\]\s*(?:#.*)?$/);
+  return match ? match[1].trim() : null;
+}
+
+function keyOf(line) {
+  const match = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=/);
+  return match ? match[1] : "";
+}
+
+function parseString(line) {
+  const eq = line.indexOf("=");
+  const raw = line.slice(eq + 1).trim();
+  const quote = raw[0];
+  if (quote === '"' || quote === "'") {
+    let escaped = false;
+    for (let i = 1; i < raw.length; i += 1) {
+      const char = raw[i];
+      if (quote === '"' && !escaped && char === "\\") { escaped = true; continue; }
+      if (!escaped && char === quote) return quote === '"' ? JSON.parse(raw.slice(0, i + 1)) : raw.slice(1, i);
+      escaped = false;
+    }
+  }
+  return raw.split(/\s+#/)[0].trim();
+}
+
+function sectionRange(lines, name) {
+  let start = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const found = parseHeader(lines[i]);
+    if (found === null) continue;
+    if (start >= 0) return { start, end: i };
+    if (found === name) start = i;
+  }
+  return start >= 0 ? { start, end: lines.length } : null;
+}
+
+let raw = fs.readFileSync(configFile, "utf8").replace(/\r\n/g, "\n");
+const lines = raw.split("\n");
+if (lines.length && lines[lines.length - 1] === "") lines.pop();
+
+let providerId = "";
+for (const line of lines) {
+  if (parseHeader(line) !== null) break;
+  if (keyOf(line) === "model_provider") providerId = parseString(line);
+}
+if (!providerId) process.exit(0);
+
+const section = sectionRange(lines, `model_providers.${providerId}`) || sectionRange(lines, `model_providers.${tomlString(providerId)}`);
+if (!section) process.exit(0);
+
+let envKeyIndex = -1;
+let tokenIndex = -1;
+for (let i = section.start + 1; i < section.end; i += 1) {
+  if (keyOf(lines[i]) === "env_key") envKeyIndex = i;
+  if (keyOf(lines[i]) === "experimental_bearer_token") tokenIndex = i;
+}
+if (envKeyIndex < 0) process.exit(0);   // 没有 env_key，不需要迁移
+
+let key = providedKey;
+if (!key && tokenIndex >= 0) key = parseString(lines[tokenIndex]);
+if (!key && fs.existsSync(authFile)) {
+  try {
+    const auth = JSON.parse(fs.readFileSync(authFile, "utf8") || "{}");
+    if (auth && typeof auth === "object" && typeof auth.OPENAI_API_KEY === "string") key = auth.OPENAI_API_KEY;
+  } catch {}
+}
+if (!key) {
+  console.error(`警告: [model_providers.${providerId}] 仍使用 env_key="${parseString(lines[envKeyIndex])}"，`);
+  console.error("      但本机没有可迁移的 Key。Codex 只从环境变量读它，请 export 该变量，");
+  console.error("      或重新运行菜单 1 填一次 OPENAI_API_KEY（会把 Key 写进段内 token）。");
+  process.exit(0);
+}
+
+if (tokenIndex >= 0) lines[tokenIndex] = `experimental_bearer_token = ${tomlString(key)}`;
+else lines[envKeyIndex] = `experimental_bearer_token = ${tomlString(key)}`;
+
+// requires_openai_auth 必须显式为 false：否则残留的 true 会让 Codex 拿 ChatGPT 登录去请求第三方端点。
+const after = sectionRange(lines, `model_providers.${providerId}`) || sectionRange(lines, `model_providers.${tomlString(providerId)}`);
+let requiresIndex = -1;
+for (let i = after.start + 1; i < after.end; i += 1) if (keyOf(lines[i]) === "requires_openai_auth") requiresIndex = i;
+if (requiresIndex >= 0) lines[requiresIndex] = "requires_openai_auth = false";
+else lines.splice(after.start + 1, 0, "requires_openai_auth = false");
+
+fs.writeFileSync(configFile, `${lines.join("\n")}\n`, { mode: 0o600 });
+try { fs.chmodSync(configFile, 0o600); } catch {}
+console.error(`提示: 已把 [model_providers.${providerId}] 的 env_key 迁移成段内 experimental_bearer_token。`);
+
+// 第三方路由旁边不再留 auth.json：有官方登录态就先暂存。
+if (fs.existsSync(authFile)) {
+  let liveAuth = null;
+  try {
+    const rawAuth = fs.readFileSync(authFile, "utf8");
+    liveAuth = rawAuth.trim() ? JSON.parse(rawAuth) : null;
+  } catch { liveAuth = null; }
+  const isLogin = liveAuth && typeof liveAuth === "object" && !Array.isArray(liveAuth)
+    && (String(liveAuth.auth_mode || "").toLowerCase() === "chatgpt"
+      || String(liveAuth.auth_mode || "").toLowerCase() === "chatgptauthtokens"
+      || (liveAuth.tokens && typeof liveAuth.tokens === "object" && Object.keys(liveAuth.tokens).length > 0));
+  if (isLogin) {
+    fs.mkdirSync(path.dirname(loginStashFile), { recursive: true });
+    fs.writeFileSync(loginStashFile, `${JSON.stringify({ version: 1, savedAt: new Date().toISOString(), auth: liveAuth }, null, 2)}\n`, { mode: 0o600 });
+    try { fs.chmodSync(loginStashFile, 0o600); } catch {}
+    console.error(`提示: 已把官方登录态暂存到 ${loginStashFile}（切回官方时会自动放回）。`);
+  }
+  fs.unlinkSync(authFile);
+  console.error("提示: 第三方模式下已移除 auth.json。");
+}
+NODE
+}
+
+# 1M 上下文窗口提问（菜单 1「查看/修改配置」与菜单 3「新建配置（不切换）」共用）。
+# 两处各写一份 case 分支会漂移：曾经菜单 3 就完全没有这一问。
+# 输出只有 "1m" / "off"（调用方用 $(...) 取），提示语一律走 stderr，避免被命令替换吞掉。
+# 默认答案跟随 config.toml 现状（第 1 个参数可显式指定状态，供「新建配置」这类没有 live 语义的场景用）。
+hapi_ask_codex_context_window() {
+    local state="${1:-}" hint answer
+
+    [ -z "${state}" ] && state=$(hapi_codex_context_window_state)
+    hint="y/N"
+    [ "${state}" = "1m" ] && hint="Y/n"
+
+    echo -e "${yellow}1M 上下文窗口：在 config.toml 顶层声明 model_context_window = 1000000（并补 model_auto_compact_token_limit = 900000）。${background}" >&2
+    echo -en "${cyan}是否开启 1M 上下文窗口？[${hint}]: ${background}" >&2
+    read -r answer
+    case "${answer}" in
+    n | N)
+        printf '%s' "off"
+        ;;
+    "")
+        if [ "${state}" = "1m" ]; then printf '%s' "1m"; else printf '%s' "off"; fi
+        ;;
+    *)
+        printf '%s' "1m"
+        ;;
+    esac
+}
+
+# 把「Codex 实际会用的 Key」回读出来打印——直接回答「我到底填进去了吗」。
+# 读取顺序与 hapi_codex_current_value 一致：config.toml 段内 token 优先，其次 auth.json。
+# 找不到就明确报红，而不是只打一句「配置已写入」（2026-10-19 的 Missing environment variable
+# 事故里，脚本打的就是「已写入」，用户完全无法判断 Key 有没有生效）。
+hapi_report_codex_credential() {
+    local key provider_id
+
+    key=$(hapi_codex_current_value "OPENAI_API_KEY")
+    provider_id=$(hapi_codex_current_value "model_provider")
+
+    if [ -z "${key}" ]; then
+        echo -e "${red}自检: 没有读到任何 OPENAI_API_KEY，Codex 启动后会拿不到凭据。${background}"
+        return 1
+    fi
+    echo -e "${green}自检: Codex 会使用以下 Key（来自 $( [ -n "${provider_id}" ] && printf 'config.toml 的 [model_providers.%s]' "${provider_id}" || printf 'auth.json' )）${background}"
+    echo "      ${key}"
+    echo -e "${yellow}      长度 ${#key}${background}"
+}
+
+# 可选的连通性自检：只用这个 Key 请求 `${base_url}/models`，只打印 HTTP 状态码（不打印响应体，
+# 避免把上游返回的敏感信息刷进终端/日志）。默认不跑——不少中转站没有 /models 端点。
+hapi_check_codex_endpoint() {
+    local base_url="$1" key="$2" status
+
+    if [ -z "${base_url}" ] || [ -z "${key}" ]; then
+        echo -e "${yellow}缺少 base_url 或 Key，跳过连通性自检。${background}"
+        return 0
+    fi
+    base_url="${base_url%/}"
+    echo -e "${yellow}正在请求 ${base_url}/models ...${background}"
+    status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 \
+        -H "Authorization: Bearer ${key}" "${base_url}/models" 2>/dev/null)
+    case "${status}" in
+    2??)
+        echo -e "${green}连通性自检通过（HTTP ${status}）。${background}"
+        ;;
+    000 | "")
+        echo -e "${red}连通性自检失败：连不上 ${base_url}（DNS/网络/证书问题）。${background}"
+        return 1
+        ;;
+    401 | 403)
+        echo -e "${red}连通性自检失败：HTTP ${status}，端点可达但这个 Key 被拒绝。${background}"
+        return 1
+        ;;
+    *)
+        echo -e "${yellow}连通性自检返回 HTTP ${status}（部分中转站不提供 /models，这不一定是 Key 的问题）。${background}"
+        ;;
+    esac
+}
+
 hapi_config_codex() {
     local config_dir="${HOME}/.codex"
     local auth_file="${config_dir}/auth.json"
     local config_file="${config_dir}/config.toml"
     local current_api_key current_base_url current_model api_key base_url model
     local auth_backup_file config_backup_file overwrite
-    local context_window_state context_window_hint context_window_answer context_window_mode
+    local context_window_mode verify_answer
     local default_base_url="https://api.openai.com/v1"
     local default_model="gpt-6-astra"
 
@@ -2416,8 +2720,8 @@ hapi_config_codex() {
     }
 
     if [ -f "${auth_file}" ] || [ -f "${config_file}" ]; then
-        echo -e "${yellow}说明: base_url 指向官方端点时 config.toml 不会保留第三方 model_provider（会剥离并暂存）；${background}"
-        echo -e "${yellow}      指向第三方端点时会自动恢复此前暂存的路由。${background}"
+        echo -e "${yellow}说明: 第三方 base_url 会把 Key 写进 config.toml 的 [model_providers.<id>].experimental_bearer_token，${background}"
+        echo -e "${yellow}      并移除 auth.json（官方登录态会暂存，切回官方时自动放回）；官方端点则剥离第三方路由并恢复登录态。${background}"
         echo -en "${yellow}检测到已存在 Codex 配置，是否仅修改 key/model/base_url 等字段（其他配置会保留），是否继续修改？[y/N]: ${background}"
         read -r overwrite
         if [[ "${overwrite}" != "y" && "${overwrite}" != "Y" ]]; then
@@ -2463,28 +2767,19 @@ hapi_config_codex() {
 
     # 1M 上下文窗口（对照 cc-switch 的 contextWindow1M 开关）：
     # 开启 = 顶层写 model_context_window = 1000000，并在缺失时补 model_auto_compact_token_limit = 900000；
-    # 不开启 = 移除这两个字段（只移除本开关写入的默认值，用户自填的其它数字保留，见 applyCodexContextWindow）。
+    # 关闭 = 无条件删除这两个顶层键（与 cc-switch 取消勾选一致）。
     # 默认答案跟随 config.toml 现状，用户直接回车不会改变当前状态。
-    context_window_state=$(hapi_codex_context_window_state)
-    context_window_hint="y/N"
-    [ "${context_window_state}" = "1m" ] && context_window_hint="Y/n"
-    echo -e "${yellow}1M 上下文窗口：在 config.toml 顶层声明 model_context_window = 1000000（并补 model_auto_compact_token_limit = 900000）。${background}"
-    echo -en "${cyan}是否开启 1M 上下文窗口？[${context_window_hint}]: ${background}"
-    read -r context_window_answer
-    case "${context_window_answer}" in
-    n | N)
-        context_window_mode="off"
-        ;;
-    "")
-        context_window_mode="off"
-        [ "${context_window_state}" = "1m" ] && context_window_mode="1m"
-        ;;
-    *)
-        context_window_mode="1m"
-        ;;
-    esac
+    context_window_mode=$(hapi_ask_codex_context_window)
 
-    hapi_write_codex_current_config "${api_key}" "${base_url}" "${model}" "${context_window_mode}"
+    hapi_write_codex_current_config "${api_key}" "${base_url}" "${model}" "${context_window_mode}" || return
+
+    # 写完立刻回读，回答「到底填进去了吗」；再让用户决定要不要做一次联网自检。
+    hapi_report_codex_credential || true
+    echo -en "${cyan}是否用该 Key 请求 ${base_url%/}/models 验证连通性？[y/N]: ${background}"
+    read -r verify_answer
+    if [[ "${verify_answer}" == "y" || "${verify_answer}" == "Y" ]]; then
+        hapi_check_codex_endpoint "${base_url}" "${api_key}" || true
+    fi
 }
 
 hapi_toggle_codex_recommended_values() {
@@ -2775,54 +3070,7 @@ const fs = require("fs");
 const storeFile = process.env.CODEX_STORE_FILE;
 const index = Number(process.env.CODEX_PROFILE_INDEX) - 1;
 
-function isSensitiveKey(key) {
-  const normalized = String(key).toLowerCase();
-  return normalized === "openai_api_key"
-    || normalized.includes("api_key")
-    || normalized.includes("apikey")
-    || normalized.includes("token")
-    || normalized.includes("secret")
-    || normalized.includes("password")
-    || normalized.includes("experimental_bearer_token");
-}
-
-function sanitizeJson(value, key = "") {
-  // tokens 是容器：只对子字段打码（access_token / id_token / refresh_token），
-  // 保留 account_id 之类非密字段，便于人工核对粘贴结构。
-  if (key === "tokens" && value && typeof value === "object" && !Array.isArray(value)) {
-    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
-  }
-  if (isSensitiveKey(key) && value !== undefined && value !== null) return "******";
-  if (Array.isArray(value)) return value.map((item) => sanitizeJson(item));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, sanitizeJson(itemValue, itemKey)]));
-  }
-  return value;
-}
-
-// config.toml 侧的唯一例外（顶层 + 精确 key + 纯整数三条件），与 hapi_show_codex_config 里的
-// 同名实现必须同步——两处只改一份时，另一条预览路径照样会泄露明文。理由见那边的注释。
-const TOML_INT_ONLY_PLAINTEXT_KEY = "model_auto_compact_token_limit";
-
-function isPlainIntegerValue(raw) {
-  return /^\d+\s*(?:#.*)?$/.test(String(raw).trim());
-}
-
-function sanitizeToml(text) {
-  let section = "";
-  return String(text || "").split(/\r?\n/).map((line) => {
-    if (line.trim().startsWith("[")) {
-      section = line.trim();
-      return line;
-    }
-    const match = line.match(/^(\s*([A-Za-z0-9_.-]+)\s*=\s*)(.*)$/);
-    if (!match) return line;
-    const isPlaintextIntField = section === ""
-      && match[2] === TOML_INT_ONLY_PLAINTEXT_KEY
-      && isPlainIntegerValue(match[3]);
-    return isSensitiveKey(match[2]) && !isPlaintextIntField ? `${match[1]}"******"` : line;
-  }).join("\n");
-}
+// 预览不脱敏（Key 要能直接看到）。校验/报错路径仍按 isSensitiveKey 打码。
 
 const store = JSON.parse(fs.readFileSync(storeFile, "utf8"));
 const profiles = Array.isArray(store.profiles) ? store.profiles : [];
@@ -2833,10 +3081,10 @@ if (!profile || !profile.config) {
 }
 console.log(`名称: ${profile.name}`);
 console.log("auth.json:");
-console.log(JSON.stringify(sanitizeJson(profile.config.auth || {}), null, 2));
+console.log(JSON.stringify(profile.config.auth || {}, null, 2));
 console.log("");
 console.log("config.toml:");
-console.log(sanitizeToml(profile.config.config || "") || "(空配置)");
+console.log(profile.config.config || "(空配置)");
 NODE
 }
 
@@ -2846,20 +3094,25 @@ hapi_store_current_codex_config() {
     auth_file="${config_dir}/auth.json"
     config_file="${config_dir}/config.toml"
 
-    if [ ! -f "${auth_file}" ] || [ ! -f "${config_file}" ]; then
-        echo -e "${yellow}当前 Codex 配置不完整，需同时存在: ${auth_file} / ${config_file}${background}"
+    if [ ! -f "${config_file}" ]; then
+        echo -e "${yellow}未找到 ${config_file}，没有可储存的配置。${background}"
         return 1
     fi
     hapi_validate_codex_files || {
         echo -e "${red}检测到 Codex 配置格式异常，已中止储存。${background}"
         return 1
     }
-    # 配置库不能成为「写入无效 auth」的旁路：菜单 4 切换时会把这个 auth 直接写回 live auth.json，
-    # 所以这里先按「Codex 能加载且带可用凭据」这一级卡一次（不要求完整的官方三件套，避免误杀 apikey/PAT 配置）。
-    if ! hapi_check_codex_auth_file "${auth_file}" loadable; then
-        echo -e "${red}当前 auth.json 不符合 Codex 的加载要求，已中止储存。${background}"
-        echo -e "${yellow}请先用菜单 7「写入/编辑官方 auth.json」写入有效配置，或修正 ${auth_file} 后重试。${background}"
-        return 1
+    # auth.json 在第三方模式下**本来就不存在**（Key 在 config.toml 的段内 token 里），
+    # 所以这里只要求 config.toml；auth 存在时才校验它能不能被 Codex 加载。
+    # 配置库不能成为「写入无效 auth」的旁路：菜单 4 切换时会把这个 auth 写回 live auth.json。
+    if [ -f "${auth_file}" ]; then
+        if ! hapi_check_codex_auth_file "${auth_file}" loadable; then
+            echo -e "${red}当前 auth.json 不符合 Codex 的加载要求，已中止储存。${background}"
+            echo -e "${yellow}请修正 ${auth_file} 后重试（官方登录请在 cc-switch 的授权中心重新绑定）。${background}"
+            return 1
+        fi
+    else
+        echo -e "${yellow}当前没有 auth.json（第三方模式）：这份配置的 auth 记为空，切换它时会移除 live 的 auth.json。${background}"
     fi
     echo -en "${cyan}请输入配置名称: ${background}"
     read -r profile_name
@@ -2871,7 +3124,7 @@ hapi_store_current_codex_config() {
 }
 
 hapi_create_codex_profile() {
-    local profile_name api_key base_url model store_file
+    local profile_name api_key base_url model store_file context_window_mode
     local default_base_url="https://api.openai.com/v1"
     local default_model="gpt-6-astra"
     store_file=$(hapi_codex_profile_store_file)
@@ -2886,10 +3139,10 @@ hapi_create_codex_profile() {
     echo -en "${cyan}请输入 OPENAI_API_KEY（已隐藏输入）: ${background}"
     read -rs api_key
     echo
-    # 空 Key 会写出 {OPENAI_API_KEY: ""}：隐式模式会被判成 apikey 却没有可用凭据，
+    # 空 Key 会写出 `experimental_bearer_token = ""`：段里有 token 字段却是空值，
     # 等于造出一个 Codex 用不了的配置，所以这里必须非空。
     while [ -z "${api_key}" ]; do
-        echo -e "${red}OPENAI_API_KEY 不能为空（空 Key 会让 Codex 既进不了官方登录、也拿不到第三方凭据）。${background}"
+        echo -e "${red}OPENAI_API_KEY 不能为空（空 Key 会让 Codex 拿不到任何凭据）。${background}"
         echo -en "${cyan}请重新输入 OPENAI_API_KEY（已隐藏输入）: ${background}"
         read -rs api_key
         echo
@@ -2901,9 +3154,12 @@ hapi_create_codex_profile() {
     read -r model
     model=${model:-${default_model}}
 
+    # 与菜单 1 共用同一个提问（此前这条路径完全没有 1M 一问，产物也和菜单 1 不一致）。
+    context_window_mode=$(hapi_ask_codex_context_window)
+
     hapi_ensure_node_json || return
     mkdir -p "$(dirname "${store_file}")"
-    CODEX_STORE_FILE="${store_file}" CODEX_PROFILE_NAME="${profile_name}" CODEX_API_KEY="${api_key}" CODEX_BASE_URL="${base_url}" CODEX_MODEL="${model}" node <<'NODE'
+    CODEX_STORE_FILE="${store_file}" CODEX_PROFILE_NAME="${profile_name}" CODEX_API_KEY="${api_key}" CODEX_BASE_URL="${base_url}" CODEX_MODEL="${model}" CODEX_CONTEXT_WINDOW="${context_window_mode}" node <<'NODE'
 const fs = require("fs");
 const path = require("path");
 const storeFile = process.env.CODEX_STORE_FILE;
@@ -2944,21 +3200,33 @@ function readStore() {
 }
 
 try {
-  const auth = { OPENAI_API_KEY: apiKey };
-  const config = [
+  // Key 只写进 config.toml 的 [model_providers.custom]（experimental_bearer_token），
+  // 不再往 auth.json 里塞：Codex 对自定义 provider 不读 auth.json，塞进去只会误导。
+  // 所以配置库里这份 profile 的 auth 是空对象，切换它时会把 live auth.json 移除。
+  const auth = {};
+  const contextWindowMode = process.env.CODEX_CONTEXT_WINDOW || "off";
+  const lines = [
     `model = ${tomlString(model)}`,
     'model_provider = "custom"',
+  ];
+  // 1M 上下文窗口：与菜单 1 的 applyCodexContextWindow 同一套语义（顶层声明 + 缺失时补压缩阈值）
+  if (contextWindowMode === "1m") {
+    lines.push("model_context_window = 1000000", "model_auto_compact_token_limit = 900000");
+  }
+  lines.push(
     "",
     "[model_providers.custom]",
     'name = "Custom"',
     `base_url = ${tomlString(baseUrl)}`,
-    'env_key = "OPENAI_API_KEY"',
+    `experimental_bearer_token = ${tomlString(apiKey)}`,
+    "requires_openai_auth = false",
     'wire_api = "responses"',
     "",
     "[features]",
     "goals = true",
     "",
-  ].join("\n");
+  );
+  const config = lines.join("\n");
   const store = readStore();
   const now = new Date().toISOString();
   const idx = store.profiles.findIndex((item) => item && item.name === name);
@@ -3039,6 +3307,8 @@ hapi_switch_codex_profile() {
 
     # 配置库不能成为旁路：写回 live auth.json 之前，先确认这份 auth 是 Codex 真能加载的
     # （loadable 级：类型/格式/可反序列化 + 至少一个可用凭据，不要求官方三件套）。
+    # 第三方模式的配置 auth 是空对象（Key 在 config.toml），空不算「无效」——它是切换时
+    # 要移除 live auth.json 的信号，因此跳过校验。
     profile_auth_tmp=$(mktemp "${TMPDIR:-/tmp}/hapi_codex_profile_auth.XXXXXX") || {
         echo -e "${red}临时文件创建失败，请确认系统有可用的 mktemp。${background}"
         return 1
@@ -3051,11 +3321,13 @@ hapi_switch_codex_profile() {
         hapi_cleanup_sensitive_tmp
         return 1
     fi
-    if ! hapi_check_codex_auth_file "${profile_auth_tmp}" loadable; then
-        echo -e "${red}该配置的 auth.json 不符合 Codex 的加载要求，已中止切换（未改动 ~/.codex）。${background}"
-        echo -e "${yellow}请删除并重建该配置，或先用菜单 7 写入有效的官方 auth.json 后再储存。${background}"
-        hapi_cleanup_sensitive_tmp
-        return 1
+    if ! hapi_codex_auth_is_empty "${profile_auth_tmp}"; then
+        if ! hapi_check_codex_auth_file "${profile_auth_tmp}" loadable; then
+            echo -e "${red}该配置的 auth.json 不符合 Codex 的加载要求，已中止切换（未改动 ~/.codex）。${background}"
+            echo -e "${yellow}请删除并重建该配置，或修正其 auth.json 后再储存。${background}"
+            hapi_cleanup_sensitive_tmp
+            return 1
+        fi
     fi
     hapi_cleanup_sensitive_tmp
 
@@ -3088,8 +3360,14 @@ try {
   const config = String(profile.config.config || "");
   if (!auth || typeof auth !== "object" || Array.isArray(auth)) throw new Error("profile auth 必须是 JSON 对象");
   fs.mkdirSync(path.dirname(authFile), { recursive: true });
-  fs.writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
-  try { fs.chmodSync(authFile, 0o600); } catch {}
+  // 空 auth = 第三方配置（Key 在 config.toml 的段内 token）：移除 live auth.json，
+  // 而不是写一个 `{}` 进去——空对象会让 Codex 认为「有 auth 文件但没有凭据」。
+  if (Object.keys(auth).length === 0) {
+    if (fs.existsSync(authFile)) fs.unlinkSync(authFile);
+  } else {
+    fs.writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
+    try { fs.chmodSync(authFile, 0o600); } catch {}
+  }
   fs.writeFileSync(configFile, config.endsWith("\n") ? config : `${config}\n`, { mode: 0o600 });
   try { fs.chmodSync(configFile, 0o600); } catch {}
   console.log(profile.name);
@@ -3105,6 +3383,13 @@ NODE
     fi
     chmod 600 "${auth_file}" "${config_file}" 2>/dev/null
     echo -e "${green}Codex 配置已切换: ${auth_file} / ${config_file}${background}"
+
+    # 切过来的老配置可能还带着 env_key（Codex 只认环境变量，auth.json 不参与），
+    # 在这里顺手迁移成段内 token；顺便把第三方模式下的 auth.json 移除/暂存。
+    if ! hapi_migrate_codex_provider_credential; then
+        echo -e "${red}迁移 [model_providers.*] 的旧 env_key 失败，请检查 ${config_file}。${background}"
+        return 1
+    fi
 
     # 切过来的配置也要收敛路由：旧配置可能是「官方登录 + 残留第三方 model_provider」，
     # 那样请求会走第三方 provider。判定为「需要保持第三方」时（保留 id / 第三方 base_url）不动。
@@ -3164,96 +3449,13 @@ NODE
     echo -e "${green}配置已删除。${background}"
 }
 
-hapi_editor_program() {
-    local editor="$1"
-    local -a editor_cmd=()
-
-    read -r -a editor_cmd <<< "${editor}"
-    if [ "${#editor_cmd[@]}" -eq 0 ]; then
-        return 1
-    fi
-    printf '%s' "${editor_cmd[0]}"
-}
-
-hapi_editor_basename() {
-    local editor_program
-    editor_program=$(hapi_editor_program "$1") || return 1
-    basename "${editor_program}"
-}
-
-hapi_detect_editor() {
-    local editor="" candidate editor_program
-
-    if [ -n "${HAPI_EDITOR}" ]; then
-        editor="${HAPI_EDITOR}"
-    elif [ -n "${VISUAL}" ]; then
-        editor="${VISUAL}"
-    elif [ -n "${EDITOR}" ]; then
-        editor="${EDITOR}"
-    fi
-
-    if [ -n "${editor}" ]; then
-        editor_program=$(hapi_editor_program "${editor}")
-        if [ -n "${editor_program}" ] && command -v "${editor_program}" >/dev/null 2>&1; then
-            printf '%s' "${editor}"
-            return 0
-        fi
-        echo -e "${yellow}环境变量指定的编辑器不可用: ${editor}，改用自动探测。${background}" >&2
-    fi
-
-    for candidate in vim vi nano emacs; do
-        if command -v "${candidate}" >/dev/null 2>&1; then
-            printf '%s' "${candidate}"
-            return 0
-        fi
-    done
-
-    return 1
-}
-
 # 判断编辑器是否兼容 vim 的 -c 参数；vi 在多数发行版是 vim 的软链，但不能直接假定
-hapi_editor_is_vim_like() {
-    local editor="$1"
-    local editor_program editor_name
-
-    editor_program=$(hapi_editor_program "${editor}") || return 1
-    editor_name=$(basename "${editor_program}")
-
-    case "${editor_name}" in
-    vim | nvim) return 0 ;;
-    vi)
-        "${editor_program}" --version 2>/dev/null | head -n 1 | grep -qi 'vim' && return 0
-        return 1
-        ;;
-    esac
-    return 1
-}
-
-hapi_run_editor() {
-    local editor="$1"
-    local target_file="$2"
-    local -a editor_cmd=()
-
-    read -r -a editor_cmd <<< "${editor}"
-    if [ "${#editor_cmd[@]}" -eq 0 ]; then
-        echo -e "${red}编辑器命令为空，无法打开编辑器。${background}"
-        return 1
-    fi
-
-    if hapi_editor_is_vim_like "${editor}"; then
-        # paste 模式关闭自动缩进，避免粘贴 JSON 时被逐层缩进破坏结构；
-        # 同时关闭 backup / swap / undo / viminfo，避免 token 残留在磁盘上。
-        "${editor_cmd[@]}" -c 'set paste' -c 'set nobackup nowritebackup noswapfile noundofile viminfo=' "${target_file}"
-    else
-        "${editor_cmd[@]}" "${target_file}"
-    fi
-}
 
 # 校验待写入 / 待写回的 Codex auth.json。
 # 分级原则（对齐 Codex 的 AuthDotJson 反序列化约束 + cc-switch 的判定函数）：
 #   · 结构/类型不符合 Codex AuthDotJson、或官方 ChatGPT 登录缺少必要凭据 → error（阻断写入）
 #   · 不影响反序列化的可选元数据缺失（account_id / last_refresh）、非目标登录模式 → warning（须二次确认）
-#   · level=official（默认，菜单 7 用）：额外要求 tokens 三件套（id_token/access_token/refresh_token）齐备
+#   · level=official（默认）：额外要求 tokens 三件套（id_token/access_token/refresh_token）齐备
 #   · level=loadable（配置库写入 / 切换时用）：只要求「Codex 能加载，且带至少一个可用凭据」
 hapi_check_codex_auth_file() {
     local auth_file="$1"
@@ -3598,32 +3800,6 @@ process.exit(errors.length > 0 ? 1 : 0);
 NODE
 }
 # 把已校验的内容规范化（去 BOM、统一两空格缩进）后写入目标文件
-hapi_write_codex_auth_file() {
-    local source_file="$1"
-    local dest_file="$2"
-
-    hapi_ensure_node_json || return 1
-    CODEX_AUTH_SOURCE="${source_file}" CODEX_AUTH_DEST="${dest_file}" node <<'NODE'
-const fs = require("fs");
-const path = require("path");
-const sourceFile = process.env.CODEX_AUTH_SOURCE;
-const destFile = process.env.CODEX_AUTH_DEST;
-
-try {
-  const raw = fs.readFileSync(sourceFile, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
-  const auth = raw.trim() ? JSON.parse(raw) : {};
-  if (!auth || typeof auth !== "object" || Array.isArray(auth)) throw new Error("auth.json 必须是 JSON 对象");
-  fs.mkdirSync(path.dirname(destFile), { recursive: true });
-  // 与 cc-switch 的 atomic_write_private 一致：凭据文件在创建时就要求 0600，
-  // 避免「先 0644 再 chmod」之间出现可读窗口；已存在的文件再统一收紧一次。
-  fs.writeFileSync(destFile, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
-  try { fs.chmodSync(destFile, 0o600); } catch {}
-} catch (error) {
-  console.error(error.message);
-  process.exit(1);
-}
-NODE
-}
 
 # 只在正常返回路径删临时文件是不够的：Ctrl+C / 断线 / kill 都可能留下凭据副本，
 # 因此敏感临时文件统一用 mktemp 生成不可预测路径，并挂上退出清理
@@ -3661,184 +3837,6 @@ hapi_install_sensitive_tmp_traps() {
 
 # 路由状态报告。路由的自动收敛由 hapi_sync_codex_route / 写入器完成，这里只报告最终状态：
 # 还能留下第三方 model_provider 的情形只有「保留 id」「脚本无法判断的登录模式」「本轮判定为保持不变」。
-hapi_warn_codex_provider_route() {
-    local model_provider
-    model_provider=$(hapi_codex_current_value "model_provider")
-
-    if [ -z "${model_provider}" ] || [ "${model_provider}" = "openai" ]; then
-        echo -e "${green}当前 config.toml 未指定第三方 model_provider，Codex 会直接使用 auth.json 中的官方登录。${background}"
-        return 0
-    fi
-    echo -e "${yellow}注意: 当前 config.toml 中 model_provider = \"${model_provider}\"，模型请求仍会走该 provider。${background}"
-    echo -e "${yellow}      脚本只在识别到官方登录/官方 Key（自动移除并暂存）或填写第三方 base_url（自动恢复）时改路由；${background}"
-    echo -e "${yellow}      这条路由本轮判定为保持不变。如需完全走官方，请移除 model_provider 及对应的 [model_providers.*] 段。${background}"
-}
-
-hapi_edit_codex_official_auth() {
-    local config_dir auth_file config_file backup_file editor tmp_file editor_status
-    local edit_mode edit_round max_editor_rounds confirm profile_name default_profile_name
-    config_dir="${HOME}/.codex"
-    auth_file="${config_dir}/auth.json"
-    config_file="${config_dir}/config.toml"
-    max_editor_rounds=5
-    default_profile_name="官方登录"
-
-    hapi_ensure_node_json || return
-
-    echo -e "${white}=====${green}写入官方 auth.json（ChatGPT 登录缓存）${white}=====${background}"
-    echo -e "${yellow}该文件保存 Codex 官方登录态（access_token / id_token / refresh_token），属于敏感凭据，请勿泄露。${background}"
-    echo -e "${yellow}目标文件: ${auth_file}${background}"
-    echo -e "${green}1.  ${cyan}空白文件（推荐：直接粘贴整份官方 auth.json）${background}"
-    echo -e "${green}2.  ${cyan}载入现有 auth.json 内容（适合局部修改）${background}"
-    echo -e "${green}0.  ${cyan}取消${background}"
-    echo "========================="
-    echo -en "${green}请输入您的选项: ${background}"; read -r edit_mode
-
-    case "${edit_mode}" in
-    1) edit_mode="blank" ;;
-    2) edit_mode="existing" ;;
-    0)
-        echo -e "${yellow}已取消。${background}"
-        return
-        ;;
-    *)
-        echo -e "${red}输入错误${background}"
-        return 1
-        ;;
-    esac
-
-    editor=$(hapi_detect_editor)
-    if [ -z "${editor}" ]; then
-        echo -e "${red}未找到可用的文本编辑器，请先安装 vim 或 nano。${background}"
-        echo -e "${yellow}也可用 HAPI_EDITOR 指定编辑器，例如: HAPI_EDITOR=vim bash Hapi_Claude_Manage.sh${background}"
-        return 1
-    fi
-
-    if [ "${edit_mode}" = "existing" ] && [ ! -f "${auth_file}" ]; then
-        echo -e "${yellow}未找到 ${auth_file}，改为从空白文件开始。${background}"
-        edit_mode="blank"
-    fi
-
-    tmp_file=$(mktemp "${TMPDIR:-/tmp}/hapi_codex_auth.XXXXXX") || {
-        echo -e "${red}临时文件创建失败，请确认系统有可用的 mktemp。${background}"
-        return 1
-    }
-    chmod 600 "${tmp_file}" 2>/dev/null
-    HAPI_CODEX_AUTH_TMP="${tmp_file}"
-    hapi_install_sensitive_tmp_traps
-
-    if [ "${edit_mode}" = "existing" ]; then
-        # 载入失败必须中止：临时文件是 mktemp 出来的**空文件**，用户会在「空白内容」上编辑，
-        # 保存后写回的就是一份不含任何凭据的 auth.json（等于把官方登录态清空）。
-        if ! cp -a "${auth_file}" "${tmp_file}"; then
-            echo -e "${red}载入现有 auth.json 失败，已中止（避免在空白内容上编辑后覆盖 ${auth_file}）。${background}"
-            hapi_cleanup_sensitive_tmp
-            return 1
-        fi
-        chmod 600 "${tmp_file}" 2>/dev/null
-        echo -e "${green}已载入现有 auth.json 内容，可直接修改后保存。${background}"
-    else
-        echo -e "${yellow}请粘贴完整 JSON，字段结构如下（示例仅用于说明，不要把示例一起粘贴进去）:${background}"
-        echo '{
-  "auth_mode": "chatgpt",
-  "OPENAI_API_KEY": null,
-  "tokens": {
-    "access_token": "eyJ...",
-    "account_id": "00000000-0000-0000-0000-000000000000",
-    "id_token": "eyJ...",
-    "refresh_token": "rt_..."
-  },
-  "last_refresh": "2026-01-01T00:00:00.000000000Z"
-}'
-    fi
-
-    echo -e "${yellow}编辑器: ${editor}${background}"
-    if hapi_editor_is_vim_like "${editor}"; then
-        echo -e "${yellow}已为 vim 开启 paste 模式，按 i 后直接粘贴即可（保存退出: Esc 后输入 :wq 回车）。${background}"
-    else
-        echo -e "${yellow}保存并退出编辑器后，脚本会立即校验内容。${background}"
-    fi
-    pause
-
-    edit_round=1
-    while [ "${edit_round}" -le "${max_editor_rounds}" ]; do
-        hapi_run_editor "${editor}" "${tmp_file}"
-        editor_status=$?
-        if [ "${editor_status}" -ne 0 ]; then
-            echo -e "${yellow}编辑器异常退出（退出码 ${editor_status}），内容可能根本没有被修改。${background}"
-            echo -en "${yellow}是否仍然校验并写入当前内容？[y/N]: ${background}"
-            read -r confirm
-            if [[ "${confirm}" != "y" && "${confirm}" != "Y" ]]; then
-                echo -e "${yellow}已取消写入。${background}"
-                hapi_cleanup_sensitive_tmp
-                return 1
-            fi
-        fi
-        echo -e "${white}=====${green}校验 auth.json 内容（第 ${edit_round} 次）${white}=====${background}"
-        if hapi_check_codex_auth_file "${tmp_file}"; then
-            echo -en "${green}确认将以上内容写入 ${auth_file} 吗？[y/N]: ${background}"
-            read -r confirm
-            if [[ "${confirm}" == "y" || "${confirm}" == "Y" ]]; then
-                break
-            fi
-            echo -e "${yellow}已取消写入。${background}"
-            hapi_cleanup_sensitive_tmp
-            return
-        fi
-
-        echo -en "${yellow}校验未通过，是否重新打开编辑器修改？[Y/n]: ${background}"
-        read -r confirm
-        if [[ "${confirm}" == "n" || "${confirm}" == "N" ]]; then
-            echo -e "${yellow}已取消写入。${background}"
-            hapi_cleanup_sensitive_tmp
-            return
-        fi
-        edit_round=$((edit_round + 1))
-    done
-
-    if [ "${edit_round}" -gt "${max_editor_rounds}" ]; then
-        echo -e "${red}连续 ${max_editor_rounds} 次校验未通过，已放弃写入。${background}"
-        hapi_cleanup_sensitive_tmp
-        return 1
-    fi
-
-    mkdir -p "${config_dir}"
-    if [ -f "${auth_file}" ]; then
-        backup_file="${auth_file}.bak"
-        hapi_backup_or_fail "${auth_file}" "${backup_file}" || return 1
-        echo -e "${green}已备份原配置到: ${backup_file}${background}"
-    fi
-    if ! hapi_write_codex_auth_file "${tmp_file}" "${auth_file}"; then
-        echo -e "${red}auth.json 写入失败。${background}"
-        hapi_cleanup_sensitive_tmp
-        return 1
-    fi
-    hapi_cleanup_sensitive_tmp
-    chmod 600 "${auth_file}" 2>/dev/null
-    echo -e "${green}官方 auth.json 已写入: ${auth_file}${background}"
-
-    # 官方登录写入后立刻收敛路由：把 config.toml 里残留的第三方路由（model_provider +
-    # 对应的 [model_providers.*] 段）剥离并暂存。否则模型请求仍会走那个第三方 provider——
-    # 官方登录只影响 Codex 识别到的账号，不改变请求实际发往哪里。
-    if ! hapi_sync_codex_route; then
-        echo -e "${red}Codex 路由同步失败：config.toml 可能仍指向第三方 provider，请检查后重试。${background}"
-        return 1
-    fi
-    hapi_warn_codex_provider_route
-
-    echo -en "${cyan}是否同时保存到 Codex 配置库（之后可用「切换配置」恢复）？[Y/n]: ${background}"
-    read -r confirm
-    if [[ "${confirm}" == "n" || "${confirm}" == "N" ]]; then
-        return 0
-    fi
-    if [ ! -f "${config_file}" ]; then
-        echo -e "${yellow}未找到 ${config_file}，配置库中该条配置的 config.toml 将为空。${background}"
-    fi
-    echo -en "${cyan}请输入配置名称 (默认 ${default_profile_name}): ${background}"
-    read -r profile_name
-    profile_name=${profile_name:-${default_profile_name}}
-    hapi_save_codex_profile_from_files "${profile_name}" "${auth_file}" "${config_file}"
-}
 
 hapi_codex_config_menu() {
     local num
@@ -3851,7 +3849,6 @@ hapi_codex_config_menu() {
         echo -e "${green}4.  ${cyan}切换配置${background}"
         echo -e "${green}5.  ${cyan}删除配置${background}"
         echo -e "${green}6.  ${cyan}切换新增推荐值${background}"
-        echo -e "${green}7.  ${cyan}写入/编辑官方 auth.json（ChatGPT 登录）${background}"
         echo -e "${green}0.  ${cyan}返回上一级${background}"
         echo "========================="
         echo -en "${green}请输入您的选项: ${background}"; read -r num
@@ -3863,7 +3860,6 @@ hapi_codex_config_menu() {
         4) hapi_switch_codex_profile; pause ;;
         5) hapi_delete_codex_profile; pause ;;
         6) hapi_toggle_codex_recommended_values; pause ;;
-        7) hapi_edit_codex_official_auth; pause ;;
         0) return ;;
         *) echo -e "${red}输入错误${background}"; pause ;;
         esac

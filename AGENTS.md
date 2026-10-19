@@ -19,7 +19,7 @@
 | `install.sh` | 引导安装器：装依赖 → 下载 `Manage/Main.sh` → 校验后装为 `/usr/local/bin/xdm` |
 | `Manage/Main.sh` | xdm 主菜单（TUI），分发到下面各功能脚本，并负责自身更新 |
 | `Manage/meme_generator.sh` | meme 表情包生成器管理（本仓库当前最复杂的脚本，见下文专属约定） |
-| `Manage/Hapi_Claude_Manage.sh` | Hapi / Claude Code / Codex / opencode 管理（含 Codex `auth.json` 编辑器，见下文专属约定） |
+| `Manage/Hapi_Claude_Manage.sh` | Hapi / Claude Code / Codex / opencode 管理（含 Codex 第三方凭据写入与官方登录态暂存，见下文专属约定） |
 | `Manage/*.sh` | 其余功能脚本：`SYS_Manage.sh`、`NapCat.sh`、`Sayu_Bot.sh`、`Lagrange_OneBot.sh`、`BOT-*.sh`、`BOT_INSTALL.sh`、`GitBot.sh`、`QSignServer.sh`、`OtherFunctions.sh` |
 | `Linux/Bot-Install-*.sh` | 各发行版的系统级引导脚本 |
 | `Manage/用户协议.txt` | 安装前需用户同意的协议 |
@@ -630,7 +630,7 @@ git diff --stat && git diff --check
     缺一个会让整份 auth.json 反序列化失败，只有 `account_id` 是 `Option`）；**非 ChatGPT 模式各自必须有可用凭据**：
     `personal_access_token` / `bedrock_api_key` 非空白字符串，`agent_identity` / `bedrock_access_keys` 非空
     （对象或非空白字符串），`OPENAI_API_KEY`（apikey）非空白字符串。
-  - `official`（默认，菜单 7 写官方 auth.json 用）额外要求：模式解析为 `chatgpt`/`chatgptAuthTokens`，且三个 token
+  - `official`（默认；菜单 7 移除后暂无调用方，保留给「整份官方 auth.json」这类完整校验）额外要求：模式解析为 `chatgpt`/`chatgptAuthTokens`，且三个 token
     **都非空**（缺一个或有一个空串即硬错误）。
   - `loadable`（配置库写入 / 切换用）比 official 宽：chatgpt 模式只要求"至少一个 token 非空"（字段存在与类型仍然查），
     用来堵配置库旁路，同时不误杀 apikey / PAT / Bedrock 配置。
@@ -682,47 +682,60 @@ git diff --stat && git diff --check
     ⚠️ 判定细节与依据写在 `tests/Hapi_Claude_Manage/路由自动收敛-测试文档.md`，改判定前先读它；
     特别是：**`apikey` 模式不能用「auth.json 有官方凭据」这条捷径**（中转 key + 中转路由会被误判成官方登录而剥掉）。
 
-### Codex 1M 上下文窗口（2026-09-29 加）
+### Codex 第三方 provider 的取 key 语义（2026-10-19，最重要的一条）
 
-- 菜单 1（`hapi_config_codex`）在收完 Key / `base_url` / `model` 之后多问一句「是否开启 1M 上下文窗口」，
-  答案作为**第 4 个位置参数**传给 `hapi_write_codex_current_config`（`"1m"` / `"off"`）。
+Codex 对自定义 provider 只认三种凭据来源（官方 config reference）：
+`experimental_bearer_token`（直接写在表里）/ `env_key`（**只从进程环境变量取值**）/ `requires_openai_auth = true`
+（走 OpenAI 认证，即 auth.json）。三者互斥，且 `env_key` 优先于 `experimental_bearer_token`。
+
+- **`env_key` + 往 auth.json 塞 Key 是错的**：2026-10-19 的真实事故是
+  `Codex error: Missing environment variable: OPENAI_API_KEY` —— 脚本写了 `env_key = "OPENAI_API_KEY"`
+  又把 Key 写进 auth.json，而自定义 provider 根本不看 auth.json。hapi 拉起的 codex 进程里没有那个环境变量，
+  于是必然报错。
+- 现在第三方段一律写：
+  `experimental_bearer_token = "<key>"` + `requires_openai_auth = false`，并**删掉已有的 `env_key` 行**
+  （原位替换，保持字段顺序）。段内有 token 时必须显式 `false`：残留的 `true` 会让 ChatGPT 的 token 被发到第三方端点。
+- Key 来源优先级（迁移时）：调用方传入 > 段内已有 token > auth.json 的 `OPENAI_API_KEY`。
+  三者都没有 → 只警告，**不删 `env_key`**（那可能是用户真在用的环境变量）。
+- `hapi_codex_current_value "OPENAI_API_KEY"` 读取顺序也是「段内 token 优先，auth.json 兜底」，
+  否则第三方模式下（auth.json 已移除）菜单 1 的「回车保留当前值」会变成空。
+- **第三方模式下 auth.json 必须不存在**（对齐 cc-switch `preserve_codex_official_auth_on_switch = false`）：
+  - 写盘完成后按「当前 `model_provider` 指向自定义段 + 段内有 token」判定第三方模式；
+  - 现有 auth.json 若带登录材料（`chatgpt` / `chatgptAuthTokens` / 有 `tokens`），整份存进
+    `~/.codex/hapi_login_stash.json`（0600）后再删；纯 apikey 的 auth 不暂存（Key 已在 config.toml）；
+  - 切回官方（官方端点 + 没填 Key）时，**只在 auth.json 不存在时**把暂存放回，避免覆盖 cc-switch 刚绑定的新登录。
+- **判定目标的一处补充**：没有登录材料、没有新 Key、但 `base_url` 明确是官方端点 → 判 `official`
+  （旧逻辑判 `legacy`，会建一个没有凭据的 custom 段，也就永远走不到「恢复登录态」）。
+- 菜单 7（写入/编辑官方 auth.json）**已移除**：官方登录改由 cc-switch 的授权中心绑定。
+  不要把编辑器流程再加回来——本脚本只负责「第三方直连 + 官方登录态暂存」，不负责登录本身。
+
+### Codex 1M 上下文窗口（2026-09-29 加，2026-10-19 调整）
+
+- 提问抽成 `hapi_ask_codex_context_window`（输出只有 `1m` / `off`，提示语走 stderr），
+  菜单 1 与菜单 3「新建配置（不切换）」共用。**不要各写一份 case 分支**——菜单 3 曾经整块漏掉这一问，
+  产物和菜单 1 不一致。
+- 菜单 1 把答案作为**第 4 个位置参数**传给 `hapi_write_codex_current_config`（`"1m"` / `"off"`）。
   ⚠️ 该参数缺省值必须是 `keep`（=不改动）**不是** `off`：`hapi_sync_codex_route` 的 `route-only` 与其它旧调用点
   只传 3 个参数，缺省成 `off` 会让它们顺手删掉用户的 1M 声明（L7 钉住）。
 - 语义对齐 cc-switch：`src/components/providers/forms/CodexConfigSections.tsx` 的 `contextWindow1M` 开关 +
   `src/utils/providerConfigUtils.ts` 的 `extractCodexTopLevelInt` / `setCodexTopLevelInt` / `removeCodexTopLevelField`。
   - 开启 → 顶层 `model_context_window = 1000000`；`model_auto_compact_token_limit` **缺失时**才补 900000（已有值不覆盖）。
-  - 关闭 → 移除这两个字段。
+  - 关闭 → **无条件删除**这两个顶层键（2026-10-19 用户明确要求对齐 cc-switch；旧版「只删自己写的默认值、
+    保留用户自填的 200000/150000」已废弃）。取舍：1M 是一个开关，不是一个用户字段——要保留自定义值就不要回答「否」。
   - 只认**顶层**（第一个 section header 之前）的字段；section 内的同名 key 不动（与 cc-switch 只扫顶层区域一致）。
-- **有意差异（关闭这一侧）**：cc-switch 的表单全程看得见这两个值，删掉不丢东西；本脚本面对的是**手改过**的
-  `config.toml`，所以只删「本来就是本开关写的默认值」（1000000 / 900000）。用户自填的 200000 / 150000 等
-  一律原样保留并打印「已原样保留」——否则「回答 n」= 静默清掉别人调过的上限，违反本文件"不静默覆盖用户数据"的原则
-  （同 `readStash` / `writeStash` 的取舍）。L4 用 200000/150000 钉住；把 `removeContext`/`removeCompact`
-  临时改成"无条件删"（一次性注入的反例，**不在测试文件里**）能让 L4 的 3 条断言变红。
+- 菜单 3 生成的配置里，两个 1M 键必须落在**第一个 section 之前**（否则 Codex 会把它们当成
+  `[model_providers.custom]` 的字段）——L8b 用 node 校验位置，L8c 断言回答「否」时不写任何 1M 键。
 - **不参与路由暂存**：1M 字段是顶层全局设置，`readStash` / `writeStash` 只搬 `model_provider` 行与
   `[model_providers.*]` 段，所以官方剥离 / 第三方恢复都不会顺手动它们。`route-only` 更是零改动（L6 按字节断言）。
-  cc-switch 把上下文窗口算作"随供应商切换"的字段，本脚本没有 per-provider 数据库——这是**已知差异**，别当 bug 改。
 - 菜单 1 的默认答案跟随现状：`hapi_codex_context_window_state` 读顶层 `model_context_window`，是 1000000 → `[Y/n]`，
   否则 `[y/N]`。探测失败 / 文件不存在 / 值带引号或非纯整数 → 按"没有 1M"处理（默认落在不开启一侧）。
-  它的判定必须与写入侧 `topLevelIntValue` 同一规则（只认「顶层 + 纯整数」），**改一处要同步另一处**。
-- 默认模型名统一为 `gpt-6-astra`：`hapi_config_codex` 与 `hapi_create_codex_profile` 的 `local default_model`
-  **加**两个 node heredoc 的兜底值（`process.env.CODEX_MODEL ||`），共 4 处，必须一起改，否则菜单 1 与菜单 3 分叉。
-  ⚠️ 「4 处必须同步」这个不变量**光靠 L1/L8 钉不住**：那两条走的是 shell 已填好的默认值，
-  **命中不到两个 Node fallback**（2026-09-29 审查把 writer 的 fallback 临时退回 `gpt-5.5`，L 组仍然 34/0）。
-  现由 L9 三条**源码断言**兜底（`local default_model=` ×2、`process.env.CODEX_MODEL ||` ×2、全文 0 处 `gpt-5.5`）。
-- 回归：`tests/Hapi_Claude_Manage/run.sh --only L`（菜单 1 全链路 + 写入语义，现 37 条断言）。
-- ⚠️ **预览脱敏的例外必须是三条件同时成立**（P1 教训，2026-09-29）：
-  `isSensitiveKey` 的 `includes("token")` 会把 `model_auto_compact_token_limit = 900000` 打成 `= "******"`，
-  看起来像被隐藏的密钥（本开关会常态写出这个键，于是菜单 1 的预览里就会出现），所以要开例外——
-  但**只按 key 名放行是错的**。首版写成 `isSensitiveKey(key) && !SET.has(key.toLowerCase())`，被审查实测出
-  **三种真实明文泄露**（都是"应该打码却整行原样输出"）：
-  1. `model_auto_compact_token_limit = "sk-secret"` —— 值不是数字也放行；
-  2. `MODEL_AUTO_COMPACT_TOKEN_LIMIT = "sk-secret"` —— TOML key 大小写不同，被 `toLowerCase()` 匹配上；
-  3. `[model_providers.foo]` 里的同名字段 —— 不是顶层 1M 字段，但 `sanitizeToml` 当时根本不跟踪 section。
-  现在两份 TOML 脱敏（`hapi_show_codex_config` / `hapi_show_codex_profile_by_index`）统一为
-  `isPlaintextIntField = 顶层 && key 精确等于（**不做 toLowerCase**）&& 值匹配 /^\d+\s*(?:#.*)?$/`，
-  且 `sanitizeToml` **必须跟踪 section**（任何 trim 后以 `[` 开头的行都算进入 section，判不准就当非顶层 = fail-closed）。
-  不放宽 `"token"` 子串规则：漏码一个真密钥的代价远高于多码一个数字。
-  两份实现必须同步（同 `isSensitiveKey` 五副本的规矩）；G 组对 live / profile **各**覆盖正向 1 组 + 负向 4 组。
+- 默认模型名统一为 `gpt-6-astra`：菜单 1 与菜单 3 的 `local default_model`
+  **加**两个 node heredoc 的兜底值（`process.env.CODEX_MODEL ||`），共 4 处，必须一起改。
+  ⚠️ 「4 处必须同步」**光靠 L1/L8 钉不住**（那两个用例走的是 shell 已填好的默认值，命中不到 Node fallback），
+  现由 L9 三条**源码断言**兜底。
+- 回归：`tests/Hapi_Claude_Manage/run.sh --only L`（菜单 1 / 菜单 3 全链路 + 写入语义）。
+- 预览已改为明文（见上节），因此「1M 数字阈值不能被打码」这个脱敏例外**不再需要**，
+  相关的 `isSensitiveKey` 副本与 `sanitizeToml` 一起删掉了。
 
 ### Claude Code `settings.json` 语义
 
@@ -762,17 +775,14 @@ git diff --stat && git diff --check
     所以**不做全局固定项**，只留在可选清单里（谁勾谁负责）。
     2026-09-23 我先写过「它会让 `[1m]` 失效」——那是**未经验证的猜测，已撤回**：能确定的是剥 beta 请求内容 +
     关 MCP tool search；`[1m]` 本身是 Claude Code 官方的模型后缀机制。
-  - **预览（`hapi_show_claude_config`）必须用 Node 递归脱敏，禁止再用 sed 正则**：旧实现只认三个固定键，
-    ① token 里带 JSON escaped quote 时后半段明文泄漏；② `OPENROUTER_API_KEY` / `OPENAI_API_KEY` /
-    任意 `*_SECRET` / `*_PASSWORD` 全部明文打印。更糟的是它是「先预览、后清理」——旧配置里残留的认证键
-    会先被打印出来（P1，2026-09-23 审查环境实跑证实）。JSON 解析失败时**不回退打原文**，只报
-    「不是合法 JSON，为避免泄露敏感字段，不显示原始内容」。
-    ⚠️ `isSensitiveKey` 在脚本里有 **5 份副本**（Claude live 预览 / Claude profile 预览 / Codex 的 3 处），
-    **改一处必须同步其余四处**——2026-09-23 就踩过两次：① 只改了一份（另外几份首行写法不同，
-    `replace_all` 没匹配到），`password` 条款漏了出去；② 漏掉了 profile 预览这条路径，
-    它在菜单 4/5 的**确认之前**就会打印，属于真实可达泄漏（P1）。
-    统一判据：`api_key` / `apikey` / `token` / `secret` / `password` / `experimental_bearer_token`
-    （`password` 是本次新加的：`settings.json.env` 是任意用户环境变量，MCP server 常有 `*_PASSWORD`）。
+  - **预览（`hapi_show_claude_config`）自 2026-10-19 起改为明文**：用户明确要求「Key 要能直接看到，
+    否则无法判断到底填进去了吗」。所以「查看配置」类入口（Claude live / Claude 配置库 / Codex live /
+    Codex 配置库）**不再脱敏**；这是有意决定，不是回退。
+    - 仍然打码的只有**校验/诊断输出**（`hapi_check_codex_auth_file`，一份 `isSensitiveKey` 副本）：
+      它会进日志、会被贴进聊天窗口。判据：`api_key` / `apikey` / `token` / `secret` / `password` /
+      `experimental_bearer_token`。
+    - 旧的「先预览、后清理」问题不复存在（预览就是看明文），但**JSON 解析失败时仍然不回退打原文**。
+    - ⚠️ 改回打码前先看 G 组：那里用「预览里不得出现 `******`」与「必须出现明文 Key」两组断言钉住了这个决定。
   - `hasCompletedOnboarding` **写 `~/.claude.json`，不是 `settings.json`**：由 `hapi_ensure_claude_onboarding` 负责，
     菜单 1（配置）与菜单 4（切换）写完 live settings 后各调一次，失败只打警告、不影响已写好的 settings.json。
     依据 cc-switch `src-tauri/src/claude_mcp.rs:148-173` `set_has_completed_onboarding`
@@ -815,9 +825,8 @@ git diff --stat && git diff --check
   ⚠️ **不要再逐点复制 `if ! cp -a …`**：这条规则原本散在 12 处，2026-09-23 只修了 Claude 的两处、
   Codex 侧仍是旧写法，于是**同一个 P1 在 Codex 又活了一轮**（审查环境发现）。现在全部 12 处走 helper，
   `tests/Hapi_Claude_Manage/run.sh` 的 **G 组会扫源码**：helper 结构不对、或脚本里还残留裸 `cp -a`，直接红。
-  **唯一非备份的例外**是「把 live 读进临时文件供编辑」（菜单 7 `existing` 分支）：它仍是 copy，
-  但**同样必须检查返回值**——临时文件是空文件，载入失败还继续就是让用户在空白内容上编辑，
-  保存后写回一份没有凭据的 auth.json（等于清空官方登录态）。
+  菜单 7 移除后，「把 live 读进临时文件供编辑」这条非备份的 copy 也一并消失；现存所有 copy 都是备份，
+  都必须走 helper。
   `hapi_prompt_add_extra_env` 是纯合并 helper，**内部禁止再备份**：历史上它用同一个 `settings.json.bak` 又备份一次，
   把原始备份覆盖成了刚写好的新配置 → 用户在「是否添加额外参数」选 `y` 时「live + 唯一 .bak」同时丢掉原配置
   （2026-09-23 用变异体实测复现：目录里只剩 `settings.json` + 内容已是新配置的 `settings.json.bak`）。
@@ -948,19 +957,18 @@ git diff --stat && git diff --check
   `cp -a` 会保留源文件 mode，所以旧版本留下的 / 人工放进去的 0644 文件会在一次新版本运行后变成
   「正式文件 0600、备份 0644」——等于真正的 token 反而留在 `.bak` 里。2026-09-19 覆盖了当时的全部 `cp -a` 站点
   （claude settings、codex auth/config、含 `cliApiToken` 的 hapi settings；只含 listenHost/port 的纯配置不在此列但一并收紧）。
-  2026-09-23 收敛后共 **12 个备份站点**走 helper（Claude 菜单 1/4、Codex writer / 菜单 1 / 推荐值 / profile 切换 / 菜单 7、
-  hapi settings 的 listen 与 cliApiToken），另有 1 处「把 live 读进临时文件供编辑」用同样检查返回值的 `if ! cp -a`。
+  2026-10-19 起共 **12 个备份站点**走 helper（Claude 菜单 1/4、Codex writer / 菜单 1 / 推荐值 / profile 切换、
+  hapi settings 的 listen 与 cliApiToken），脚本里已没有「非备份的 copy」。
 - 敏感临时文件：`mktemp` 生成不可预测路径（**不要** `${TMPDIR}/xxx_$$.json`），并挂 `hapi_install_sensitive_tmp_traps`
   （`hapi_cleanup_sensitive_tmp` 统一处理 `HAPI_CODEX_AUTH_TMP` / `HAPI_CLAUDE_SETTINGS_TMP`）。
   **故意不挂 INT**：vim 里 Ctrl+C 是退出插入模式的常用操作，挂上会在 vim 退出后连带删掉用户刚保存的内容。
 
-### 编辑器流程（Codex 菜单 7「写入/编辑官方 auth.json」）
+### 编辑器流程（已随菜单 7 移除，2026-10-19）
 
-- 编辑器探测顺序：`HAPI_EDITOR` → `VISUAL` → `EDITOR` → 自动探测 `vim vi nano emacs`；**配置的编辑器不可用要回退**，不要硬用。
-- vim 系加 `-c 'set paste' -c 'set nobackup nowritebackup noswapfile noundofile viminfo='`
-  （paste 防自动缩进破坏 JSON；其余防 token 落进 `~/.vim/undo`、`.swp`、`~`、viminfo）。
-  `vi` 不一定是 vim：`hapi_editor_is_vim_like` 先探测（`--version` 里含 vim）再决定加不加 `-c`。
-- **编辑器退出码非 0 必须拦住**（默认中止、清理临时文件），否则 existing 模式下"编辑失败但旧内容仍然合法"会被静默写回。
+- 菜单 7 删除后，脚本里**不再有任何文本编辑器调用**。不要再引入 `HAPI_EDITOR` / vim `-c` 那套流程：
+  官方 auth.json 由 cc-switch 授权中心绑定，本脚本只负责第三方直连与登录态暂存。
+- 仍然通用的经验照上节执行：`mktemp` 随机路径 + `hapi_install_sensitive_tmp_traps`（`HAPI_CODEX_AUTH_TMP` /
+  `HAPI_CLAUDE_SETTINGS_TMP`），失败路径也要清理。
 
 ### 本脚本的验证方式
 
@@ -972,17 +980,19 @@ git diff --stat && git diff --check
   几秒钟能拦住 heredoc 里的手滑，比等测试跑到一半才报错划算。
 - 行为回归：`bash tests/Hapi_Claude_Manage/run.sh`（失败非零退出；`--only A,C` 只跑指定组，`--log FILE` 指定进度日志）。
   分组：**A** `last_refresh` 真 RFC3339 ／ **B** `id_token` 严格 JWT envelope ／ **C** `auth_mode` 解析 + official/loadable 两级校验 ／
-  **D** 写入器路由保护 ／ **E** 菜单 7 编辑器流程（含 SIGTERM 清理）／ **F** 配置库旁路卡点 ／ **G** 凭据 0600 与预览脱敏
-  （含 1M 数字阈值例外的正向 / 负向：非数字值、带引号数字、大小写变体、section 内同名 key，live 与 profile 各一遍）／ **H** 兼容性 ／
+  **D** 写入器：第三方 Key 落点（段内 token / 无 env_key / requires_openai_auth=false / auth.json 移除 / 登录态暂存）
+  与官方路由保护 ／ **E** 菜单 7 已移除（函数、菜单项、文案三处都不得复活）／ **F** 配置库旁路卡点 ／
+  **G** 凭据 0600 与「查看配置」明文显示 Key（校验输出仍然打码）／ **H** 兼容性 ／
   **I** 路由自动收敛（官方剥离+暂存 / 第三方恢复 / 保留 id 不动 / 损坏暂存 fail-closed / 空配置走同一条流程，81 条断言；语义与反例清单见
   `tests/Hapi_Claude_Manage/路由自动收敛-测试文档.md`）／
   **J** Claude Code `settings.json` 写入语义（合并写盘保留未知顶层键 / 备份固定一份不堆积 / 不注入固定补齐项 / 预览递归脱敏 /
   配置库损坏 fail-closed（语法级 + schema 级）/ onboarding 幂等 / 写 live 四处 plain-object 校验）／
   **K** Codex 配置库 schema fail-closed（save / create / list 三态）+ 备份 fail-fast
-  （writer / 菜单 1 / 推荐值 / profile 切换 / 菜单 7 粘贴 / 菜单 7 载入现有 auth，每条都断言日志里出现「备份失败，已中止修改」，
+  （writer / 菜单 1 / 推荐值 / profile 切换，每条都断言日志里出现「备份失败，已中止修改」，
   避免「因为别的卡点提前 return」造成的假绿）／
-  **L** Codex 1M 上下文窗口（菜单 1 第 4 参数：写入 / 移除 / 保留用户自填值 / 缺省 `keep` 不改动 / route-only **字节级**零改动）
-  + 默认模型名 `gpt-6-astra`（含「4 处必须同步」的源码断言；现 37 条断言）。
+  **L** Codex 1M 上下文窗口（菜单 1 第 4 参数 + 菜单 3 共用的提问：写入 / **无条件删除** / 缺省 `keep` 不改动 /
+  route-only **字节级**零改动 / 菜单 3 开启与关闭 / 1M 键必须在第一个 section 之前）
+  + 默认模型名 `gpt-6-astra`（含「4 处必须同步」的源码断言）。
   实测（2026-09-19，本机 Windows/MSYS）：**定向分组** `--only C` = 39 断言全绿、`--only E,F` = 35 断言全绿；A 组 ≈15s、C 组 ≈25s、E 组 ≈2min、E+F ≈3min（进程创建极慢，别指望秒级）。
 - ⚠️ **全量套件在本机 Windows/MSYS 上超过默认 300s 上限**（2026-09-23 实测）：默认 `HARNESS_TIMEOUT=300` 会被
   `timeout` 杀掉，表现为 **`NOT OK - harness 超时（300s）`、rc=124、日志停在 G 组且没有任何 `NOT OK` 断言**
