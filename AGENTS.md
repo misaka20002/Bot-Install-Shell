@@ -790,3 +790,17 @@ done
 - `git_clone` / `git_update` 失败后可能留下半成品目录（有目录无 `.git`）——**只能清理由本轮操作创建的目录**；已存在的目录不得按"半成品"推断后删除。
 - **`SYS_Manage.sh` 的「安装常用字体」各发行版包名不同，别照抄**：CJK 是 `fonts-noto-cjk`（apt）/ `google-noto-sans-cjk-fonts`（yum、dnf）/ `noto-fonts-cjk`（pacman）；emoji 是 `fonts-noto-color-emoji`（apt）/ `noto-fonts-emoji`（pacman）。RPM 系**改过名**：EL9 及更早是 `google-noto-emoji-color-fonts`，EL10 起是 `google-noto-color-emoji-fonts`，要写成 `dnf install A || dnf install B` 两条命令试——写进一条里时只要有一个包不存在，dnf 会 `Unable to find a match` 让**整条事务失败**。⚠️ **`google-noto-emoji-fonts` 是黑白 emoji**，装错包不报错但表情仍是方块。装完必须按 `fc-list :lang=zh` / `fc-list | grep -i emoji` 复核：字体装失败是**静默**的，只有 fc-list 能戳破（2026-09-14：`chatgpt-plugin` 的列表图在服务器上整片中文变方块，根因就是宿主没装 CJK 字体）。
 - `Linux/Bot-Install-*.sh` 那批系统安装脚本只装文泉驿（CentOS 走 `groupinstall fonts`），**没有 Noto 系列**——需要 CJK/emoji 覆盖时记得同步这四处。
+
+## Agent skills
+
+### Issue tracker
+
+本地 markdown：issue / spec / tickets 都在 `.scratch/<feature-slug>/`（未经确认不要往 gitee / GitHub 开 issue）。See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+五个规范角色，标签字符串与角色名相同（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）。See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+单上下文：仓库根 `GLOSSARY.md` + `docs/adr/`；两者尚不存在，技能按需惰性创建。See `docs/agents/domain.md`.
