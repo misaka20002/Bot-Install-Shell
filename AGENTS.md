@@ -192,277 +192,26 @@ done
 
 ### 编辑与 EOL 约定
 
-- **按文件保持它原有的 EOL**：不要无意归一化。2026-09-19 实测基线：
-  `Manage/meme_generator.sh`（2642 行 / 2642 CRLF）、`Manage/SYS_Manage.sh`（1128 / 1128）、`Manage/Main.sh`（1107 / 1107）、
-  `Manage/NapCat.sh`（3281 / 3281）都是**全 CRLF**；`Manage/Hapi_Claude_Manage.sh` 现在是**全 LF**（4114 行 / 0 CRLF，2026-09-19 实测；
-  这个行数每次改动都会变，**判据看 `crlf=0`**，行数只是用来发现"整文件被归一化"的异常）。
-  ⚠️ `Hapi_Claude_Manage.sh` 原先记录为"已知历史例外（混行）"，**该状态已不存在**：2026-09-19 实测工作区副本已是全 LF。
-  仓库里（对象库）本来就是纯 LF（`git show HEAD:Manage/Hapi_Claude_Manage.sh` 实测 0 CRLF），
-  所以 `git diff` 不会出现整文件假 diff；目标平台是 Linux，全 LF 是**正确状态，不要"修回"CRLF**。
-  CRLF 的那几个文件改完仍要复核没被整体归一（判据见下）。
-  `tests/**/*.sh` 反过来必须是 **LF**：CRLF 会让 `bash tests/...` 直接报 `\r` 相关错误（`$'\r': command not found`）。
-  **已由 `.gitattributes` 钉住（2026-09-19 实测：仓库根该文件存在，内容只有一行 `tests/**/*.sh text eol=lf`）**：
-  `git check-attr text eol -- tests/meme_generator/run.sh` 返回 `text: set` / `eol: lf`。
-  （历史：曾有一段时间仓库里没有这个文件，于是 Windows 上重新 checkout 后 `run.sh` 会变回 CRLF、测试直接报
-  `$'\r': command not found`。现在这条已修好——判断时以 `git check-attr` 为准，别再手抄"有没有 .gitattributes"。）
-  注意它**只覆盖 `tests/**/*.sh`**：`Manage/*.sh` 没有 `text`/`eol` 属性，走 `core.autocrlf=true`（本机实测为 `true`），
-  即**对象库里是 LF、Windows 工作区 checkout 出来是 CRLF**，所以 `git diff` 的警告是正常的，不是"你改坏了行尾"。
-- 编辑时优先**定点替换**，不要整文件重写（会产生全量 diff 假象）。改完确认同文件没有出现新的混行：
-  ```sh
-  node -e "const s=require('fs').readFileSync(process.argv[1],'utf8');const nl=(s.match(/\n/g)||[]).length,crlf=(s.match(/\r\n/g)||[]).length;console.log(crlf===nl?'全 CRLF':(crlf===0?'全 LF':'混行!'));" Manage/xxx.sh
-  ```
-  判据写成 `crlf === 0 || crlf === nl`（全 LF 也是合法状态）。
+- **行尾：对象库统一 LF，工作区随平台落地；单个文件内不许混用。**
+  `.gitattributes` 现在有两行：`* text=auto`（任何系统提交都归一化成 LF）+
+  `tests/**/*.sh text eol=lf`（测试脚本强制 LF，否则 `bash tests/...` 直接报 CR 相关错误）。
+  本机 `core.autocrlf=true`，所以 **Windows 工作区里 `Manage/*.sh`、`install.sh` 是 CRLF，`tests/**` 与 `.md` 是 LF**
+  ——两种都合法，`git diff` 里那句 "LF will be replaced by CRLF" 警告是正常的。
+- 编辑时**按文件当前的行尾定点替换**，不要整文件重写：
+  - 用 node/python 改文件时先看该文件用 `\r\n` 还是 `\n`，按原样切分/拼回；
+  - 一次性 `read → join("\n") → write` 会把整份文件的行尾换掉；`git diff --stat` 里出现「整份文件 +N/-N」就是这个症状
+    （2026-10-19 真踩过：4888 行新增 + 4888 行删除），用 `git checkout -- <file>` 重来，别硬提交。
+- 改完确认没有混行：`bash tests/static-checks.sh <file>`（混行会让 bash 在 CR 处报错，这个检查会直接点名）。
 - 函数内变量尽量 `local`；避免用全局变量在函数间传参（历史上 `Tmux_Name` / `repo_path` / `original_url` 都因此互相覆盖过）。
 
 ### 验证方式
 
-```sh
-# 1) 语法检查（必备，每次改完都要跑）
-bash -n Manage/xxx.sh
+改完任何 `Manage/*.sh` 的最低要求：`bash tests/static-checks.sh`（`bash -n` + heredoc 里的 node 语法 + 行尾一致，秒级）。
+行为回归：`bash tests/<脚本名>/run.sh`（默认全组；`--only A,B` 只跑指定组；`--log FILE` 指定进度日志）。
+本机跑得慢，优先放后台 + `--log`；**不要在本机跑全量**。
 
-# 2) 行为回归：跑仓库内的测试（tests/<脚本名>/run.sh），它从脚本里抽出函数体、再造数据跑断言（不需要 root、不联网）
-#     bash tests/meme_generator/run.sh              # 默认：A~F + H 断言（**G 组已默认跳过**）
-#     bash tests/meme_generator/run.sh --only A,B   # 只跑指定分组（日常最常用）
-#     bash tests/meme_generator/run.sh --with-git   # 只有确实改了 git_clone / git_update 才用（G 组已停跑，见下）
-#     --log FILE 指定进度日志（默认自动生成）；每条断言即时 append，超时/被杀也能看出停在哪
-#    ⚠️ **测试范围已收窄（2026-09-13，用户决定）**：
-#      · **不再跑 G 组**（真实 git 行为：造裸仓库 + 多次 push + force-push）。默认已跳过，要跑必须显式 `--with-git`；
-#        G 组断言仍在代码里，但**不再随日常回归执行**，属于**未维护**状态（别把它当成"有保护"）。
-#      · **不再跑变异验证**（`--mutate`）。参数保留（代码没删），但**不要跑、也不要再提议**。
-#      随之而来的唯一代价：新断言的"有效性"不再由变异自动证明，所以**新断言必须手工拿反例自证**
-#      （临时改坏对应生产代码 → 跑一次确认变红 → 改回），否则就是"看起来对"的断言。
-#    当前 meme_generator.sh 的断言覆盖（run.sh 里按 A~H 分组，--only 可单独跑；**G 组已默认停跑/未维护**）：
-#      A 运行判据      is_meme_process_running 把前台 watchdog 算作"运行中"（覆盖 sleep 2 间隙）
-#      B 前台身份      PID 身份 fail-closed；register_foreground_watchdog 取不到 boot_id 必须失败且不落地文件；
-#                      Foreground_Start 准备阶段失败时不登记身份（用标记文件测**登记时机**，不是测文件残留）；
-#                      stop_meme_service 在「watchdog 仍存活」或「身份不可信但 PID 还活着」时都必须报失败且保留 PID 文件
-#      C 安装状态      is_meme_install_complete 必须证明 pip 包真的装进 venv（venv 文件在 ≠ 装好了）；
-#                      修复模式下 pip 再次失败后，再选「安装」仍能重进修复（不能被「您已安装」挡住）；
-#                      重装依赖成功后选「重新启动」必须真的走到 start_meme_generator（不能撞上 restart 的
-#                      「未启动无法重启」而根本没启动）；install 用例不得越界到「安装字体」写 /usr/share/fonts
-#      D 配置写入      write_default_config 原子写入 + 权限收紧；rewrite_config 备份失败必须中止且不动原配置；
-#                      rewrite_config 的「接线」（真的调用 helper）也被验证——只测 helper 会漏掉接线被删
-#      E 配置读写      config_get/config_set 段内定位、注释保留、未命中 key/section 返回非零；
-#                      config_set_string 的 \ 与 " 转义形式（断言的是转义结果，不是"能被 TOML 解析器读回"）；
-#                      meme_dirs 增删链路
-#      F 自更新/版本   ⛔ **「SCRIPT_VERSION 必须高于 HEAD」那条断言已删除**（2026-09-13 用户决定）：
-#                      它与提交流程耦合——刚 commit 完工作区 == HEAD，必然判红，是假警报；
-#                      该约定改为**纯文档**（见「自更新」小节：改脚本要提版本，提交前自查，没有红灯提醒）。
-#                      仍在跑的是：同版本但内容损坏的系统脚本必须重下；
-#                      镜像返回旧版本必须跳下一个源；全源版本不符必须失败且不覆盖现有脚本。
-#                      （F 组编号从 F2 起、**故意不重排**：本文多处引用 F5~F9。）
-#      F cron          `read_current_crontab` 统一读取层：确认「no crontab」→ 幂等成功；**非零读取错误
-#                      （含只有 stderr 的 permission denied）必须 fail-closed**；`remove_meme_cron` 在
-#                      「meme 是唯一一条 cron」时必须删成功（pipefail 老坑）；读不到时 append / toggle /
-#                      setup（启用分支）三个调用点都必须拒绝写入（否则会把用户整份 crontab 覆盖成一行）；
-#                      F9 `setup_auto_update` **关闭分支**失败时必须**如实返回非零**（读取失败 / 删不掉各一条），
-#                      并带一条正向对照（正常关闭必须返回 0）。为什么必须直接断言返回码、端到端抓不到：
-#                      它的调用点 `Tmux_Start` 那个分支最后一条语句是 `echo`，返回值在那一层被吃掉
-#      H 公网 IP       is_valid_ipv4 拒绝超段/缺段/多段/HTML/空白等垃圾输入；load_public_ip_cache 只读缓存
-#                      文件（零网络），缺失/损坏/TTL 过期一律拒绝且清空 PUBLIC_IP；refresh_public_ip_bg 只有
-#                      合法 IPv4 才原子写缓存（错误页绝不落盘，POST ip.3322.net → GET api.ipify.org 兜底）；
-#                      init_public_ip 缓存新鲜时绝不触发后台获取（「不要每次进主菜单都 POST」的保证）、
-#                      缓存缺失/过期才补一发（curl 桩掉，不联网）。2026-09-13 新增，三条变异反例已自证
-#      G Git 边界      ⛔ **默认不跑（未维护）**：只有确实改了 git 相关代码时才 `--with-git` 跑一次。内容是——
-#                      git_clone 目录所有权（已存在非空目录必须被拒绝且不删文件）；
-#                      git_update 面对**真正的非快进改写**（上游 reset 回 A、再造 C、强推）仍能对齐远端 HEAD；
-#                      已知边界：与远端新增 tracked 同名的未跟踪文件会被覆盖（断言它确实被覆盖），不冲突的保留；
-#                      git_update 全部地址失败后 origin 被恢复为权威地址
-#    实现要点：用函数桩替换 curl 与进程探测函数；git 用本地裸仓库（不依赖网络）
-#    - ⛔ **变异验证已停用（2026-09-13，用户决定）**：不要再跑 `--mutate`，也不要再提议。参数与下面的清单**保留**，
-#      作为历史记录 / "将来若真要恢复该怎么做"的参考。新增或修改断言的有效性，改由**手工反例自证**
-#      （临时改坏对应生产代码 → 跑一次看到变红 → 改回）。理由：这个脚本文件本来就小，G 组 + 变异矩阵的耗时
-#      （本机 ≈1 小时）与收益不成比例。
-#    - 变异验证（设计意图：每条关键断言都要能在注入对应 bug 后失败，否则就是「恒真断言」）。
-#      当前 14 条（**以代码为准，别手抄**：`grep -c 'run_mutation "' tests/meme_generator/run.sh`——本节数字漂过好几次）。
-#      `run_mutation name old new <groups>` 让每条只跑它涉及的分组，比跑全部组显著快；但**不是"秒级"**：
-#      本机（Windows/MSYS，进程创建极慢）实测**≈4 分钟/条**，只有换到正常 Linux 才可能降到秒级。
-#      ⚠️ 下表除标注「已实测」的那几条外都是**预期映射，不是实测结论**。换到正常 Linux / CI 跑 `--mutate` 才能把 14 条全部验完。
-#      A  去掉 is_meme_process_running 的前台判据      → 「sleep 2 间隙算运行中」失败   ← 已实测会被抓住
-#      B  把 watchdog 登记挪到 cd/激活 venv 之前       → 「venv 失败前未写 PID」失败       （预期）
-#      B  stop_meme_service 改回「先删身份再确认退出」  → 「仍存活时误报停止成功」失败     （预期）
-#      B  去掉「身份不可信就不算停止成功」              → 「旧式一行 PID 被删掉」失败       （预期）
-#      C  安装判据退回只看 .git                        → 「进修复模式 / 未被误判为已安装」失败（预期）
-#      C  去掉 pip 包判据                              → 「包没装上却判为已完成」失败       （预期）
-#      D  rewrite_config 备份失败仍继续覆盖             → 「备份失败仍继续执行」失败         （预期）
-#      D  rewrite_config 丢掉 write_default_config 接线 → 「原内容已被替换」失败             （预期）
-#      C  重装依赖后回调 restart_meme_generator         → 「真的走到 start / 未出现未启动无法重启」失败（预期）
-#      F  remove_meme_cron 退回 `grep -v | crontab -`   → 「唯一一条 cron 删掉却报失败」失败 ← 已实测（1 条断言判红）
-#      F  read_current_crontab 把「非零」当成「没有 crontab」→「stderr-only 读取错误被当成没有」失败 ← 已实测（7 条判红）
-#      F  download_script 去掉版本一致性校验            → 「写回旧版本 / 全源不符却成功」失败 ← 已实测（3 条判红）
-#      F  setup_auto_update 关闭分支去掉两个如实返回    → 「读不到 / 删不掉却返回 0」失败      （预期）
-#      G  git_update 把 reset --hard 改 --soft          → 「本地未对齐被改写后的远端」失败   （预期）
-#    已实测结果（2026-09-13，**本轮实跑**，被测 = 上面那 14 条变异 + 本轮的 cron / case / rm / setup 返回码 修复）：
-#      - `bash tests/meme_generator/run.sh`（= 旧 `--fast`；现在**默认就跳过 G 组**）：**pass=62 fail=0 skip=2，rc=0**
-#        （删掉 F1 版本断言后由 63 → 62）；两个 skip = Windows 不强制 POSIX 权限位 + G 组默认不跑。
-#        （同日在 Linux 上由用户复跑：pass=59 fail=0 skip=1——Linux 能跑权限断言，所以多 1 pass、少 1 skip；
-#        当时还没有 F9 的 5 条。跨平台对比请看 pass/fail 而非绝对值。）
-#      - ⛔ 2026-09-13 起 **G 组与变异验证停跑**（用户决定，见上面「测试策略」）。上面这次是**最后一次含 A~F 的实测**；
-#        G 组自此**没有任何实测记录**，其断言视为**未维护**，不要引用为"已验证"。
-#        本机跑法（PATH 里的 `bash` 是坏 shim，必须用真实 bash 并把它的 bin 目录放进 PATH）：
-#          PATH="/c/Users/<user>/.workbuddy/binaries/PortableGit/versions/<ver>/usr/bin:/c/Users/<user>/.workbuddy/binaries/PortableGit/versions/<ver>/bin:$PATH" \
-#            HARNESS_TIMEOUT=600 bash tests/meme_generator/run.sh --log /tmp/mg.log   # 默认即 A~F
-#      - **含 git 组的全量 + `--mutate` 全量变异矩阵（长任务：本机 ≈4 分钟/条 × 14 条 ≈ 1 小时）本轮没有跑**——
-#        按项目约定"长任务先问"，且用户已明确表示小脚本没必要跑这么久，**不要再主动提议**。
-#        已跑的是**最小范围的定向变异**：`--fast --only F --mutate` → **caught=3 missed=0**（当时 F 组 3 条全被抓住，
-#        分别报了 1 / 7 / 3 条 `NOT OK`；耗时 11m49s）。F 组现在 4 条，新增的那条**还没实测**。
-#        于是下表里 A（早先实测）与 F 的前三条（实测）是**实测结论**；其余 10 条
-#        （B×3 / C×3 / D×2 / F×1（新增）/ G×1）仍**只是预期映射，不是实测结论**。
-#        变异 harness 的"超时 / 崩溃"负向分支（rc=124、rc≠1）也还没实测
-#        （要故意构造才会触发，属已知未覆盖项）。
-#        （历史记录：加固前跑过一次含 git 的全量，pass=55 fail=0 skip=1。）
-#      - 教训：本节一度写着"F 组已验证"，而实际上是空的——F8 的 `case` 模式带空格（语法错误）让整个 harness
-#        构建失败，**F 组从来没执行过**。所以清单里的每个"已验证"都必须能对应到一次真实运行的数字。
-#    - **变异的分组隔离必须自检**：harness 的 prelude 会把 `ONLY` / `LOG_FILE` 的默认值**写进生成的文件**，
-#      所以 `run_mutation` 用 `ONLY=<groups> LOG_FILE= cmd` 覆盖时，prelude 必须"只在未设置时才填默认值"
-#      （用 `${VAR+x}` 判断，**不能用 `:-`**——变异故意要传空 `LOG_FILE`，`:-` 会把空串也当成没设置）。
-#      只改这一处还不够，`run_mutation` 里另加三条硬校验：① 变异 harness 必须**退出码 1**（= 有断言失败地正常收尾；
-#      124 = 超时、其它码 = 基础设施崩坏）且输出里有完整的 `TOTAL: ... fail=<非零>`——否则"中途超时/崩坏 +
-#      之前碰巧打印过一个 `NOT OK`"就会被误判成 caught；② 变异输出里不得出现未选中分组的标题
-#      （"别的组里某条 `NOT OK`"同样会造成**假 caught**）；③ 变异运行不得让主进度日志行数变化。
-#    脚手架坑（都踩过）：
-#    - ⚠️ **删断言前先查它顺带建立的 fixture**：断言块经常顺手定义后面用例要用的变量 / 桩 / 现场。
-#      真实事故（2026-09-13）：删掉「版本必须高于 HEAD」那条断言时，连带删了它定义的版本变量，
-#      而 F2/F3 正拿这个变量造 curl 桩 → 立刻 4 条 `NOT OK`（pass=58 fail=4），**跑一遍才发现**。
-#      规则：① 删之前 `grep` 一遍该块定义的所有名字；② 删完**必须跑对应分组**；
-#      ③ 共享 fixture 在定义处标注「别删 + 谁在用」。（当时已把该变量改名为 `cur_ver` 并加了说明。）
-#    - 不要 `source` 整个被测脚本：顶层守卫遇非 Linux 会 `exit` 掉测试进程，末尾 `mainbak` 会死循环。
-#      抽取一律**按内容定位**：守卫起点 `cd "$HOME" || exit 1` → 探测块起点 `^URL=` → 正文起点 `^config=`
-#      → 终点 `^function mainbak`。**不要写死行号**——脚本持续插函数，行号一漂就静默取错范围。
-#    - `Foreground_Start` 是嵌在 `start_meme_generator` 里的嵌套定义，主菜单里直接调不了；
-#      抽函数体时按「函数体内各行都缩进、闭合 `}` 在行首」来切，比数花括号可靠（体内满是 `${}` 展开）。
-#    - 「不得留下 PID 文件」这类断言不能用「跑完后 `[ ! -f PID ]`」判断：
-#      `trap ... EXIT` 会在子 Shell 退出时把文件删掉、把 bug 掩盖掉。要在 `activate_meme_venv` 的桩里
-#      检查「此刻 PID 文件是否已存在」（写标记文件），才真正测到登记时机。
-#    - 抽不到函数时 `if <函数名>` 会因「command not found」而**假绿**（被当成"未运行/未完成"）：
-#      harness 开头必须前置自检，关键函数/变量缺一个就直接 FAIL 退出。
-#    - 变异要施加在**源脚本副本**上再重新抽取：只改"抽出来的库"会漏掉嵌套的 Foreground_Start。
-#    - 变异字面量匹配前先 `tr -d '\r'`：Windows 工作区是 CRLF，按 LF 写的多行字面量永远匹配不上。
-#    - git 类断言每次运行前必须重建裸仓库：上一轮 `reset --hard` 已经改掉现场，
-#      否则 `reset --soft` 这类变异会因工作区早就是远端内容而抓不住。
-#    - ⚠️ **`case` 的模式里只要含空格就必须加引号**：`case "${out}" in *无法读取当前 crontab*)` 是**语法错误**
-#      （bash 报 `syntax error near unexpected token 'crontab*'`；把模式换成 ASCII 的 `*a b*` 一样报），
-#      正确写法是 `*"无法读取当前 crontab"*)`。踩到的后果不是"这条断言红了"，而是**整个 harness 构建失败**
-#      （`build_harness` 末尾的 `bash -n "$2"` 挡住），表现为只打印一句「harness 生成失败」，退出 2 ——
-#      也就是说加上这段断言的那一轮，F 组（含 F8）**从来没被执行过**。
-#      教训：`bash -n` 通过 ≠ 断言真的跑过；**新增断言后必须至少跑一次对应分组**（`--only F`），
-#      否则"文档声称有保护、实际从未执行"会一直躺着。
-#    - ⚠️ **prelude 用的是未加引号的 heredoc**（它本来就需要 `WORK` / `ONLY` / `LOG` 在这里展开），
-#      于是正文里**反引号是命令替换、会真的执行**，`${...}` 也会被展开：
-#      在注释里写一对反引号包住的内容，就会看到 `run.sh: line 159: groups: No such file or directory`
-#      并把注释文字替换成空。要写字面量必须转义（写成 `\`` 与 `\${VAR+x}`）；同理，别指望这个 heredoc 里的
-#      注释能原样保留 `$` 和反引号。
-
-# 3) 确认没有整文件重写导致的换行/全量 diff
-git diff --stat && git diff --check
-```
-
-- **可复用的测试必须写进这个 Git 仓库**，不要只留在系统临时目录：测试是交付物的一部分，要能被审查、能随被测脚本一起演进。
-  只有一次性的探针（例如只为确认某条 Git / 系统真实行为的临时实验）可以放临时目录、用完即删。
-  教训：前几轮把断言写在临时目录、用完就删，结果没人能复核「到底测了什么、还测不测得动」。
-- 测试的存放与运行约定：
-  - **位置**：仓库根下 `tests/`，按被测脚本分子目录，如 `tests/meme_generator/`。
-  - **入口**：每个套件一个 `tests/<脚本名>/run.sh`，用 `bash tests/<脚本名>/run.sh` 跑完并打印 `pass/fail` 汇总，
-    **失败必须以非零退出码返回**（这样能直接接 CI，或串进 `&&` 链）。
-  - **自包含**：不引入新依赖，只用 bash + 系统已有工具（`git` / `sed` / `awk` / `node` 等按需）。
-  - **断言质量**：每条核心断言都要带负向对照，并且能用「注入对应 bug 的变异」证明它会失败（见上文"变异验证"）。
-  - **路径**：测试里一切仓库路径都要能按仓库实际位置推导，不要写死开发机的绝对路径。
-- **测试不要放进 `Manage/`**：`Manage/*.sh` 是「独立整包」，会被 `bash <(curl …)` 现场拉取执行；
-  测试放那里既会被用户当成功能脚本，也会白白增加下载体积。测试只在仓库内跑，不随功能脚本分发。
-- 没有测试框架，不要假设仓库里已有，也不要为了测试给 `Manage/*.sh` 加"测试模式"分支——
-  「从源码抽函数体 + 函数桩」（见上文脚手架坑）已经够用。
-- **测试策略（别误读；这条被误解过两次，其中一次很严重）**：
-  - **必须做、不用问**：**快速 / 定向验证是交付的一部分，改完就该跑**——`bash -n` + `bash tests/meme_generator/run.sh`
-    （默认 A~F，G 组已跳过），或按改动范围 `--only <组>`。本机实测耗时：A~F 全量 ≈6 分钟，单组也有 ≈4 分钟
-    （进程创建极慢，别指望秒级）。**做 review 的那一轮同样要跑**：审查方只做静态阅读就给出"通过 / 不通过 / 可以收尾"
-    的结论，是不合格的交付方式（见下面"审查回合的硬要求"）。
-  - ⛔ **已停用：G 组与变异验证都不再跑**（2026-09-13 用户决定）。这是**用户的明确取舍**，不是"我懒得跑"：
-    · **G 组**（真实 git 行为）默认已跳过；只有**确实改了 `git_clone` / `git_update`** 时才显式 `--with-git` 跑一次。
-      停在代码里的 G 组断言属于**未维护**状态，别把它算进"有保护"。
-    · **变异验证**（`--mutate`）**不要跑、也不要再提议**：本机 ≈4 分钟/条 × 14 条 ≈ 1 小时，用户原话"这么小的脚本
-      没必要跑这么久的验证"。替代做法：新断言用**手工反例**自证（临时改坏 → 看红 → 改回）。
-    · 万一真要跑变异：只跑涉及分组（`--only F --mutate`）、必须后台 + `--log` 落盘，并先问一句。
-  - 停用前实测的耗时（留作参考，别再拿它当"要跑"的理由）：**单条变异 ≈4 分钟**、`--only F --mutate`（3 条）≈11m49s、
-    14 条全量 ≈1 小时。条数一律现数，别手抄：`grep -c 'run_mutation "' tests/meme_generator/run.sh`。
-  - ⚠️ **不要把"停跑 G 组 / 停跑变异"误解成"不用跑测试"**。真实事故：有一轮把整轮验证省成"我按你的要求没有运行任何测试，
-    只做静态审查"，被用户明确判为**不符合**——用户原话是"其他测试还是要做的，然后审查模型也应该做测试"。
-    **A~F 断言照跑，它是交付的一部分**；停掉的只有 G 组与变异这两块。
-  - **结论必须标注验证级别**：任何交付里的判断都要说清哪些是**实测**（附命令与 `pass/fail` 数字）、哪些只是**静态阅读**。
-    不要把静态推断写成"已验证"，也不要把"没跑"包装成"按要求"。
-- **审查回合的硬要求**（评审别人（或自己）改动时）：
-  1. **先跑再判**：至少 `bash -n Manage/<脚本>.sh` + `bash tests/meme_generator/run.sh`（A~F；被审改动涉及 git 才加 `--with-git`），
-     或按改动范围用 `--only <组>`；用实际结果校正判断。静态阅读只用来**定位**要看的地方，不用来替代验证。
-  2. **发现"文档声称有保护、测试实际没保护"时按 blocker 处理**：先跑出反例（或指出缺哪条断言），再谈改法。
-  3. **本机跑测试的调用姿势**（否则会误报失败）：系统 PATH 里的 `bash` 是坏 shim（直接报 `bash: command not found`），
-     harness 内部还会再 `bash "${WORK}/harness.sh"`，所以必须先用**真实 bash 的绝对路径**并把它所在目录放进 `PATH`：
-     ```sh
-     export PATH="/c/Users/<user>/.workbuddy/binaries/PortableGit/versions/<ver>/usr/bin:/c/Users/<user>/.workbuddy/binaries/PortableGit/versions/<ver>/bin:$PATH"
-     HARNESS_TIMEOUT=600 bash tests/meme_generator/run.sh --log /tmp/mgtest.log; echo "EXIT=$?"
-     ```
-     长一点的运行一律 `run_in_background` + 轮询 `--log`；前台干等必然被工具超时打断。
-- **测试必须"不会卡住"**，三条硬保证缺一不可（都踩过：一次前台跑长套件看起来像死循环，实际是被超时杀掉 + 输出缓冲丢失）：
-  1. harness 开头 `exec 0< /dev/null`：任何漏写重定向的 `read` 立刻 EOF，绝不因 stdin 是未关闭的管道而永久阻塞；
-  2. 每次 harness 运行都套 `timeout`（`HARNESS_TIMEOUT`，默认 300s）并把 rc=124 明确报成「超时，可能有死循环」。
-     **本机没有可用的 `timeout` 必须直接失败退出**，绝不能悄悄退化成"无限运行"——那等于没有这条保证。
-     能力探测要**真的超时一次**（`timeout 1 sh -c 'sleep 5'` 后校验 rc=124）：只跑 `timeout 1 true` 只能证明
-     "有个叫 timeout 的程序能跑通 true"，证明不了它真会终止超时的子进程——而"有界"靠的恰恰是这一点；
-  3. 每条断言**即时追加**到 `--log` 指定的日志（`printf ... >> log`，追加写=不缓冲），进程被外部杀掉也能看出停在哪一步。
-     默认日志**故意放在 `WORK` 之外**（`/tmp/meme_generator_test.<pid>.log`）：`WORK` 会被 EXIT trap 整个删掉，
-     日志跟着消失就失去了"被杀了也能看进度"的意义。成功才删默认日志，失败 / 超时 / 被杀一律保留；
-     `--log` 指向不可写路径要立刻报错退出，别静默把这条保证丢掉。
-- **凡是会碰"系统级副作用"的生产函数，测试里都必须显式 stub**（进程 / tmux socket / cron / 网络 / 系统目录）。
-  **只把 `HOME` 指到临时目录不等于隔离**：tmux socket 名与 `/tmp/tmux-<uid>/<name>` 都不受 `HOME` 影响——
-  不 stub `tmux_kill_session`，跑一次回归就可能把开发机上真正在跑的那个 meme 服务停掉。
-  当前 harness 固定 stub：`proc_boot_id` / `proc_starttime` / `meme_pid` / `meme_curl` / `tmux` / `tmux_ls` / `tmux_new` / `tmux_kill_session`；
-  用例内按需再 stub `curl`（自更新）、`crontab`（cron）、`cp`（备份失败）。
-- **测试绝不允许在真实机器上产生"安装 / 系统级写入"**。这是结构性要求，不能靠"碰巧没跑到那一步"：
-  1. **所有指向系统绝对路径的全局变量都要钉到临时目录**。最典型的是 `SCRIPT_SYSTEM_PATH`（生产默认
-     `/usr/local/bin/meme_generator.sh`）：harness 里必须覆盖成临时文件，否则任何一条误调
-     `ensure_script_saved` / `setup_auto_update` / `toggle_auto_update` 的用例，都会真的下载并替换系统脚本。
-     `install_path` / `config` / PID 文件都以 `$HOME` 为根，靠 HOME 重定向即可覆盖；
-     但 **`/usr/share/fonts`（字体安装）没有变量可钉**——所以 harness 里对 `mkdir` / `cp` 做了 **fail-closed 保险桩**：
-     参数命中 `/usr/share/fonts` 就返回 97 并打 `BLOCKED_SYSTEM_WRITE`，其余参数用 `command` 原样透传；`fc-cache` 直接 stub。
-     这样即使将来 production 真的越过"pip 失败点"走到字体安装，也是**先被拦住**而不是先写坏开发机；
-     同时保留一条输出断言（一旦输出出现「安装字体」就报错）来暴露越界。只靠"事后检查输出"是不够的——那时系统写入已经发生了。
-  2. **harness 开头 fail-closed 校验隔离前置条件**：`HOME` 不在本次运行的临时目录里就直接 `exit 2` 拒绝运行，
-     而不是假定"已经隔离好了"。
-  实测结论（2026-09-13，跑完整套件后核对）：`~/.config/meme_generator`、`~/memeGenerator`、
-  `usr/local/bin/meme_generator.sh`、`~/.pip`、tmux socket、crontab 条目**全部不存在 / 未被改动**，
-  `~/.gitconfig` 与 `~/.config` 的 mtime 未变——即**本机没有被安装任何东西**。
-- **绝不要在测试/被测脚本正在运行时编辑它们**：bash 是**边执行边按偏移增量读取**脚本的，
-  边跑边改会让它从错乱偏移继续读，报出莫名的 `syntax error near unexpected token '}'`，甚至把 heredoc 正文当命令执行。
-  要改就先等进程结束，或改完再从新副本起跑。
-- **慢盘 / 模拟文件系统（例如 Windows 上经 MSYS 跑）**：一次进程创建可能几百毫秒，整套要几分钟。这**不是卡死**。
-  做法：后台跑 + 轮询 `--log`；用 `--only A,B` 把范围切到最小逐组验证；配合 `HARNESS_TIMEOUT=900` 放宽上限。
-- **平台差异要写进断言，别把平台限制报成生产 bug**：
-  - POSIX 权限位在 Windows（MSYS/Cygwin）上不生效（`chmod 600` 后 `stat` 仍报 644）——权限类断言先做**能力探测**，不支持就 SKIP。
-  - **给 git 的一切路径（含仓库地址）都先用 `cygpath -m` 转成 `C:/...`**（`git.exe` 不认 `/tmp/...` 形式的 POSIX 路径，`-C` 也要转）。
-    实测结论：`C:/.../bare.git` 作为 clone 源、`remote set-url`、`fetch` 全部正常（被当成本地路径）；
-    **不要加 `file:///` 前缀**——MSYS 版 git 会把它解析成 `/C:/...` 而失败。
-    另外，bash 的 `/tmp/...` 与 git 看到的 `/tmp` 可能**不是同一个位置**，所以测试现场先 `cygpath -m` 再交给 git。
-- **分组运行必须自带 fixture**：`--only D` 时 C 组不会跑，D 依赖的 `.git` / venv / config 必须由 D 自己建立；
-  否则被测函数会在第一道守卫（`is_meme_repo_installed`）处**静默 return**，看起来像是"莫名其妙跳过了"。
-- 在本机（Windows）验证时：`bash` / `sed` / `wc` 等命令可能不在 PATH（精简 shim），可用绝对路径的 `bash.exe -n` 做语法检查，用 `node -e` 做文件与字符串检查。
-- **MSYS 的路径转换规则（2026-09-19 实测）**：MSYS 会转换**命令行参数**里的类 POSIX 路径，但**不转换环境变量**。
-  Windows 原生 `node` 把 `/tmp/x` 解析成"当前盘符根 + `tmp\x`"（如 `E:\tmp\x`），与 Bash 眼里的 `/tmp` **不是同一位置**。
-  所以：给 node 传路径一律用 `C:/Users/...` 这种带盘符的前向斜杠形式（不要用 `/tmp/...`，否则读写会落到另一个目录）；
-  而往 `PATH` 里追加目录必须用 POSIX 形式（`/c/Users/...`），写成 Windows 形式不生效、会 `command not found`
-  —— "假编辑器 / 假 vim 放进 PATH 却没被找到"就是踩了这个。
-- ⚠️ **本机 `rm` 是宿主包装的"回收站版"，在 Windows 形式路径上会 fail-closed 地"删不掉"**（2026-09-13 实测）：
-  `type rm` 显示它是经 `BASH_ENV` 注入的**函数**（`${CODEBUDDY_SAFE_DELETE_BIN_DIR}/rm`）；当路径写成
-  `C:\Users\...\Temp/xxx` 这种 Windows 形式时，它 CanonicalizePath 失败，stderr 打出
-  `[safe-delete][SAFE_DELETE_FAIL_CLOSED] ... "reason":"trash-failed"`，**而且文件真的还在原地**。
-  本机默认 `TMPDIR` 恰好就是 `C:\Users\...\Temp` 形式，于是 harness 里所有 `rm -f` 静默失效
-  （`reset_pid_file` 删不掉身份文件、`cleanup` 删不掉 WORK），A2「无身份时报运行中」、
-  B1「venv 失败前已写身份文件」、B2「取不到 boot_id 却登记成功」会连着变红 ——
-  而这三条的现象都能被解释成"生产 bug"，极具误导性（实测：同一套件在 `TMPDIR=/tmp` 下全绿）。
-  **已修**：`run.sh` 在建 `WORK` 之前用 `cygpath -u` 把 Windows 形式的 `TMPDIR` 归一到 POSIX 形式。
-  判据：stderr 出现 safe-delete 文案，或出现"删了却还在"→ 先怀疑 `rm` 被包装，不要先去改生产代码。
-
-### Git 约定
-
-- **不要主动 `git add` / `commit` / `push`。** 改完把改动留在工作区并汇报；用户明确说「提交 / 推送」才执行。
-- commit message 风格：`fix: 中文描述` / `feat: 中文描述`。
+各组断言覆盖什么、`tests/meme_generator/run.sh` 的 G 组为什么默认停跑、`--mutate` 为什么不再使用、
+以及各脚本的实测耗时，见 `docs/验证方式.md`。
 
 ## `Manage/Main.sh` 专属约定
 
@@ -682,71 +431,13 @@ git diff --stat && git diff --check
     ⚠️ 判定细节与依据写在 `tests/Hapi_Claude_Manage/路由自动收敛-测试文档.md`，改判定前先读它；
     特别是：**`apikey` 模式不能用「auth.json 有官方凭据」这条捷径**（中转 key + 中转路由会被误判成官方登录而剥掉）。
 
-### Codex 第三方 provider 的取 key 语义（2026-10-19，最重要的一条）
+### Codex 取 key / 路由 / 1M 上下文窗口 → `docs/Codex-凭据与上下文窗口-实现约定.md`
 
-Codex 对自定义 provider 只认三种凭据来源（官方 config reference）：
-`experimental_bearer_token`（直接写在表里）/ `env_key`（**只从进程环境变量取值**）/ `requires_openai_auth = true`
-（走 OpenAI 认证，即 auth.json）。三者互斥，且 `env_key` 优先于 `experimental_bearer_token`。
-
-- **`env_key` + 往 auth.json 塞 Key 是错的**：2026-10-19 的真实事故是
-  `Codex error: Missing environment variable: OPENAI_API_KEY` —— 脚本写了 `env_key = "OPENAI_API_KEY"`
-  又把 Key 写进 auth.json，而自定义 provider 根本不看 auth.json。hapi 拉起的 codex 进程里没有那个环境变量，
-  于是必然报错。
-- 现在第三方段一律写：
-  `experimental_bearer_token = "<key>"` + `requires_openai_auth = false`，并**删掉已有的 `env_key` 行**
-  （原位替换，保持字段顺序）。段内有 token 时必须显式 `false`：残留的 `true` 会让 ChatGPT 的 token 被发到第三方端点。
-  ⚠️ **迁移时必须先删 `env_key` 再写 token**：`env_key` 的优先级高于 `experimental_bearer_token`，
-  两者并存时刚写的 token 是死字段，Codex 仍旧报 Missing environment variable（2026-10-19 评审抓到，
-  I15-A 用「env_key 与 token 并存」的夹具钉住）。
-- Key 来源优先级（迁移时）：调用方传入 > 段内已有 token > auth.json 的 `OPENAI_API_KEY`。
-  三者都没有 → 只警告，**不删 `env_key`**（那可能是用户真在用的环境变量），也**不动 auth.json**。
-- `hapi_codex_current_value` 有两个相关字段：`OPENAI_API_KEY`（段内 token 优先、auth.json 兜底）与
-  `CONFIG_BEARER_TOKEN`（只读段内 token）。自检用它区分「Key 到底从哪来」，**不要用 provider_id 是否存在来猜**。
-- **第三方模式下 auth.json 必须不存在**（对齐 cc-switch `preserve_codex_official_auth_on_switch = false`）：
-  - 写盘完成后按「当前 `model_provider` 指向自定义段 + 段内有 token」判定第三方模式；
-  - 现有 auth.json 若是 **ChatGPT 登录态**（有 `tokens`，且 mode 为空/`chatgpt`/`chatgptAuthTokens`），整份存进
-    `~/.codex/hapi_login_stash.json`（0600）后再删；纯 apikey 的 auth **不暂存**（Key 已在 config.toml）。
-    ⚠️ 判定要用 `isChatgptLogin`，**不要用 `hasOfficialAccountMaterial`**——后者把 apikey 也算「官方材料」，
-    会把中转 Key 搬进登录暂存，之后切回官方时覆盖用户新绑定的登录态（D 组有反例断言）。
-  - 菜单 4 的迁移函数（`hapi_migrate_codex_provider_credential`）也有同一套「暂存 + 移除」逻辑：
-    它是同一规则的第二份实现（两个 node 进程无法共享函数），改一处要同步另一处。
-    并且它**不能**在「没有 env_key」时提前 exit——新式配置（只有 token）同样要移除 auth.json（I15-B 钉住）。
-  - 切回官方（官方端点 + 没填 Key）时，**只在 auth.json 不存在时**把暂存放回，避免覆盖 cc-switch 刚绑定的新登录。
-- **判定目标的一处补充**：没有登录材料、没有新 Key、但 `base_url` 明确是官方端点 → 判 `official`
-  （旧逻辑判 `legacy`，会建一个没有凭据的 custom 段，也就永远走不到「恢复登录态」）。
-- **写入后自检**：菜单 1 与菜单 4 都会调用 `hapi_report_codex_credential`，回读并打印
-  「Codex 会用的 Key（来源 + 长度）」。读不到 Key 且不是官方登录态时报红——这正是当年
-  「明明填了 Key 却报 Missing environment variable」时最缺的一条反馈。
-- 菜单 7（写入/编辑官方 auth.json）**已移除**：官方登录改由 cc-switch 的授权中心绑定。
-  不要把编辑器流程再加回来——本脚本只负责「第三方直连 + 官方登录态暂存」，不负责登录本身。
-
-### Codex 1M 上下文窗口（2026-09-29 加，2026-10-19 调整）
-
-- 提问抽成 `hapi_ask_codex_context_window`（输出只有 `1m` / `off`，提示语走 stderr），
-  菜单 1 与菜单 3「新建配置（不切换）」共用。**不要各写一份 case 分支**——菜单 3 曾经整块漏掉这一问，
-  产物和菜单 1 不一致。
-- 菜单 1 把答案作为**第 4 个位置参数**传给 `hapi_write_codex_current_config`（`"1m"` / `"off"`）。
-  ⚠️ 该参数缺省值必须是 `keep`（=不改动）**不是** `off`：`hapi_sync_codex_route` 的 `route-only` 与其它旧调用点
-  只传 3 个参数，缺省成 `off` 会让它们顺手删掉用户的 1M 声明（L7 钉住）。
-- 语义对齐 cc-switch：`src/components/providers/forms/CodexConfigSections.tsx` 的 `contextWindow1M` 开关 +
-  `src/utils/providerConfigUtils.ts` 的 `extractCodexTopLevelInt` / `setCodexTopLevelInt` / `removeCodexTopLevelField`。
-  - 开启 → 顶层 `model_context_window = 1000000`；`model_auto_compact_token_limit` **缺失时**才补 900000（已有值不覆盖）。
-  - 关闭 → **无条件删除**这两个顶层键（2026-10-19 用户明确要求对齐 cc-switch；旧版「只删自己写的默认值、
-    保留用户自填的 200000/150000」已废弃）。取舍：1M 是一个开关，不是一个用户字段——要保留自定义值就不要回答「否」。
-  - 只认**顶层**（第一个 section header 之前）的字段；section 内的同名 key 不动（与 cc-switch 只扫顶层区域一致）。
-- 菜单 3 生成的配置里，两个 1M 键必须落在**第一个 section 之前**（否则 Codex 会把它们当成
-  `[model_providers.custom]` 的字段）——L8b 用 node 校验位置，L8c 断言回答「否」时不写任何 1M 键。
-- **不参与路由暂存**：1M 字段是顶层全局设置，`readStash` / `writeStash` 只搬 `model_provider` 行与
-  `[model_providers.*]` 段，所以官方剥离 / 第三方恢复都不会顺手动它们。`route-only` 更是零改动（L6 按字节断言）。
-- 菜单 1 的默认答案跟随现状：`hapi_codex_context_window_state` 读顶层 `model_context_window`，是 1000000 → `[Y/n]`，
-  否则 `[y/N]`。探测失败 / 文件不存在 / 值带引号或非纯整数 → 按"没有 1M"处理（默认落在不开启一侧）。
-- 默认模型名统一为 `gpt-6-astra`：菜单 1 与菜单 3 的 `local default_model`
-  **加**两个 node heredoc 的兜底值（`process.env.CODEX_MODEL ||`），共 4 处，必须一起改。
-  ⚠️ 「4 处必须同步」**光靠 L1/L8 钉不住**（那两个用例走的是 shell 已填好的默认值，命中不到 Node fallback），
-  现由 L9 三条**源码断言**兜底。
-- 回归：`tests/Hapi_Claude_Manage/run.sh --only L`（菜单 1 / 菜单 3 全链路 + 写入语义）。
-- 预览已改为明文（见上节），因此「1M 数字阈值不能被打码」这个脱敏例外**不再需要**，
-  相关的 `isSensitiveKey` 副本与 `sanitizeToml` 一起删掉了。
+改 `Manage/Hapi_Claude_Manage.sh` 里**凭据、`model_provider` 路由、`model_context_window`** 任一处之前，
+先读那份文件（`env_key` 为什么不能用、第三方 Key 写哪里、auth.json 何时暂存/移除、1M 开关的删除语义、
+以及对应的 D/I/L 测试组）。底线一句：第三方 provider 的 Key 只写在
+`[model_providers.<id>].experimental_bearer_token` + `requires_openai_auth = false`；
+`env_key` 只从进程环境变量取值，auth.json 不参与——这就是 `Missing environment variable` 的根因。
 
 ### Claude Code `settings.json` 语义
 
@@ -983,12 +674,12 @@ Codex 对自定义 provider 只认三种凭据来源（官方 config reference�
 
 ### 本脚本的验证方式
 
-- 每次改完最低要求：`bash -n Manage/Hapi_Claude_Manage.sh`。
-- **内嵌 node 段的语法 `bash -n` 检查不到**（`local x=$(...)` 之外，`node <<'NODE' … NODE` 里的 JS 只在运行时才炸）：
-  本脚本有 **24 个** `node <<'NODE'` 块（2026-09-29 实测 `grep -c "<<'NODE'"`；曾记为 23 / 16，属于文档漂移——
-  1M 开关的 `hapi_codex_context_window_state` 又加了 1 个），改过其中一个就把它们全部抽出来逐个 `node --check`——
-  做法：按 `<<.NODE.` / 单独一行 `NODE` 切块，各写一个临时 `.js`（路径用盘符形式给 node），再 `for f in ...; do node --check "$f"; done`。
-  几秒钟能拦住 heredoc 里的手滑，比等测试跑到一半才报错划算。
+- **机械检查（秒级，改完先跑这一条）**：`bash tests/static-checks.sh`。
+  它做三件事：全部受控 `*.sh` 的 `bash -n`、每个 `<<'NODE'` 块的 `node --check`、**行尾一致性**
+  （同一目录的 `.sh` 必须同一种行尾；单文件内不许混用）。
+  已挂到提交前：`.githooks/pre-commit` → `git config core.hooksPath .githooks`（本机已设好，换机器要重设一次）。
+  ⚠️ 行尾与「按函数名删整块」的坑见上文「编辑与 EOL 约定」；`^}$` 会命中 heredoc 里的 JS，
+  所以删函数要先跳过 `<<'NODE' … NODE` 正文再找列首 `}`（2026-10-19 在这上面连错两次）。
 - 行为回归：`bash tests/Hapi_Claude_Manage/run.sh`（失败非零退出；`--only A,C` 只跑指定组，`--log FILE` 指定进度日志）。
   分组：~~**A** `last_refresh` 真 RFC3339~~ ／ ~~**B** `id_token` 严格 JWT envelope~~（2026-10-19 删除：只覆盖手写官方
   auth.json 的深度校验，而菜单 7 已移除）／ **C** `auth_mode` 解析 + `loadable` 级校验 ／
@@ -1023,11 +714,8 @@ Codex 对自定义 provider 只认三种凭据来源（官方 config reference�
 - ⚠️ 测试执行方式（2026-09-29 **用户结论：不要在本机跑**）：
   - **别在本机跑这套件——太慢**。实测（2026-09-29，Windows/MSYS）：`--only L` **单个分组**就要 **1m45s**，
     全量按老记录 9~10min 以上；中途硬杀的代价只是白等，所以**默认交服务器 / 审查环境**跑行为回归。
-  - 本机只做**秒级静态检查**（这些是真的快，改完必跑）：
-    ① `bash -n Manage/Hapi_Claude_Manage.sh` + `bash -n tests/Hapi_Claude_Manage/run.sh`；
-    ② 把全部 `node <<'NODE'` 块逐个 `node --check`（做法见上，注意起始行是 `VAR=… node <<'NODE'` 形式，
-       用 `grep -c "<<'NODE'"` 数总数对账）；
-    ③ 需要看真实产物时用「仓库副本 + awk 抽取函数体」的小探针**目视** config.toml 排版，不跑整组断言。
+  - 本机只做**机械检查**：`bash tests/static-checks.sh`（`bash -n` + heredoc `node --check` + 行尾，见上节）。
+    需要看真实产物时用「仓库副本 + awk 抽取函数体」的小探针**目视** config.toml 排版，不跑整组断言。
   - 全局规则仍然是「要跑就跑在**后台任务**里 + 日志文件」（不要前台等）；本机全量需显式 `HARNESS_TIMEOUT=1200`。
   - 推论：**新断言在本机默认处于"未实跑"状态**。汇报时必须写清"哪台机器、哪一轮"，不许把没跑过的一次说成通过。
     2026-09-29 这一轮的实际状态就是典型例子：

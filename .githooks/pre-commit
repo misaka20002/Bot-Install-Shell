@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# 提交前的机械检查（bash -n / heredoc 里的 node 语法 / 行尾一致性）。
+# 启用一次即可：git config core.hooksPath .githooks
+# 关掉：git config --unset core.hooksPath
+# 单次跳过：git commit --no-verify（本仓库没有别的守卫，别养成习惯）
+set -o pipefail
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# 纯文档提交不必等检查
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -q '\.sh$'; then
+    exit 0
+fi
+
+exec bash tests/static-checks.sh
