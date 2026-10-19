@@ -4,30 +4,32 @@
 #   Manage/Hapi_Claude_Manage.sh 的回归测试（Codex / Claude 配置语义 + 凭据写入路径）
 #
 # 用法：
-#   bash tests/Hapi_Claude_Manage/run.sh                  # 全量（A~L）
-#   bash tests/Hapi_Claude_Manage/run.sh --only A,C       # 只跑指定分组（日常最常用）
+#   bash tests/Hapi_Claude_Manage/run.sh                  # 全量（C~L；A/B 已删除）
+#   bash tests/Hapi_Claude_Manage/run.sh --only D,L       # 只跑指定分组（日常最常用）
 #   bash tests/Hapi_Claude_Manage/run.sh --log /tmp/x.log # 指定进度日志（默认自动生成）
 #
 # 分组：
-#   A last_refresh 真 RFC3339（格式 + 日历/时钟/时区范围）
-#   B id_token 严格 JWT envelope（三段非空 / 严格 base64url-no-pad / plain object）
-#   C auth_mode 解析优先级 + official / loadable 两级校验
-#   D 写入器：官方登录路由保护（隐式模式、保留 provider id、experimental token、空 Key）
-#   E 菜单 7：编辑器探测 / vim 参数 / 编辑器失败拦截 / mktemp / 信号清理
+#   ~~A last_refresh RFC3339~~ ／ ~~B id_token JWT envelope~~：2026-10-19 删除
+#     （只覆盖手写官方 auth.json 的深度校验；菜单 7 已移除，官方登录改由 cc-switch 授权中心绑定）
+#   C auth_mode 解析优先级 + loadable 级校验（配置库存取用的旁路卡点）
+#   D 写入器：第三方 Key 落点（段内 token / 无 env_key / requires_openai_auth=false /
+#     auth.json 移除 / 登录态暂存）+ 官方路由保护
+#   E 菜单 7 已移除（函数 / 菜单项 / 文案都不得复活）
 #   F 配置库旁路卡点（菜单 2 储存、菜单 3 新建、菜单 4 切换）
-#   G 凭据权限（备份 0600）与预览脱敏（1M 数字阈值的例外必须同时满足「顶层 + 精确 key + 纯整数」，
-#     三种不满足的场景各有一条负向断言；live / profile 两份实现都要覆盖）
+#   G 凭据 0600 与「查看配置」明文显示 Key（校验/诊断输出仍然打码）
 #   H 兼容性回归（既有校验 / 展示 / 菜单接线）
 #   I 路由自动收敛（官方登录剥离并暂存第三方路由 / 第三方 base_url 自动恢复 / 保留 id 不动）
-#   J Claude Code settings.json 写入语义（merge 写盘保留未知顶层键 / 备份固定一份不堆积 / 不注入固定补齐项 /
-#     不写 includeCoAuthoredBy / live 预览与 profile 预览递归脱敏 / 配置库损坏 fail-closed（含 schema 级）/
-#     ~/.claude.json 的 onboarding 幂等写入 / 写 live 的各入口统一 plain-object 校验）
+#   J Claude Code settings.json 写入语义（merge 写盘保留未知顶层键 / 备份固定一份不堆积 /
+#     不注入固定补齐项 / 预览明文 / 配置库损坏 fail-closed / onboarding 幂等 / plain-object 校验）
 #   K Codex 配置库 schema fail-closed（save / create / list 三态）+ 备份 fail-fast
-#     （writer / 菜单 1 / 推荐值 / profile 切换 / 菜单 7 粘贴 / 菜单 7 载入现有 auth）
-#   L 1M 上下文窗口（菜单 1 第 4 参数：写入 / 移除 / 保留用户自填值 / 缺省不改动 /
-#     route-only 字节级不参与）+ 默认模型名 gpt-6-astra（含「4 处必须同步」的源码断言）
+#     （writer / 菜单 1 / 推荐值 / profile 切换）
+#   L 1M 上下文窗口（菜单 1 第 4 参数 + 菜单 3 共用提问：写入 / 无条件删除 / 缺省不改动 /
+#     route-only 字节级不参与 / 1M 键必须在第一个 section 之前）+ 默认模型名 gpt-6-astra
 #
-# 三条"绝不卡住"的保证（与 tests/meme_generator/run.sh 一致）：
+# 断言实现说明（2026-10-19）：计数用 mapfile + [[ =~ ]] 的**纯 bash 内建**，不起 grep 子进程。
+# Windows/MSYS 上进程创建是主要成本；旧实现每条断言 fork 一次 grep，250 条断言就是 250 次进程创建。
+# 语义与 grep -cE 对齐（数匹配行数 / 不可读记 0 / **正则写错直接判失败**，不再静默记 0）。
+## 三条"绝不卡住"的保证（与 tests/meme_generator/run.sh 一致）：
 #   1) harness 里 `exec 0< /dev/null`：漏写重定向的 read 立刻 EOF，不会永久阻塞；
 #   2) harness 整体套 timeout（HARNESS_TIMEOUT，默认 300s）；本机没有可用 timeout 直接失败退出，
 #      且能力探测会**真的超时一次**（要求 rc=124）；
@@ -260,17 +262,49 @@ group_on(){ [ -z "${ONLY}" ] && return 0; case ",${ONLY}," in *",${1},"*) return
 expect_rc(){   # $1 描述 $2 期望 $3 实得
   if [ "$2" = "$3" ]; then ok "$1（rc=$3）"; else no "$1：期望 rc=$2，实得 rc=$3"; fi
 }
+# ---------- 计数：纯 bash 内建，不起进程 ----------
+# Windows/MSYS 上最贵的是 **进程创建**（每次 fork+exec 50~200ms）。旧实现每条断言都
+# $(grep -cE …) + basename，250 条断言就是 250 次进程创建——这才是套件跑十几分钟的原因，
+# 不是断言数量。改成 mapfile + [[ =~ ]] 后，一条断言的开销降到一次 bash 内建正则匹配。
+#
+# 语义必须与 grep -cE 对齐：
+#   · 数的是**匹配的行数**（同一行出现两次算 1）；
+#   · 文件 / 管道不可读时记 0（旧实现靠 || true 吞掉 grep 的报错）；
+#   · **正则写错必须报错，不能静默记 0**——否则「期望 0 条」的断言会因为正则手滑而永远绿。
+# 结果通过 REPLY_COUNT / REPLY_BAD_REGEX 返回（不用 $( )，避免又起子 shell）。
+REPLY_COUNT=0
+REPLY_BAD_REGEX=0
+count_matches(){   # $1 文件（也接受 <(cmd) 的 /dev/fd/N） $2 ERE
+  local file="$1" pattern="$2" line rc
+  REPLY_COUNT=0
+  REPLY_BAD_REGEX=0
+  [[ "" =~ $pattern ]]
+  rc=$?
+  if [ "${rc}" -eq 2 ]; then REPLY_BAD_REGEX=1; return 0; fi
+  [ -r "${file}" ] || return 0
+  local -a lines=()
+  mapfile -t lines < "${file}" 2>/dev/null || return 0
+  for line in "${lines[@]}"; do
+    line=${line%$'\r'}
+    [[ "${line}" =~ $pattern ]] && REPLY_COUNT=$((REPLY_COUNT + 1))
+  done
+  return 0
+}
+
 expect_grep(){   # $1 描述 $2 文件 $3 正则
-  if grep -qE -- "$3" "$2" 2>/dev/null; then ok "$1"; else no "$1（未匹配 /$3/，见 $(basename "$2")）"; fi
+  count_matches "$2" "$3"
+  if [ "${REPLY_BAD_REGEX}" -eq 1 ]; then no "$1：正则无效 /$3/"; return; fi
+  if [ "${REPLY_COUNT}" -ge 1 ]; then ok "$1"; else no "$1（未匹配 /$3/，见 ${2##*/}）"; fi
 }
 expect_no_grep(){   # $1 描述 $2 文件 $3 正则
-  if grep -qE -- "$3" "$2" 2>/dev/null; then no "$1（不该出现 /$3/）"; else ok "$1"; fi
+  count_matches "$2" "$3"
+  if [ "${REPLY_BAD_REGEX}" -eq 1 ]; then no "$1：正则无效 /$3/"; return; fi
+  if [ "${REPLY_COUNT}" -eq 0 ]; then ok "$1"; else no "$1（不该出现 /$3/，实得 ${REPLY_COUNT} 行）"; fi
 }
 expect_count(){   # $1 描述 $2 文件 $3 正则 $4 期望条数
-  local got
-  got=$(grep -cE -- "$3" "$2" 2>/dev/null || true)
-  got=${got:-0}
-  if [ "${got}" -eq "$4" ]; then ok "$1（${got}）"; else no "$1：期望 $4 条，实得 ${got}"; fi
+  count_matches "$2" "$3"
+  if [ "${REPLY_BAD_REGEX}" -eq 1 ]; then no "$1：正则无效 /$3/"; return; fi
+  if [ "${REPLY_COUNT}" -eq "$4" ]; then ok "$1（${REPLY_COUNT}）"; else no "$1：期望 $4 条，实得 ${REPLY_COUNT}"; fi
 }
 expect_eq(){   # $1 描述 $2 期望 $3 实得
   if [ "$2" = "$3" ]; then ok "$1"; else no "$1：期望[$2]，实得[$3]"; fi
@@ -443,54 +477,21 @@ mk_fake_editors
 log "==== harness 启动：ONLY='${ONLY}' 夹具=${FX_COUNT} ===="
 
 # ============================================================
-# A) last_refresh：真 RFC3339
-# ============================================================
-if group_on A; then
-  head_ "A) last_refresh 必须是真 RFC3339（格式 + 日历/时钟/时区范围）"
-  for name in ok_official a_ok_frac a_ok_leap_year a_ok_lowercase a_ok_leap_second a_ok_offset_max; do
-    auth_check "${name}"; expect_rc "接受合法时间 ${name}" 0 "$?"
-  done
-  for name in a_bad_month a_bad_feb31 a_bad_feb29_nonleap a_bad_offset a_bad_hour a_bad_nodash c_bad_date_number; do
-    auth_check "${name}"; expect_rc "拒绝非法时间 ${name}" 1 "$?"
-  done
-  auth_check a_bad_month
-  expect_grep "非法日期报「不是合法的 RFC3339」" "${WORK_DIR}/check.out" "不是合法的 RFC3339"
-  auth_check c_bad_date_number
-  expect_grep "数字型 last_refresh 报类型错误" "${WORK_DIR}/check.out" "必须是 RFC3339 字符串"
-fi
-
-# ============================================================
-# B) id_token：严格 JWT envelope
-# ============================================================
-if group_on B; then
-  head_ "B) id_token 严格 JWT envelope（三段非空 / 严格 base64url-no-pad / payload 为对象）"
-  auth_check b_ok_official;   expect_rc "合法三件套通过" 0 "$?"
-  auth_check b_ok_no_alg;     expect_rc "header 缺 alg 不阻断" 0 "$?"
-  expect_grep "header 缺 alg 给出警告" "${WORK_DIR}/check.out" "缺少 alg"
-  expect_no_grep "缺 alg 时没有硬错误" "${WORK_DIR}/check.out" "^错误"
-  for name in b_bad_empty_header b_bad_dollar b_bad_array_payload b_bad_null_payload \
-              b_bad_two_segments b_bad_padded b_bad_std_b64 b_bad_not_jwt; do
-    auth_check "${name}"; expect_rc "拒绝非严格 JWT ${name}" 1 "$?"
-  done
-  auth_check b_bad_empty_header
-  expect_grep "非 JWT 报硬错误" "${WORK_DIR}/check.out" "不是合法的 JWT"
-  auth_check b_bad_array_payload
-  expect_grep "payload 为数组也拒绝" "${WORK_DIR}/check.out" "不是合法的 JWT"
-fi
-
+# A/B 两组（last_refresh 的 RFC3339 日历边界、id_token 的严格 JWT envelope）已于 2026-10-19 删除。
+# 理由：它们只覆盖「手写官方 auth.json」这条路径的深度校验，而菜单 7 已移除——官方登录改由
+# cc-switch 授权中心绑定，本脚本不再产生/编辑官方登录凭据。C 组保留 loadable 级（配置库存取用）
+# 的核心卡点，足以守住「配置库不能成为无效凭据的旁路」。
 # ============================================================
 # C) auth_mode 解析优先级 + official / loadable 分级
 # ============================================================
 if group_on C; then
   head_ "C) auth_mode 解析优先级与两级校验"
   auth_check ok_absent_mode;  expect_rc "无 auth_mode（隐式 ChatGPT）按官方登录校验" 0 "$?"
-  auth_check c_partial_tokens official; expect_rc "official 级要求三件套齐备" 1 "$?"
   auth_check c_partial_tokens loadable; expect_rc "loadable 级也拒绝缺必需字段的 tokens" 1 "$?"
   expect_grep "缺字段说明是 TokenData 必需字段" "${WORK_DIR}/check.out" "都是必需字段"
   auth_check c_all_blank_tokens loadable; expect_rc "loadable 级拦住全空凭据" 1 "$?"
   auth_check c_apikey_ok loadable;    expect_rc "loadable 级放行 apikey 配置" 0 "$?"
   auth_check c_apikey_blank loadable; expect_rc "loadable 级拦住空 Key" 1 "$?"
-  auth_check c_apikey_blank;          expect_rc "official 级也拦住空 Key" 1 "$?"
   auth_check c_apikey_blank_mode;     expect_rc "auth_mode=apikey 空 Key 报错" 1 "$?"
   auth_check c_bad_date_number loadable; expect_rc "loadable 级同样拦类型错误" 1 "$?"
   auth_check c_unknown_mode;  expect_rc "拒绝无法识别的 auth_mode" 1 "$?"
@@ -623,12 +624,12 @@ if group_on E; then
   # 这些函数只服务于菜单 7；留着就是死代码，引用它们等于留一个「能加载但没人调用」的陷阱。
   for fn in hapi_edit_codex_official_auth hapi_detect_editor hapi_editor_program hapi_editor_basename \
             hapi_editor_is_vim_like hapi_run_editor hapi_write_codex_auth_file hapi_warn_codex_provider_route; do
-    expect_count "生产脚本已无函数 ${fn}" "${TARGET_SCRIPT}" "^${fn}() {" 0
+    expect_count "生产脚本已无函数 ${fn}" "${TARGET_SCRIPT}" "^${fn}\(\) \{" 0
   done
   expect_count "菜单不再有第 7 项" "${TARGET_SCRIPT}" "写入/编辑官方 auth.json" 0
-  expect_count "菜单 case 不再分发到菜单 7" "${TARGET_SCRIPT}" "7) hapi_edit_codex_official_auth" 0
+  expect_count "菜单 case 不再分发到菜单 7" "${TARGET_SCRIPT}" "7\) hapi_edit_codex_official_auth" 0
   expect_count "脚本里不再出现「菜单 7」字样" "${TARGET_SCRIPT}" "菜单 7" 0
-  expect_grep "Codex 菜单仍保留第 6 项（推荐值）" "${TARGET_SCRIPT}" "6) hapi_toggle_codex_recommended_values; pause ;;"
+  expect_grep "Codex 菜单仍保留第 6 项（推荐值）" "${TARGET_SCRIPT}" "6\) hapi_toggle_codex_recommended_values; pause ;;"
   expect_grep "写不进去时的提示已指向 cc-switch 授权中心" "${TARGET_SCRIPT}" "cc-switch 的授权中心"
 fi
 
@@ -781,11 +782,11 @@ base_url = "https://api.example.com/v1"
   expect_rc "hapi_validate_codex_files 接受正常配置" 0 "$?"
   expect_eq "hapi_codex_current_value 读取 model_provider" "myrelay" "$(hapi_codex_current_value 'model_provider')"
   expect_count "菜单项 7 已移除（官方登录改由 cc-switch 授权中心绑定）" "${TARGET_SCRIPT}" "写入/编辑官方 auth.json" 0
-  expect_count "菜单 7 case 分支已移除" "${TARGET_SCRIPT}" "7) hapi_edit_codex_official_auth; pause ;;" 0
-  expect_count "菜单 2 走 loadable 级校验" \
-    <(grep -c 'hapi_check_codex_auth_file "${auth_file}" loadable' "${TARGET_SCRIPT}") "1" 1
-  expect_count "菜单 4 走 loadable 级校验" \
-    <(grep -c 'hapi_check_codex_auth_file "${profile_auth_tmp}" loadable' "${TARGET_SCRIPT}") "1" 1
+  expect_count "菜单 7 case 分支已移除" "${TARGET_SCRIPT}" "7\\) hapi_edit_codex_official_auth; pause ;;" 0
+  expect_count "菜单 2 走 loadable 级校验" "${TARGET_SCRIPT}" \
+    'hapi_check_codex_auth_file "\$\{auth_file\}" loadable' 1
+  expect_count "菜单 4 走 loadable 级校验" "${TARGET_SCRIPT}" \
+    'hapi_check_codex_auth_file "\$\{profile_auth_tmp\}" loadable' 1
 fi
 
 # ============================================================

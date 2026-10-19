@@ -979,13 +979,14 @@ Codex 对自定义 provider 只认三种凭据来源（官方 config reference�
   做法：按 `<<.NODE.` / 单独一行 `NODE` 切块，各写一个临时 `.js`（路径用盘符形式给 node），再 `for f in ...; do node --check "$f"; done`。
   几秒钟能拦住 heredoc 里的手滑，比等测试跑到一半才报错划算。
 - 行为回归：`bash tests/Hapi_Claude_Manage/run.sh`（失败非零退出；`--only A,C` 只跑指定组，`--log FILE` 指定进度日志）。
-  分组：**A** `last_refresh` 真 RFC3339 ／ **B** `id_token` 严格 JWT envelope ／ **C** `auth_mode` 解析 + official/loadable 两级校验 ／
+  分组：~~**A** `last_refresh` 真 RFC3339~~ ／ ~~**B** `id_token` 严格 JWT envelope~~（2026-10-19 删除：只覆盖手写官方
+  auth.json 的深度校验，而菜单 7 已移除）／ **C** `auth_mode` 解析 + `loadable` 级校验 ／
   **D** 写入器：第三方 Key 落点（段内 token / 无 env_key / requires_openai_auth=false / auth.json 移除 / 登录态暂存）
   与官方路由保护 ／ **E** 菜单 7 已移除（函数、菜单项、文案三处都不得复活）／ **F** 配置库旁路卡点 ／
   **G** 凭据 0600 与「查看配置」明文显示 Key（校验输出仍然打码）／ **H** 兼容性 ／
-  **I** 路由自动收敛（官方剥离+暂存 / 第三方恢复 / 保留 id 不动 / 损坏暂存 fail-closed / 空配置走同一条流程，81 条断言；语义与反例清单见
+  **I** 路由自动收敛（官方剥离+暂存 / 第三方恢复 / 保留 id 不动 / 损坏暂存 fail-closed / 空配置走同一条流程；语义与反例清单见
   `tests/Hapi_Claude_Manage/路由自动收敛-测试文档.md`）／
-  **J** Claude Code `settings.json` 写入语义（合并写盘保留未知顶层键 / 备份固定一份不堆积 / 不注入固定补齐项 / 预览递归脱敏 /
+  **J** Claude Code `settings.json` 写入语义（合并写盘保留未知顶层键 / 备份固定一份不堆积 / 不注入固定补齐项 / 预览明文 /
   配置库损坏 fail-closed（语法级 + schema 级）/ onboarding 幂等 / 写 live 四处 plain-object 校验）／
   **K** Codex 配置库 schema fail-closed（save / create / list 三态）+ 备份 fail-fast
   （writer / 菜单 1 / 推荐值 / profile 切换，每条都断言日志里出现「备份失败，已中止修改」，
@@ -993,6 +994,16 @@ Codex 对自定义 provider 只认三种凭据来源（官方 config reference�
   **L** Codex 1M 上下文窗口（菜单 1 第 4 参数 + 菜单 3 共用的提问：写入 / **无条件删除** / 缺省 `keep` 不改动 /
   route-only **字节级**零改动 / 菜单 3 开启与关闭 / 1M 键必须在第一个 section 之前）
   + 默认模型名 `gpt-6-astra`（含「4 处必须同步」的源码断言）。
+- **断言实现：不要再用 `$(grep -cE …)`**（2026-10-19 改）。Windows/MSYS 上最贵的是**进程创建**，
+  旧写法 250 条断言 = 250 次 fork+exec。现在 `expect_count` / `expect_grep` / `expect_no_grep` 走
+  `count_matches`：`mapfile` 读行 + bash 内建 `[[ =~ ]]`，零子进程。
+  三条必须遵守的语义（都有踩坑记录）：
+  ① 数的是**匹配的行数**（与 `grep -c` 一致）；
+  ② 文件/管道不可读记 0（`<(cmd)` 的 `/dev/fd/N` 也算可读，别改成 `[ -f ]`）；
+  ③ **正则写错直接判失败**，不许静默记 0 —— 旧实现里 `grep` 报错被 `|| true` 吞掉，
+     `^fn() {`、`7) hapi_…`、`"${auth_file}"` 这三类 ERE 非法模式因此**一直是假绿**，
+     换实现后才暴露出来。写带括号/花括号的模式时要转义：`\(` `\)` `\{` `\}`。
+  ④ 仓库文件是 CRLF：`mapfile` 会留下行尾 `\r`，`…$` 锚点会假红，所以 `count_matches` 里先剥 `\r`。
   实测（2026-09-19，本机 Windows/MSYS）：**定向分组** `--only C` = 39 断言全绿、`--only E,F` = 35 断言全绿；A 组 ≈15s、C 组 ≈25s、E 组 ≈2min、E+F ≈3min（进程创建极慢，别指望秒级）。
 - ⚠️ **全量套件在本机 Windows/MSYS 上超过默认 300s 上限**（2026-09-23 实测）：默认 `HARNESS_TIMEOUT=300` 会被
   `timeout` 杀掉，表现为 **`NOT OK - harness 超时（300s）`、rc=124、日志停在 G 组且没有任何 `NOT OK` 断言**
