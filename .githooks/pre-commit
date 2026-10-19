@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 提交前的机械检查（bash -n / heredoc 里的 node 语法 / 行尾一致性）。
+# 提交前的机械检查（bash -n / heredoc 里的 node 语法 / 行尾一致性 / md 重复标题）。
 # 启用一次即可：git config core.hooksPath .githooks
 # 关掉：git config --unset core.hooksPath
 # 单次跳过：git commit --no-verify（本仓库没有别的守卫，别养成习惯）
@@ -7,9 +7,17 @@ set -o pipefail
 
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
-# 纯文档提交不必等检查
-if ! git diff --cached --name-only --diff-filter=ACMR | grep -q '\.sh$'; then
+# 只检查暂存过的 .sh / .md。
+# 文档也要走：2026-10-20 一次改 AGENTS.md 把正文写成了两份，纯 md 提交当时直接放行，
+# 只有 `git diff --stat` 的 +803 行暴露了问题。
+# core.quotePath=false：否则中文路径会被 git 转义成 "docs/\346..."，脚本读不到。
+staged=()
+while IFS= read -r f; do
+    staged+=("${f}")
+done < <(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR | grep -E '\.(sh|md)$')
+
+if [ "${#staged[@]}" -eq 0 ]; then
     exit 0
 fi
 
-exec bash tests/static-checks.sh
+exec bash tests/static-checks.sh "${staged[@]}"

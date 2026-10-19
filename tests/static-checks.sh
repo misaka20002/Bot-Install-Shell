@@ -6,12 +6,13 @@
 #   bash tests/static-checks.sh             # 检查全部受版本控制的 *.sh
 #   bash tests/static-checks.sh a.sh b.sh   # 只检查指定文件（pre-commit 用）
 #
-# 做三件事：
+# 做四件事：
 #   1) 每个 *.sh 的 `bash -n`；
 #   2) 每个 node heredoc 块的 `node --check` —— `bash -n` 看不到 heredoc 里的 JS。
 #      2026-10-19 两次改坏那个 4900 行脚本，真凶都在 JS 里，而 `bash -n` 只报了一个不相干的 `}`；
 #   3) 行尾混用检测：同一文件里既有 CRLF 又有 LF 时，Linux 上执行会在 \r 处炸。
 #      整份翻转型改写交给 `.gitattributes` 的 `* text=auto` 兜底（git 在 add 时归一化）。
+#   4) *.md 的重复同级标题：整段被写两遍的唯一可靠信号（见文件末尾注释）。
 #
 # 退出码：0 = 全过；1 = 有问题（逐条打印 "文件: 原因"）。
 # ============================================================
@@ -23,13 +24,21 @@ ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
 }
 cd "${ROOT}" || exit 1
 
-files=()
+sh_files=()
+md_files=()
 if [ "$#" -gt 0 ]; then
-    files=("$@")
+    for f in "$@"; do
+        case "${f}" in
+            *.sh) sh_files+=("${f}") ;;
+            *.md) md_files+=("${f}") ;;
+        esac
+    done
 else
-    while IFS= read -r f; do files+=("${f}"); done < <(git ls-files '*.sh')
+    while IFS= read -r f; do sh_files+=("${f}"); done < <(git ls-files '*.sh')
+    # core.quotePath=false：中文文件名默认会被 git 加引号转义，node 会读不到
+    while IFS= read -r f; do md_files+=("${f}"); done < <(git -c core.quotePath=false ls-files '*.md')
 fi
-if [ "${#files[@]}" -eq 0 ]; then
+if [ "${#sh_files[@]}" -eq 0 ] && [ "${#md_files[@]}" -eq 0 ]; then
     echo "static-checks: 没有要检查的文件"
     exit 0
 fi
@@ -38,7 +47,7 @@ fail=0
 say() { printf '%s: %s\n' "$1" "$2"; }
 
 # ---- 1) bash -n ----
-for f in "${files[@]}"; do
+for f in "${sh_files[@]}"; do
     [ -f "${f}" ] || continue
     if ! err=$(bash -n "${f}" 2>&1); then
         say "${f}" "bash -n 失败 → ${err}"
@@ -48,7 +57,7 @@ done
 
 # ---- 2) heredoc 里的 node 块 ----
 node_files=()
-for f in "${files[@]}"; do
+for f in "${sh_files[@]}"; do
     [ -f "${f}" ] || continue
     if grep -q "^[^#]*node .*<<'NODE'" "${f}"; then node_files+=("${f}"); fi
 done
@@ -114,7 +123,7 @@ fi
 # 不做「整份行尾翻转」检测：本仓库 core.autocrlf=true，git 在 add 时会归一化，
 # `git diff` 根本看不到行尾差异（2026-10-19 实测），据此报警只会制造假阳性。
 # 真正的护栏是 `.gitattributes` 里那条 `* text=auto`：无论谁在什么系统提交，对象库都是 LF。
-eol_report=$(node - "${files[@]}" <<'JS'
+eol_report=$(node - "${sh_files[@]}" <<'JS'
 const fs = require("fs");
 const files = process.argv.slice(2);
 const problems = [];
@@ -134,9 +143,43 @@ if [ -n "${eol_report}" ]; then
     fail=1
 fi
 
+# ---- 4) Markdown 结构：同一文件里重复的同级标题 ----
+# 2026-10-20 事故：用 node 的 String.replace 改 AGENTS.md，替换串里的 `$` + 反引号
+# 被当成「插入匹配点之前的全部内容」，整份正文被写成两份；bash -n 和行尾检查都看不出，
+# 只有 `git diff --stat` 显示 +803 行才发现。重复标题是这种「整段写两遍」的可靠特征。
+if [ "${#md_files[@]}" -gt 0 ]; then
+    md_report=$(node - "${md_files[@]}" <<'JS'
+const fs = require("fs");
+const files = process.argv.slice(2);
+const problems = [];
+for (const f of files) {
+  let raw;
+  try { raw = fs.readFileSync(f, "utf8"); } catch { continue; }
+  const lines = raw.replace(/\r\n/g, "\n").split("\n");
+  const seen = new Map();
+  lines.forEach((line, i) => {
+    const m = /^(#{2,6}) +(.+?)\s*$/.exec(line);
+    if (!m) return;
+    const key = m[1].length + " " + m[2];
+    if (seen.has(key)) {
+      problems.push(`${f}\t第 ${i + 1} 行与第 ${seen.get(key)} 行是重复的同级标题「${m[2]}」——多半整段被写了两遍`);
+    } else {
+      seen.set(key, i + 1);
+    }
+  });
+}
+if (problems.length) console.log(problems.join("\n"));
+JS
+)
+    if [ -n "${md_report}" ]; then
+        while IFS=$'\t' read -r md_file md_msg; do say "${md_file}" "${md_msg}"; done <<< "${md_report}"
+        fail=1
+    fi
+fi
+
 if [ "${fail}" -ne 0 ]; then
     echo
     echo "static-checks: FAIL（修好后再提交；只跑指定文件：bash tests/static-checks.sh 路径…）" >&2
     exit 1
 fi
-echo "static-checks: OK（${#files[@]} 个文件：bash -n / heredoc node --check / 行尾混用）"
+echo "static-checks: OK（${#sh_files[@]} 个 sh：bash -n / heredoc node --check / 行尾混用；${#md_files[@]} 个 md：重复标题）"

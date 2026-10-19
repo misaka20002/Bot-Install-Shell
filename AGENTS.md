@@ -187,7 +187,9 @@ done
 
 - 提示一律**中文**，配色沿用 `echo -e ${green}…${background}` 风格。
 - `[Y/n]` = 默认 **是**（`case` 里 `N|n)` 走否分支，其余含直接回车走是）；`[y/N]` = 默认 **否**。两者不要混用。
-- **未加引号的 `echo` 里不要出现 ASCII 括号**：`echo -e ... (1-65535): ...` 会让 bash 报 `syntax error near unexpected token '('`。要么加引号，要么改全角括号。
+- **未加引号的 `echo` 里不要出现 ASCII 的括号或尖括号**：`echo -e ... (1-65535): ...` 会让 bash 报
+  `syntax error near unexpected token '('`；`echo -e ... db_<uin> ...` 里的 `<` 会被当成**输入重定向**，
+  报 `uin: No such file or directory` 并让**整行静默不输出**（2026-10-20 踩过）。要么给整串加引号，要么改全角括号。
 - 密钥输入用 `read -rsp`（不回显），不要用 `read -p` 把密钥留在终端和历史里。
 
 ### 编辑与 EOL 约定
@@ -202,11 +204,15 @@ done
   - 一次性 `read → join("\n") → write` 会把整份文件的行尾换掉；`git diff --stat` 里出现「整份文件 +N/-N」就是这个症状
     （2026-10-19 真踩过：4888 行新增 + 4888 行删除），用 `git checkout -- <file>` 重来，别硬提交。
 - 改完确认没有混行：`bash tests/static-checks.sh <file>`（混行会让 bash 在 CR 处报错，这个检查会直接点名）。
+- **用 node 改文本时用 `split` / `join` 定点插入，不要 `String.replace`**：替换串里的 `$&`、`$'`
+  以及「`$` 紧跟反引号」都会被展开成"匹配位置前后/附近的原文"。2026-10-20 就是替换串里带了
+  `` `^}$` `` 这一段，把 `AGENTS.md` 的整份正文写成了两份（症状：`git diff --stat` 显示 +803 行）。
+  现在 `tests/static-checks.sh` 会检查 `.md` 的重复同级标题，专挡这种「整段写两遍」。
 - 函数内变量尽量 `local`；避免用全局变量在函数间传参（历史上 `Tmux_Name` / `repo_path` / `original_url` 都因此互相覆盖过）。
 
 ### 验证方式
 
-改完任何 `Manage/*.sh` 的最低要求：`bash tests/static-checks.sh`（`bash -n` + heredoc 里的 node 语法 + 行尾一致，秒级）。
+改完任何 `Manage/*.sh` 的最低要求：`bash tests/static-checks.sh`（`bash -n` + heredoc 里的 node 语法 + 行尾一致 + `.md` 重复标题，秒级）。
 行为回归：`bash tests/<脚本名>/run.sh`（默认全组；`--only A,B` 只跑指定组；`--log FILE` 指定进度日志）。
 本机跑得慢，优先放后台 + `--log`；**不要在本机跑全量**。
 
@@ -791,6 +797,17 @@ done
 - **`SYS_Manage.sh` 的「安装常用字体」各发行版包名不同，别照抄**：CJK 是 `fonts-noto-cjk`（apt）/ `google-noto-sans-cjk-fonts`（yum、dnf）/ `noto-fonts-cjk`（pacman）；emoji 是 `fonts-noto-color-emoji`（apt）/ `noto-fonts-emoji`（pacman）。RPM 系**改过名**：EL9 及更早是 `google-noto-emoji-color-fonts`，EL10 起是 `google-noto-color-emoji-fonts`，要写成 `dnf install A || dnf install B` 两条命令试——写进一条里时只要有一个包不存在，dnf 会 `Unable to find a match` 让**整条事务失败**。⚠️ **`google-noto-emoji-fonts` 是黑白 emoji**，装错包不报错但表情仍是方块。装完必须按 `fc-list :lang=zh` / `fc-list | grep -i emoji` 复核：字体装失败是**静默**的，只有 fc-list 能戳破（2026-09-14：`chatgpt-plugin` 的列表图在服务器上整片中文变方块，根因就是宿主没装 CJK 字体）。
 - `Linux/Bot-Install-*.sh` 那批系统安装脚本只装文泉驿（CentOS 走 `groupinstall fonts`），**没有 Noto 系列**——需要 CJK/emoji 覆盖时记得同步这四处。
 
+- **`tests/<脚本>/run.sh` 只抽函数体，顶层的 `VAR="..."` 不会跟着走**：它用 awk 按 `name() {` 到 `^}$` 逐段抽取，
+  所以函数里引用的顶层变量（目录清单、配置数组）在测试里是**空值**，表现是「函数静默什么都不做」而不是报错。
+  这类常量要么写进函数体（`local dirs="..."`），要么在 run.sh 里显式造一份。2026-10-20 的缓存清理用例就踩了这个：
+  枚举只出了 3 条，因为 `QQ_CACHE_MEDIA_DIRS` 在抽取后是空的。
+- **Windows/MSYS 上每个 fork ≈ 0.25s，而 `rm -rf` 走安全网关 ≈3.7s**（2026-10-20 实测）。测试断言里少起进程：
+  数行用 `mapfile` + `${#arr[@]}`，匹配用 `case "$var" in *pat*)`，读输出用 `$(< file)`；
+  不要用 `grep -c` / `wc -l` / `basename` / `cut` / `date`。夹具用 `mktemp -d`（新建即空），别在开头再 `rm -rf` 一遍。
+  脚本侧同理，见 `Manage/NapCat.sh` 的缓存清理：一个目录只 `find` 一次，格式化走 bash 内建。
+- **`cmd | grep -q` 在 `set -o pipefail` 下会「假红」**：grep 命中即退出，写端拿到 SIGPIPE（141），pipeline 整体非零，
+  断言就把「匹配成功」判成失败。要判串就先把输出抓进变量再 `case` 匹配。
+
 ## Agent skills
 
 ### Issue tracker
@@ -803,4 +820,4 @@ done
 
 ### Domain docs
 
-单上下文：仓库根 `GLOSSARY.md` + `docs/adr/`；两者尚不存在，技能按需惰性创建。See `docs/agents/domain.md`.
+单上下文：仓库根 `GLOSSARY.md` + `docs/adr/`（2026-10-20 起已存在）。See `docs/agents/domain.md`.

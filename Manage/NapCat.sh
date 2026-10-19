@@ -744,6 +744,14 @@ uninstall_NapCat() {
             
             echo -e ${green}${APP_NAME}及所有相关数据已彻底卸载完成${background}
             echo -e ${yellow}若要重新安装，请重新运行安装命令${background}
+            # 卸载不删除 ~/.config/QQ：QQ 客户端缓存仍在占盘，指路到主菜单 3
+            local qq_cache_kb=""
+            if [ -d "$QQ_DATA_ROOT" ]; then
+                qq_cache_kb=$(napcat_cache_total_kb 2>/dev/null)
+                if [ -n "$qq_cache_kb" ]; then
+                    echo -e ${yellow}QQ 客户端缓存 ${QQ_DATA_ROOT} 不随卸载删除，仍占用 $(format_size_kb "$qq_cache_kb")，可用主菜单 3. qq缓存清理 处理${background}
+                fi
+            fi
             echo -en ${cyan}回车返回${background};read
             ;;
         *)
@@ -751,6 +759,483 @@ uninstall_NapCat() {
             echo -en ${cyan}回车返回${background};read
             ;;
     esac
+}
+
+# ============================================================
+# QQ 缓存 / NapCat 日志：占用查看与清理
+# 目录归属、可清理性与风险见 docs/NapCat缓存清理插件-调研-2026-10-20.md
+#
+# 性能约定（本机 Windows/MSYS 上每次 fork ≈ 0.25s，Linux 上也要额外遍历 I/O）：
+#   · 统计一个目录只跑一次 find，大小/文件数/最新 mtime 都由它算出来，不再额外跑 du
+#   · 大小与时间格式化走 bash 内建，不 fork awk / date / basename / dirname
+#   · 目录名全部用参数展开截取，不 fork cut
+# ============================================================
+QQ_DATA_ROOT="/root/.config/QQ"
+NAPCAT_BASE_DIR="/root/Napcat/opt/QQ/resources/app/app_launcher/napcat"
+NAPCAT_INSTALL_DIR="/root/Napcat"
+
+# KB 数 → 人类可读；空值/非数字输出 -，绝不把统计失败伪装成 0（纯内建，无 fork）
+format_size_kb() {
+    local kb="${1:-}"
+    case "$kb" in
+        ''|*[!0-9]*) printf '%s' '-'; return 0 ;;
+    esac
+    if [ "$kb" -lt 1024 ]; then
+        printf '%dK' "$kb"
+    elif [ "$kb" -lt 1048576 ]; then
+        printf '%d.%dM' $((kb / 1024)) $(((kb % 1024) * 10 / 1024))
+    elif [ "$kb" -lt 1073741824 ]; then
+        printf '%d.%02dG' $((kb / 1048576)) $(((kb % 1048576) * 100 / 1048576))
+    else
+        printf '%d.%02dT' $((kb / 1073741824)) $(((kb % 1073741824) * 100 / 1073741824))
+    fi
+    return 0
+}
+
+# 秒级时间戳 → 本地时间；0 或无效输出 -（bash 4.2+ 用 %()T，避免 fork date）
+format_timestamp() {
+    local epoch="${1:-0}"
+    case "$epoch" in
+        ''|*[!0-9]*) printf '%s' '-'; return 0 ;;
+    esac
+    if [ "$epoch" -le 0 ]; then
+        printf '%s' '-'
+        return 0
+    fi
+    printf '%(%Y-%m-%d %H:%M)T' "$epoch" 2>/dev/null ||
+        date -d "@${epoch}" '+%Y-%m-%d %H:%M' 2>/dev/null ||
+        printf '%s' '-'
+    return 0
+}
+
+# 目录统计：输出 "KB|文件数|最新 mtime（epoch）"
+# 一次 find 同时算三样；find 失败返回 1，调用方显示 - 而不是 0
+cache_dir_stats() {
+    local stats
+    stats=$(find "$1" -xdev -mindepth 1 \( -type f -o -type l \) -printf '%s %T@\n' 2>/dev/null |
+        awk 'NF { b += $1; n++; if ($2 + 0 > m) m = $2 + 0 } END { printf "%d|%d|%d\n", b / 1024, n, m }') || return 1
+    printf '%s\n' "$stats"
+}
+
+# NapCat 自身的日志目录：设了 NAPCAT_WORKDIR 就在它下面，否则在 NapCat 目录下
+napcat_logs_dir() {
+    if [ -n "${NAPCAT_WORKDIR:-}" ]; then
+        printf '%s\n' "${NAPCAT_WORKDIR%/}/logs"
+    else
+        printf '%s\n' "$NAPCAT_BASE_DIR/logs"
+    fi
+}
+
+# 列出可清理的目录，每行 "section|kind|name|显示名|绝对路径"
+# section = qq（QQ 客户端）/ napcat（NapCat 自身）
+# kind    = media（媒体缓存，按保留天数）/ log（日志，整清）
+#         / napcat（NapCat 临时与残留，整清）/ skip（符号链接，只显示不动）
+# 路径只由本函数拼接得出，不接受任何外部输入，避免清理越界。
+# 目录清单写在函数内：本仓库的测试只抽取函数体，顶层变量不会跟着走。
+napcat_cache_targets() {
+    local media_dirs="Pic Ptt Video File" log_dirs="log log-cache"
+    local root dir name base short kind
+    for root in "$QQ_DATA_ROOT"/nt_qq_*/nt_data; do
+        [ -d "$root" ] || continue
+        [ -L "$root" ] && continue
+        base=${root%/nt_data}
+        base=${base##*/}
+        short="${base:0:16}…"
+        for name in $media_dirs $log_dirs; do
+            dir="$root/$name"
+            if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then
+                continue
+            fi
+            kind=media
+            case "$name" in
+                log|log-cache) kind=log ;;
+            esac
+            if [ -L "$dir" ]; then
+                printf 'qq|skip|%s|%s/%s|%s\n' "$name" "$short" "$name" "$dir"
+            else
+                printf 'qq|%s|%s|%s/%s|%s\n' "$kind" "$name" "$short" "$name" "$dir"
+            fi
+        done
+    done
+    # NapCat 真正的临时目录在 QQ 数据根下，不在安装目录里
+    dir="$QQ_DATA_ROOT/NapCat/temp"
+    if [ -L "$dir" ]; then
+        printf 'napcat|skip|temp|NapCat/temp|%s\n' "$dir"
+    elif [ -d "$dir" ]; then
+        printf 'napcat|napcat|temp|NapCat/temp|%s\n' "$dir"
+    fi
+    dir=$(napcat_logs_dir)
+    if [ -L "$dir" ]; then
+        printf 'napcat|skip|logs|napcat/logs|%s\n' "$dir"
+    elif [ -d "$dir" ]; then
+        printf 'napcat|napcat|logs|napcat/logs|%s\n' "$dir"
+    fi
+    return 0
+}
+
+# 所有可清理目录的占用合计（KB）；任一目录统计失败则整体返回 1
+napcat_cache_total_kb() {
+    local section kind name short path kb rest total=0
+    while IFS='|' read -r section kind name short path; do
+        [ -n "$path" ] || continue
+        [ "$kind" = skip ] && continue
+        rest=$(cache_dir_stats "$path") || return 1
+        kb=${rest%%|*}
+        case "$kb" in
+            ''|*[!0-9]*) return 1 ;;
+        esac
+        total=$((total + kb))
+    done < <(napcat_cache_targets)
+    printf '%s\n' "$total"
+    return 0
+}
+
+# 统计「将被删除」的字节数与文件数，输出 "字节|文件数"
+# $1=目录  $2=all|days  $3=保留天数
+cache_pending_stat() {
+    local dir="$1" mode="$2" days="$3" stats
+    if [ "$mode" = all ]; then
+        stats=$(find "$dir" -xdev -mindepth 1 \( -type f -o -type l \) -printf '%s\n' 2>/dev/null) || return 1
+    else
+        stats=$(find "$dir" -xdev -mindepth 1 \( -type f -o -type l \) -mtime +"${days}" -printf '%s\n' 2>/dev/null) || return 1
+    fi
+    printf '%s\n' "$stats" | awk 'NF { s += $1; n++ } END { printf "%d|%d\n", s, n }'
+    return 0
+}
+
+# 删除：$1=目录  $2=all|days  $3=保留天数  $4=stderr 收集文件（可省略）
+# 只删文件与符号链接本身（不跟随、不跨文件系统），保留目录自身；有任何删除失败就返回 1
+cache_delete_entries() {
+    local dir="$1" mode="$2" days="$3" err="${4:-}" rc failed=0 own_err=0
+    if [ -z "$err" ]; then
+        err=$(mktemp) || return 1
+        own_err=1
+    fi
+    : > "$err" || { [ "$own_err" -eq 1 ] && rm -f "$err"; return 1; }
+    if [ "$mode" = all ]; then
+        find "$dir" -xdev -mindepth 1 \( -type f -o -type l \) -delete 2>"$err"
+    else
+        find "$dir" -xdev -mindepth 1 \( -type f -o -type l \) -mtime +"${days}" -delete 2>"$err"
+    fi
+    rc=$?
+    if [ -s "$err" ]; then
+        failed=$(awk 'END { print NR }' "$err")
+        echo -e ${yellow}    有 ${failed} 项删除失败（多因文件正被运行中的进程占用），已跳过${background}
+        echo -e ${yellow}    首个错误: $(head -n 1 "$err")${background}
+    fi
+    [ "$own_err" -eq 1 ] && rm -f "$err"
+    if [ "$failed" -gt 0 ]; then
+        return 1
+    fi
+    if [ "$rc" -ne 0 ]; then
+        return 1
+    fi
+    # 顺手删掉清理后变空的子目录，保留 $dir 自身
+    find "$dir" -xdev -mindepth 1 -depth -type d -empty -delete 2>/dev/null
+    return 0
+}
+
+# 打印占用总览：磁盘 / 每个目录的大小·文件数·最近写入 / 合计 / 安装目录
+print_napcat_cache_overview() {
+    local section kind name short path stats kb files newest
+    local total_kb=0 qq_kb=0 napcat_kb=0 rows=0
+    local qq_section=0 napcat_section=0 inst_kb df_line
+
+    df_line=$(df -h / 2>/dev/null | awk 'NR==2 { printf "%s 已用 %s / %s（%s），可用 %s", $1, $3, $2, $5, $4 }')
+    echo -e ${green}磁盘:${background} ${df_line:-无法读取}
+    echo -e ${yellow}正在统计缓存占用，目录较大时需要几秒...${background}
+
+    while IFS='|' read -r section kind name short path; do
+        [ -n "$path" ] || continue
+        rows=$((rows + 1))
+        if [ "$section" = qq ] && [ "$qq_section" -eq 0 ]; then
+            qq_section=1
+            echo
+            echo -e ${white}"-- QQ 客户端缓存 ${QQ_DATA_ROOT}/nt_qq_*/ --"${background}
+        elif [ "$section" = napcat ] && [ "$napcat_section" -eq 0 ]; then
+            napcat_section=1
+            echo
+            echo -e ${white}"-- NapCat 自身日志与临时文件 --"${background}
+        fi
+        if [ "$kind" = skip ]; then
+            printf '  %-30s %s\n' "$short" '跳过（符号链接，不读不删）'
+            continue
+        fi
+        stats=$(cache_dir_stats "$path") || stats=""
+        kb=${stats%%|*}
+        files=${stats#*|}
+        files=${files%%|*}
+        newest=${stats##*|}
+        printf '  %-30s %8s · %6s 个文件 · 最近写入 %s\n' \
+            "$short" "$(format_size_kb "$kb")" "${files:-?}" "$(format_timestamp "$newest")"
+        case "$kb" in
+            ''|*[!0-9]*) ;;
+            *)
+                total_kb=$((total_kb + kb))
+                if [ "$section" = napcat ]; then
+                    napcat_kb=$((napcat_kb + kb))
+                else
+                    qq_kb=$((qq_kb + kb))
+                fi
+                ;;
+        esac
+    done < <(napcat_cache_targets)
+
+    if [ "$rows" -eq 0 ]; then
+        echo
+        echo -e ${yellow}未找到可统计的缓存目录${background}
+        echo -e ${yellow}已查找 ${QQ_DATA_ROOT}/nt_qq_*/ 与 NapCat 的 logs、temp${background}
+        return 1
+    fi
+
+    echo
+    echo -e ${green}合计:${background} QQ 缓存 $(format_size_kb "$qq_kb") + NapCat 自身 $(format_size_kb "$napcat_kb") = $(format_size_kb "$total_kb")
+    echo -e ${yellow}"说明: 聊天记录库 nt_db 与 NapCat 的 db_ 目录不在统计与清理范围内"${background}
+    if [ -d "$NAPCAT_INSTALL_DIR" ]; then
+        inst_kb=$(cache_dir_stats "$NAPCAT_INSTALL_DIR") || inst_kb=""
+        inst_kb=${inst_kb%%|*}
+        echo -e ${green}安装目录（只显示，不参与清理）:${background} ${NAPCAT_INSTALL_DIR} $(format_size_kb "$inst_kb")
+    fi
+    return 0
+}
+
+# 清理流程：选保留天数 → 确认范围 → 统计 → 二次确认 → 删除 → 前后对账
+clean_napcat_cache() {
+    local section kind name short path out bytes count pred_mode
+    local choice mode days include_recv=1 include_yn stop_yn confirm
+    local est_bytes=0 est_count=0 total_count=0 failed=0 done_count=0 running=0 stat_failed=0
+    local before_kb after_kb freed_kb df_before df_after err_file
+
+    total_count=$(napcat_cache_targets | awk 'END { print NR }')
+    if [ "$total_count" -eq 0 ]; then
+        echo -e ${yellow}未找到可清理的目录${background}
+        echo -e ${yellow}已查找 ${QQ_DATA_ROOT}/nt_qq_*/ 与 NapCat 的 logs、temp${background}
+        echo -en ${cyan}回车返回${background};read
+        return 0
+    fi
+
+    echo
+    print_napcat_cache_overview
+
+    echo
+    echo -e ${green}1. ${cyan}清理 7 天前的媒体缓存${background}
+    echo -e ${green}2. ${cyan}清理 30 天前的媒体缓存${background}
+    echo -e ${green}3. ${cyan}自定义保留天数${background}
+    echo -e ${green}4. ${cyan}全部清空（媒体缓存一个不留）${background}
+    echo -e ${green}0. ${cyan}取消${background}
+    echo -e ${yellow}"说明: log 与 NapCat 自身日志、临时文件始终整清，不受保留天数影响"${background}
+    echo -en ${green}请选择清理方式 [默认 1]: ${background};read choice
+    case "${choice:-1}" in
+        1)
+            mode=days
+            days=7
+            ;;
+        2)
+            mode=days
+            days=30
+            ;;
+        3)
+            echo -en ${cyan}请输入保留天数（1-3650）: ${background};read days
+            case "$days" in
+                ''|*[!0-9]*)
+                    echo -e ${red}天数必须是正整数${background}
+                    echo -en ${cyan}回车返回${background};read
+                    return 1
+                    ;;
+            esac
+            if [ "$days" -lt 1 ] || [ "$days" -gt 3650 ]; then
+                echo -e ${red}天数超出范围（1-3650）${background}
+                echo -en ${cyan}回车返回${background};read
+                return 1
+            fi
+            mode=days
+            ;;
+        4)
+            mode=all
+            days=0
+            ;;
+        0)
+            echo -e ${yellow}已取消${background}
+            echo -en ${cyan}回车返回${background};read
+            return 0
+            ;;
+        *)
+            echo -e ${red}输入错误${background}
+            sleep 1
+            return 1
+            ;;
+    esac
+
+    echo
+    echo -e ${yellow}接收文件 File 可能是唯一一份本地副本，发送方无法补发${background}
+    echo -en ${cyan}本次是否包含 File？[Y/n]${background};read include_yn
+    case "$include_yn" in
+        N|n) include_recv=0 ;;
+    esac
+
+    if list_running_instances >/dev/null 2>&1; then
+        running=1
+        echo
+        echo -e ${yellow}检测到实例正在运行: 被进程占用的文件删除后空间不会立刻释放，要等 QQ 退出${background}
+        echo -en ${cyan}是否先停止全部实例？[y/N]${background};read stop_yn
+        case "$stop_yn" in
+            Y|y)
+                if stop_all_instances; then
+                    running=0
+                else
+                    echo -e ${yellow}未能确认实例已停止，下面仍按「运行中」提示${background}
+                fi
+                ;;
+        esac
+    fi
+
+    echo
+    echo -e ${yellow}正在统计将要删除的文件...${background}
+    while IFS='|' read -r section kind name short path; do
+        [ -n "$path" ] || continue
+        [ "$kind" = skip ] && continue
+        if [ "$kind" = media ] && [ "$name" = File ] && [ "$include_recv" -eq 0 ]; then
+            continue
+        fi
+        if [ "$kind" = log ] || [ "$kind" = napcat ] || [ "$mode" = all ]; then
+            pred_mode=all
+        else
+            pred_mode=days
+        fi
+        if ! out=$(cache_pending_stat "$path" "$pred_mode" "$days"); then
+            echo -e ${red}  ${short} 统计失败，本次跳过该目录${background}
+            stat_failed=$((stat_failed + 1))
+            continue
+        fi
+        bytes=${out%%|*}
+        count=${out##*|}
+        case "$bytes" in
+            ''|*[!0-9]*) bytes=0 ;;
+        esac
+        case "$count" in
+            ''|*[!0-9]*) count=0 ;;
+        esac
+        est_bytes=$((est_bytes + bytes))
+        est_count=$((est_count + count))
+        printf '  %-30s %8s · %6s 个文件\n' "$short" "$(format_size_kb $((bytes / 1024)))" "$count"
+    done < <(napcat_cache_targets)
+
+    if [ "$est_count" -eq 0 ]; then
+        echo
+        if [ "$stat_failed" -gt 0 ]; then
+            echo -e ${red}有 ${stat_failed} 个目录统计失败，无法确认可清理内容，已中止${background}
+            echo -en ${cyan}回车返回${background};read
+            return 1
+        fi
+        echo -e ${yellow}没有符合保留期条件的文件，无需清理${background}
+        echo -en ${cyan}回车返回${background};read
+        return 0
+    fi
+
+    if [ "$stat_failed" -gt 0 ]; then
+        echo -e ${yellow}注: 有 ${stat_failed} 个目录统计失败，本次不处理它们${background}
+    fi
+
+    echo
+    echo -e ${red}将删除 ${est_count} 个文件，预计释放 $(format_size_kb $((est_bytes / 1024)))${background}
+    echo -en ${cyan}确认清理？此操作不可恢复。 [y/N]${background};read confirm
+    case "$confirm" in
+        Y|y) ;;
+        *)
+            echo -e ${yellow}已取消${background}
+            echo -en ${cyan}回车返回${background};read
+            return 0
+            ;;
+    esac
+
+    df_before=$(df -h / 2>/dev/null | awk 'NR==2 { printf "已用 %s / %s（%s），可用 %s", $3, $2, $5, $4 }')
+    before_kb=$(napcat_cache_total_kb) || before_kb=""
+
+    echo
+    echo -e ${yellow}正在清理...${background}
+    # 所有目录共用一个 stderr 收集文件，避免逐个 mktemp / rm
+    err_file=$(mktemp) || { echo -e ${red}无法创建临时文件，已中止${background}; return 1; }
+    while IFS='|' read -r section kind name short path; do
+        [ -n "$path" ] || continue
+        [ "$kind" = skip ] && continue
+        if [ "$kind" = media ] && [ "$name" = File ] && [ "$include_recv" -eq 0 ]; then
+            continue
+        fi
+        if [ "$kind" = log ] || [ "$kind" = napcat ] || [ "$mode" = all ]; then
+            pred_mode=all
+        else
+            pred_mode=days
+        fi
+        if cache_delete_entries "$path" "$pred_mode" "$days" "$err_file"; then
+            echo -e ${green}  已清理 ${short}${background}
+            done_count=$((done_count + 1))
+        else
+            echo -e ${red}  ${short} 未清干净（见上方原因）${background}
+            failed=$((failed + 1))
+        fi
+    done < <(napcat_cache_targets)
+    rm -f "$err_file"
+
+    after_kb=$(napcat_cache_total_kb) || after_kb=""
+    df_after=$(df -h / 2>/dev/null | awk 'NR==2 { printf "已用 %s / %s（%s），可用 %s", $3, $2, $5, $4 }')
+
+    echo
+    echo -e ${green}清理完成:${background} ${done_count} 个目录已处理
+    if [ -n "$before_kb" ] && [ -n "$after_kb" ]; then
+        freed_kb=$((before_kb - after_kb))
+        if [ "$freed_kb" -lt 0 ]; then
+            freed_kb=0
+        fi
+        echo -e ${green}本次释放:${background} $(format_size_kb "$freed_kb")
+    else
+        echo -e ${yellow}本次释放: 无法统计（部分目录读取失败）${background}
+    fi
+    echo -e ${green}磁盘清理前:${background} ${df_before:-无法读取}
+    echo -e ${green}磁盘清理后:${background} ${df_after:-无法读取}
+    if [ "$running" -eq 1 ]; then
+        echo -e ${yellow}注: 仍有实例在运行，被占用的文件空间要等 QQ 退出后才真正释放${background}
+    fi
+
+    if [ "$failed" -gt 0 ]; then
+        echo -e ${red}有 ${failed} 个目录未清干净，请对照上方提示处理${background}
+        echo -en ${cyan}回车返回${background};read
+        return 1
+    fi
+    echo -en ${cyan}回车返回${background};read
+    return 0
+}
+
+# QQ 缓存清理子菜单
+manage_napcat_cache() {
+    local choice
+    while true; do
+        echo
+        echo -e ${white}"====="${green}QQ 缓存 / NapCat 日志清理${white}"===="${background}
+        echo -e ${green}1. ${cyan}查看占用${background}
+        echo -e ${green}2. ${cyan}清理缓存${background}
+        echo -e ${green}0. ${cyan}返回主菜单${background}
+        echo "========================="
+        echo -en ${green}请输入您的选项: ${background};read choice
+        case "$choice" in
+            1)
+                echo
+                print_napcat_cache_overview
+                echo
+                echo -en ${cyan}回车返回${background};read
+                ;;
+            2)
+                echo
+                clean_napcat_cache
+                ;;
+            0)
+                return 0
+                ;;
+            *)
+                echo -e ${red}输入错误${background}
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 # 管理 WebUI 配置
@@ -3260,11 +3745,12 @@ main() {
     echo -e ${white}"====="${green}呆毛版-${APP_NAME}管理${white}"====="${background}
     echo -e ${green}1. ${cyan}安装/更新${background}
     echo -e ${green}2. ${cyan}卸载${background}
-    echo -e ${green}3. ${cyan}WebUI 配置${background}
-    echo -e ${green}4. ${cyan}WebSocket接口配置${background}
-    echo -e ${green}5. ${cyan}音乐签名配置${background}
-    echo -e ${green}6. ${cyan}NapCat插件配置${background}
-    echo -e ${green}7. ${cyan}启动/多开QQ${background}
+    echo -e ${green}3. ${cyan}qq缓存清理${background}
+    echo -e ${green}4. ${cyan}WebUI 配置${background}
+    echo -e ${green}5. ${cyan}WebSocket接口配置${background}
+    echo -e ${green}6. ${cyan}音乐签名配置${background}
+    echo -e ${green}7. ${cyan}NapCat插件配置${background}
+    echo -e ${green}8. ${cyan}启动/多开QQ${background}
     echo -e ${green}0. ${cyan}退出${background}
     echo "========================="
     
@@ -3295,11 +3781,12 @@ main() {
     case ${number} in
         1) echo; install_NapCat ;;
         2) echo; uninstall_NapCat ;;
-        3) echo; manage_webui_config ;;
-        4) echo; configure_ws ;;
-        5) echo; configure_music_sign ;;
-        6) echo; manage_napcat_plugin ;;
-        7) echo; manage_multi_instances ;;
+        3) echo; manage_napcat_cache ;;
+        4) echo; manage_webui_config ;;
+        5) echo; configure_ws ;;
+        6) echo; configure_music_sign ;;
+        7) echo; manage_napcat_plugin ;;
+        8) echo; manage_multi_instances ;;
         0) exit ;;
         *) echo; echo -e ${red}输入错误${background}; sleep 1 ;;
     esac

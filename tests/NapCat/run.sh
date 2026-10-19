@@ -14,26 +14,68 @@ fi
 shift
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd) || exit 2
 SOURCE=${NAPCAT_SOURCE:-"$ROOT/Manage/NapCat.sh"}
+# TMPDIR 可能是 Windows 形式（C:\Users\...\Temp）：宿主包装的 rm 在这种路径上 fail-closed，
+# EXIT trap 就删不掉 WORK。先归一成 POSIX 形式（同 docs/验证方式.md 的 2026-09-13 实测）。
+if [ -n "${TMPDIR:-}" ] && command -v cygpath >/dev/null 2>&1; then
+    TMPDIR=$(cygpath -u "$TMPDIR" 2>/dev/null) || TMPDIR=
+    export TMPDIR
+fi
 WORK=$(mktemp -d) || exit 2
-trap 'rm -rf -- "$WORK"' EXIT
-if [ "$#" -eq 2 ] && [ "$1" = --log ]; then
-    LOG_FILE=$2
-    KEEP_LOG=true
-elif [ "$#" -eq 0 ]; then
+CACHE_FIXTURE=''
+trap 'if [ -n "$CACHE_FIXTURE" ]; then rm -rf -- "$CACHE_FIXTURE"; fi; rm -rf -- "$WORK"' EXIT
+
+# 参数：--only 只跑指定组（逗号分隔，默认全跑），--log 指定进度日志
+ONLY=''
+LOG_FILE=''
+KEEP_LOG=false
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --log)
+            if [ "$#" -lt 2 ]; then
+                echo '用法：bash tests/NapCat/run.sh [--only 组] [--log FILE]' >&2
+                exit 2
+            fi
+            LOG_FILE=$2
+            KEEP_LOG=true
+            shift 2
+            ;;
+        --only)
+            if [ "$#" -lt 2 ]; then
+                echo '用法：bash tests/NapCat/run.sh [--only 组] [--log FILE]' >&2
+                exit 2
+            fi
+            ONLY=$2
+            shift 2
+            ;;
+        *)
+            echo '用法：bash tests/NapCat/run.sh [--only version,cache] [--log FILE]' >&2
+            exit 2
+            ;;
+    esac
+done
+if [ -z "$LOG_FILE" ]; then
     LOG_FILE=$(mktemp /tmp/napcat-test.XXXXXX.log) || exit 2
-    KEEP_LOG=false
-else
-    echo '用法：bash tests/NapCat/run.sh [--log FILE]' >&2
-    exit 2
 fi
 : > "$LOG_FILE" || exit 2
 printf '日志：%s\n' "$LOG_FILE"
+
+# 组开关：不写 --only 就是全跑。组的划分见文件末尾的 version / cache 两段。
+want_group() {
+    [ -z "$ONLY" ] && return 0
+    case ",$ONLY," in
+        *",$1,"*) return 0 ;;
+    esac
+    return 1
+}
 
 # 只提取本次涉及的函数，绝不运行入口、安装系统依赖或启动真实 QQ。
 tr -d '\r' < "$SOURCE" > "$WORK/source.sh" || exit 2
 grep '^INSTALL_URL=' "$WORK/source.sh" > "$WORK/functions.sh" || exit 2
 for name in read_qq_target_version download_napcat_installer install_NapCat \
-    get_qq_target_version check_qq_update clear_version_cache; do
+    get_qq_target_version check_qq_update clear_version_cache \
+    format_size_kb format_timestamp cache_dir_stats napcat_logs_dir \
+    napcat_cache_targets napcat_cache_total_kb cache_pending_stat cache_delete_entries \
+    print_napcat_cache_overview clean_napcat_cache; do
     grep -q "^${name}() {" "$WORK/source.sh" || exit 2
     awk -v start="${name}() {" '$0 == start {copy=1} copy {print} copy && /^}$/ {exit}' \
         "$WORK/source.sh" >> "$WORK/functions.sh" || exit 2
@@ -142,6 +184,8 @@ no_temporary_files() {
     [ -z "$(find "$TMPDIR" -mindepth 1 -print -quit)" ]
 }
 
+if want_group version; then
+
 reset_case
 actual=$(get_qq_target_version); rc=$?
 [ "$rc" -eq 0 ] && [ "$actual" = 3.2.32-52194 ] &&
@@ -227,6 +271,140 @@ for response in timeout error-page bad-syntax no-version; do
         ! grep -q 'NapCat安装完成' "$WORK/output" && no_temporary_files
     report "$?" "安装下载遇到 $response 时中止并清理临时文件"
 done
+
+fi # version 组
+
+if want_group cache; then
+
+# ---------------------------------------------------------------------------
+# QQ 缓存 / NapCat 日志：查看与清理（决策见 docs/adr/0001-napcat-cache-cleanup.md）
+# 夹具放在 /tmp：本组会真的删文件，不能落在只读断言用的 cwd 里。
+# 本组三条性能约定（Win/MSYS 上 fork ≈0.25s、rm -rf 走安全网关 ≈3.7s）：
+#   · 断言只用内建：case/[[ ]] 匹配变量、$(<file) 读输出、mapfile 数行，
+#     不用 grep -c / wc / basename 这类每个都起一个进程的写法
+#   · 夹具由 mktemp 新建即为空，除 EXIT trap 外不做 rm -rf
+#   · 只有主流程遍历完整 9 个目录，校验类用例用最小夹具
+# ---------------------------------------------------------------------------
+CACHE_FIXTURE=$(mktemp -d "${CACHE_TMP_ROOT:-/tmp}/napcat-cache.XXXXXX") || exit 2
+CACHE_A="$CACHE_FIXTURE/qq/nt_qq_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+CACHE_B="$CACHE_FIXTURE/qq/nt_qq_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+CACHE_MIN="$CACHE_FIXTURE/min"
+QQ_DATA_ROOT="$CACHE_FIXTURE/qq"
+NAPCAT_BASE_DIR="$CACHE_FIXTURE/napcat"
+NAPCAT_INSTALL_DIR="$CACHE_FIXTURE/install"
+NAPCAT_WORKDIR=''
+list_running_instances() { return 1; }
+stop_all_instances() { return 0; }
+
+cache_fixture() {
+    # 目录一次建完（每次 mkdir 都是一个进程），文件用内建 printf 写入
+    mkdir -p "$CACHE_A/nt_data/log" "$CACHE_A/nt_data/Pic/2026-01/Ori" \
+        "$CACHE_A/nt_data/Pic/2026-01/Thumb" "$CACHE_A/nt_data/Ptt" \
+        "$CACHE_A/nt_data/Video" "$CACHE_A/nt_data/File/Ori" \
+        "$CACHE_B/nt_data/log" "$CACHE_FIXTURE/napcat/logs" \
+        "$CACHE_FIXTURE/qq/NapCat/temp" "$CACHE_FIXTURE/elsewhere/pic"
+    printf 'xxxx' > "$CACHE_A/nt_data/log/old.log"
+    printf 'xxxx' > "$CACHE_A/nt_data/log/new.log"
+    printf 'xxxx' > "$CACHE_A/nt_data/Pic/2026-01/Ori/a.jpg"
+    printf 'xxxx' > "$CACHE_A/nt_data/Pic/2026-01/Thumb/a.thumb"
+    printf 'xxxx' > "$CACHE_A/nt_data/Ptt/a.amr"
+    printf 'xxxx' > "$CACHE_A/nt_data/Video/big.mp4"
+    printf 'xxxx' > "$CACHE_A/nt_data/File/Ori/recv.zip"
+    printf 'xxxx' > "$CACHE_B/nt_data/log/b.log"
+    printf 'xxxx' > "$CACHE_FIXTURE/napcat/logs/a.log"
+    printf 'xxxx' > "$CACHE_FIXTURE/qq/NapCat/temp/nt.tmp"
+    printf 'yyyy' > "$CACHE_FIXTURE/elsewhere/pic/keep.jpg"
+    touch -d '40 days ago' "$CACHE_A/nt_data/Pic/2026-01/Ori/a.jpg" \
+        "$CACHE_A/nt_data/Pic/2026-01/Thumb/a.thumb" \
+        "$CACHE_A/nt_data/Ptt/a.amr" "$CACHE_A/nt_data/File/Ori/recv.zip"
+    # 账号 B 的 Pic 指向别处：只显示、不跟随（部分文件系统不支持，故用例可跳过）
+    ln -s "$CACHE_FIXTURE/elsewhere/pic" "$CACHE_B/nt_data/Pic" 2>/dev/null
+}
+
+cache_has_target() {
+    case "$1" in
+        *"$2"*) return 0 ;;
+    esac
+    return 1
+}
+
+cache_fixture
+targets=$(napcat_cache_targets)
+mapfile -t target_lines <<< "$targets"
+expected_lines=8
+[ -L "$CACHE_B/nt_data/Pic" ] && expected_lines=9
+[ "${#target_lines[@]}" -eq "$expected_lines" ] &&
+    cache_has_target "$targets" 'qq|media|File|' &&
+    cache_has_target "$targets" "|$CACHE_FIXTURE/qq/NapCat/temp" &&
+    cache_has_target "$targets" "|$CACHE_FIXTURE/napcat/logs"
+report "$?" '枚举账号缓存、NapCat/temp 与 logs，不碰其它目录'
+
+# 符号链接只在真的建出来时才断言（Win 上 ln -s 常退化成复制或直接失败）
+cache_link_ok=0
+if [ -L "$CACHE_B/nt_data/Pic" ]; then
+    cache_link_ok=1
+    cache_has_target "$targets" 'qq|skip|Pic|'
+    report "$?" '顶层目录是符号链接时标为 skip，不进入'
+fi
+
+[ "$(cache_pending_stat "$CACHE_A/nt_data/Pic" days 7)" = '8|2' ] &&
+    [ "$(cache_pending_stat "$CACHE_A/nt_data/Pic" days 30)" = '8|2' ] &&
+    [ "$(cache_pending_stat "$CACHE_A/nt_data/Pic" all 0)" = '8|2' ]
+report "$?" '按 mtime 统计待删：7/30 天只算旧文件，全部口径算全部'
+
+# 校验类用例只跑一次：保留天数 0 同时覆盖「非数字」之外的边界分支
+mkdir -p "$CACHE_MIN/qq/nt_qq_0123456789abcdef0123456789abcdef/nt_data/Pic"
+printf 'xxxx' > "$CACHE_MIN/qq/nt_qq_0123456789abcdef0123456789abcdef/nt_data/Pic/a.jpg"
+CACHE_MIN_PIC="$CACHE_MIN/qq/nt_qq_0123456789abcdef0123456789abcdef/nt_data/Pic/a.jpg"
+QQ_DATA_ROOT="$CACHE_MIN/qq"
+NAPCAT_BASE_DIR="$CACHE_MIN/napcat"
+printf '3\n0\n' | clean_napcat_cache > "$WORK/cache-bad.out" 2>&1
+rc=$?
+cache_bad_out=$(< "$WORK/cache-bad.out")
+[ "$rc" -eq 1 ] && [ -e "$CACHE_MIN_PIC" ] &&
+    case "$cache_bad_out" in *天数超出范围*) true ;; *) false ;; esac
+report "$?" '自定义保留天数 0 被拒、返回非零且不删任何文件'
+QQ_DATA_ROOT="$CACHE_FIXTURE/qq"
+NAPCAT_BASE_DIR="$CACHE_FIXTURE/napcat"
+
+printf '1\nn\ny\ny\n\n' | clean_napcat_cache > "$WORK/cache-clean.out" 2>&1
+rc=$?
+clean_out=$(< "$WORK/cache-clean.out")
+[ "$rc" -eq 0 ] && case "$clean_out" in *未清干净*) false ;; *) true ;; esac
+report "$?" '清理 7 天且不含 File 时如实返回 0，输出无「未清干净」'
+
+[ ! -e "$CACHE_A/nt_data/Pic/2026-01/Ori/a.jpg" ] &&
+    [ ! -e "$CACHE_A/nt_data/Pic/2026-01/Thumb/a.thumb" ] &&
+    [ ! -d "$CACHE_A/nt_data/Pic/2026-01" ] &&
+    [ -d "$CACHE_A/nt_data/Pic" ]
+report "$?" '删旧文件、删空的日期目录、保留 Pic 目录自身（Thumb 一并覆盖）'
+
+[ -e "$CACHE_A/nt_data/File/Ori/recv.zip" ] &&
+    [ -e "$CACHE_A/nt_data/Video/big.mp4" ]
+report "$?" 'File 回答 n 后保留；未超保留期的视频保留'
+
+[ ! -e "$CACHE_A/nt_data/log/new.log" ] &&
+    [ ! -e "$CACHE_A/nt_data/log/old.log" ] &&
+    [ ! -e "$CACHE_FIXTURE/qq/NapCat/temp/nt.tmp" ] &&
+    [ ! -e "$CACHE_FIXTURE/napcat/logs/a.log" ]
+report "$?" 'log / NapCat 的 temp 与 logs 一律整清'
+
+if [ "$cache_link_ok" -eq 1 ]; then
+    [ -e "$CACHE_FIXTURE/elsewhere/pic/keep.jpg" ] && [ -L "$CACHE_B/nt_data/Pic" ]
+    report "$?" '符号链接未被跟随删除'
+fi
+
+CACHE_TMP_QQ="$QQ_DATA_ROOT"
+QQ_DATA_ROOT="$CACHE_FIXTURE/nonexistent"
+NAPCAT_BASE_DIR="$CACHE_FIXTURE/nonexistent2"
+printf '\n' | clean_napcat_cache > "$WORK/cache-none.out" 2>&1
+rc=$?
+cache_none_out=$(< "$WORK/cache-none.out")
+[ "$rc" -eq 0 ] && case "$cache_none_out" in *未找到可清理的目录*) true ;; *) false ;; esac
+report "$?" '无目录时提示未找到并按幂等成功返回'
+QQ_DATA_ROOT="$CACHE_TMP_QQ"
+
+fi # cache 组
 
 printf 'TOTAL: pass=%s fail=%s\n' "$pass" "$fail"
 printf 'TOTAL: pass=%s fail=%s\n' "$pass" "$fail" >> "$LOG_FILE" || exit 2
