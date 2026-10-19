@@ -1412,7 +1412,7 @@ function parseTomlString(line) {
 }
 
 function readConfigFields() {
-  const result = { model: "", model_provider: "", base_url: "", OPENAI_API_KEY: "" };
+  const result = { model: "", model_provider: "", base_url: "", OPENAI_API_KEY: "", CONFIG_BEARER_TOKEN: "" };
   if (!fs.existsSync(configFile)) return result;
   const providerBaseUrls = {};
   const providerTokens = {};
@@ -1436,8 +1436,11 @@ function readConfigFields() {
   }
   const providerId = result.model_provider || "custom";
   result.base_url = providerBaseUrls[providerId] || providerBaseUrls.custom || "";
+  // 段内 token 单独留一个字段：自检要区分「Key 来自 config.toml」还是「来自 auth.json」，
+  // 只看 OPENAI_API_KEY（含 auth.json 兜底）会谎报来源。
+  result.CONFIG_BEARER_TOKEN = providerTokens[providerId] || "";
   // 第三方模式下 Key 在段内 token 里（auth.json 已被移除），这里优先读它。
-  result.OPENAI_API_KEY = providerTokens[providerId] || "";
+  result.OPENAI_API_KEY = result.CONFIG_BEARER_TOKEN;
   return result;
 }
 
@@ -1881,6 +1884,20 @@ function hasOfficialAccountMaterial(auth) {
   }
 }
 
+// 只有「ChatGPT 登录态」才值得暂存。
+// ⚠️ 不要用 hasOfficialAccountMaterial 做这个判断：它把 apikey 也算「官方材料」，会把
+// `{auth_mode:"apikey", OPENAI_API_KEY:"…"}` 也搬进登录暂存；之后切回官方、auth.json 不在时
+// 被恢复出来，等于用一份旧的中转 Key 覆盖用户新的登录态。
+// 另外 resolveAuthMode 对空对象会回退成 "chatgpt"，所以必须要求「确实有登录材料」。
+function isChatgptLogin(auth) {
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return false;
+  const mode = resolveAuthMode(auth);
+  if (mode !== "chatgpt" && mode !== "chatgptAuthTokens") return false;
+  const tokens = auth.tokens;
+  if (tokens && typeof tokens === "object" && !Array.isArray(tokens) && Object.keys(tokens).length > 0) return true;
+  return false;
+}
+
 // ---- 路由判定与自动收敛（对照 cc-switch） ----
 //
 // cc-switch 的官方预设是 `auth: {}` + `config: ""`（src/config/codexProviderPresets.ts 里
@@ -2289,8 +2306,9 @@ try {
     if (!section) {
       if (lines.length && lines[lines.length - 1].trim() !== "") lines.push("");
       lines.push(`[${sectionName}]`, `name = ${tomlString(providerId)}`, `base_url = ${tomlString(writeBaseUrl)}`);
-      if (apiKey) lines.push(`experimental_bearer_token = ${tomlString(apiKey)}`);
-      lines.push("requires_openai_auth = false", 'wire_api = "responses"');
+      // 只有确实写了 token 才需要显式关掉 OpenAI 认证；没有 token 时 Codex 默认就是 false。
+      if (apiKey) lines.push(`experimental_bearer_token = ${tomlString(apiKey)}`, "requires_openai_auth = false");
+      lines.push('wire_api = "responses"');
     } else {
       let baseLine = -1;
       for (let i = section.start + 1; i < section.end; i += 1) {
@@ -2368,7 +2386,7 @@ try {
         } catch {
           liveAuth = null;
         }
-        if (liveAuth && typeof liveAuth === "object" && !Array.isArray(liveAuth) && hasOfficialAccountMaterial(liveAuth)) {
+        if (liveAuth && isChatgptLogin(liveAuth)) {
           writeLoginStash(liveAuth);
           console.error(`提示: 已把官方登录态暂存到 ${loginStashFile}（切回官方时会自动放回）。`);
         }
@@ -2378,11 +2396,13 @@ try {
     } else if (decision.target === "official") {
       if (apiKey) {
         // 官方 API Key：登录态先暂存，再整份写成 apikey 模式（混合 tokens + Key 会让 Codex 继续走 OAuth）。
-        if (officialLogin) writeLoginStash(auth);
+        // 只有 ChatGPT 登录态才值得暂存——apikey 的 auth 本来就要被这次写入覆盖。
+        if (isChatgptLogin(auth)) writeLoginStash(auth);
         writeAuthJson({ auth_mode: "apikey", OPENAI_API_KEY: apiKey });
         authAction = "apikey";
       } else {
-        authAction = restoreLoginStash();
+        // 只在 auth.json 不存在时恢复；暂存损坏只报错、不中止（config.toml 已落盘）。
+        restoreLoginStash();
       }
     }
   }
@@ -2572,48 +2592,75 @@ for (let i = section.start + 1; i < section.end; i += 1) {
   if (keyOf(lines[i]) === "env_key") envKeyIndex = i;
   if (keyOf(lines[i]) === "experimental_bearer_token") tokenIndex = i;
 }
-if (envKeyIndex < 0) process.exit(0);   // 没有 env_key，不需要迁移
+if (envKeyIndex < 0 && tokenIndex < 0) process.exit(0);   // 这条路由没有内联凭据，什么都别动
 
-let key = providedKey;
-if (!key && tokenIndex >= 0) key = parseString(lines[tokenIndex]);
-if (!key && fs.existsSync(authFile)) {
-  try {
-    const auth = JSON.parse(fs.readFileSync(authFile, "utf8") || "{}");
-    if (auth && typeof auth === "object" && typeof auth.OPENAI_API_KEY === "string") key = auth.OPENAI_API_KEY;
-  } catch {}
-}
-if (!key) {
-  console.error(`警告: [model_providers.${providerId}] 仍使用 env_key="${parseString(lines[envKeyIndex])}"，`);
-  console.error("      但本机没有可迁移的 Key。Codex 只从环境变量读它，请 export 该变量，");
-  console.error("      或重新运行菜单 1 填一次 OPENAI_API_KEY（会把 Key 写进段内 token）。");
-  process.exit(0);
+let key = "";
+let migrated = false;
+if (envKeyIndex >= 0) {
+  key = providedKey;
+  if (!key && tokenIndex >= 0) key = parseString(lines[tokenIndex]);
+  if (!key && fs.existsSync(authFile)) {
+    try {
+      const auth = JSON.parse(fs.readFileSync(authFile, "utf8") || "{}");
+      if (auth && typeof auth === "object" && typeof auth.OPENAI_API_KEY === "string") key = auth.OPENAI_API_KEY;
+    } catch {}
+  }
+  if (!key) {
+    console.error(`警告: [model_providers.${providerId}] 仍使用 env_key="${parseString(lines[envKeyIndex])}"，`);
+    console.error("      但本机没有可迁移的 Key。Codex 只从环境变量读它，请 export 该变量，");
+    console.error("      或重新运行菜单 1 填一次 OPENAI_API_KEY（会把 Key 写进段内 token）。");
+    process.exit(0);   // 不删 auth.json：env_key 还指着环境变量，删了只会更没凭据
+  }
+  if (tokenIndex >= 0) {
+    lines[tokenIndex] = `experimental_bearer_token = ${tomlString(key)}`;
+    // ⚠️ env_key 的优先级高于 experimental_bearer_token：留着它，刚写的 token 就是死字段。
+    lines.splice(envKeyIndex, 1);
+  } else {
+    lines[envKeyIndex] = `experimental_bearer_token = ${tomlString(key)}`;
+  }
+  migrated = true;
 }
 
-if (tokenIndex >= 0) lines[tokenIndex] = `experimental_bearer_token = ${tomlString(key)}`;
-else lines[envKeyIndex] = `experimental_bearer_token = ${tomlString(key)}`;
+// 重新定位（上面可能删过一行），确认这条路由**最终**有内联 token。
+const finalSection = sectionRange(lines, `model_providers.${providerId}`) || sectionRange(lines, `model_providers.${tomlString(providerId)}`);
+let finalTokenIndex = -1;
+let finalRequiresIndex = -1;
+for (let i = finalSection.start + 1; i < finalSection.end; i += 1) {
+  if (keyOf(lines[i]) === "experimental_bearer_token") finalTokenIndex = i;
+  if (keyOf(lines[i]) === "requires_openai_auth") finalRequiresIndex = i;
+}
+if (finalTokenIndex < 0) process.exit(0);   // 没有内联凭据（例如只靠 auth.json 的旧配置），保持原样
 
 // requires_openai_auth 必须显式为 false：否则残留的 true 会让 Codex 拿 ChatGPT 登录去请求第三方端点。
-const after = sectionRange(lines, `model_providers.${providerId}`) || sectionRange(lines, `model_providers.${tomlString(providerId)}`);
-let requiresIndex = -1;
-for (let i = after.start + 1; i < after.end; i += 1) if (keyOf(lines[i]) === "requires_openai_auth") requiresIndex = i;
-if (requiresIndex >= 0) lines[requiresIndex] = "requires_openai_auth = false";
-else lines.splice(after.start + 1, 0, "requires_openai_auth = false");
+if (finalRequiresIndex >= 0) lines[finalRequiresIndex] = "requires_openai_auth = false";
+else lines.splice(finalSection.start + 1, 0, "requires_openai_auth = false");
 
-fs.writeFileSync(configFile, `${lines.join("\n")}\n`, { mode: 0o600 });
-try { fs.chmodSync(configFile, 0o600); } catch {}
-console.error(`提示: 已把 [model_providers.${providerId}] 的 env_key 迁移成段内 experimental_bearer_token。`);
+const nextText = `${lines.join("\n")}\n`;
+if (nextText !== fs.readFileSync(configFile, "utf8")) {
+  fs.writeFileSync(configFile, nextText, { mode: 0o600 });
+  try { fs.chmodSync(configFile, 0o600); } catch {}
+}
+if (migrated) {
+  console.error(`提示: 已把 [model_providers.${providerId}] 的 env_key 迁移成段内 experimental_bearer_token。`);
+}
 
-// 第三方路由旁边不再留 auth.json：有官方登录态就先暂存。
+// 第三方路由旁边不再留 auth.json。只暂存 **ChatGPT 登录态**；
+// 纯 apikey 的 auth 不暂存（它的 Key 就是段内 token 那一份，留着只会让恢复时覆盖新登录）。
+// ⚠️ 这里是 writer 里 isChatgptLogin / writeLoginStash 的**第二份实现**（两个 node 进程无法共享函数）：
+//    判定条件（有 tokens 且 mode 为空/chatgpt/chatgptAuthTokens）与暂存结构（version/savedAt/auth）
+//    必须与那边同步，改一处要改两处。
 if (fs.existsSync(authFile)) {
   let liveAuth = null;
   try {
     const rawAuth = fs.readFileSync(authFile, "utf8");
     liveAuth = rawAuth.trim() ? JSON.parse(rawAuth) : null;
   } catch { liveAuth = null; }
-  const isLogin = liveAuth && typeof liveAuth === "object" && !Array.isArray(liveAuth)
-    && (String(liveAuth.auth_mode || "").toLowerCase() === "chatgpt"
-      || String(liveAuth.auth_mode || "").toLowerCase() === "chatgptauthtokens"
-      || (liveAuth.tokens && typeof liveAuth.tokens === "object" && Object.keys(liveAuth.tokens).length > 0));
+  const mode = liveAuth && typeof liveAuth === "object" && !Array.isArray(liveAuth)
+    ? String(liveAuth.auth_mode || "").toLowerCase()
+    : "";
+  const hasTokens = liveAuth && liveAuth.tokens && typeof liveAuth.tokens === "object"
+    && !Array.isArray(liveAuth.tokens) && Object.keys(liveAuth.tokens).length > 0;
+  const isLogin = hasTokens && (mode === "" || mode === "chatgpt" || mode === "chatgptauthtokens");
   if (isLogin) {
     fs.mkdirSync(path.dirname(loginStashFile), { recursive: true });
     fs.writeFileSync(loginStashFile, `${JSON.stringify({ version: 1, savedAt: new Date().toISOString(), auth: liveAuth }, null, 2)}\n`, { mode: 0o600 });
@@ -2658,16 +2705,29 @@ hapi_ask_codex_context_window() {
 # 找不到就明确报红，而不是只打一句「配置已写入」（2026-10-19 的 Missing environment variable
 # 事故里，脚本打的就是「已写入」，用户完全无法判断 Key 有没有生效）。
 hapi_report_codex_credential() {
-    local key provider_id
+    local key provider_id config_key source_label
 
     key=$(hapi_codex_current_value "OPENAI_API_KEY")
     provider_id=$(hapi_codex_current_value "model_provider")
+    # 单独取一次「段内 token」，用来判定这把 Key 到底是从哪读到的——
+    # 之前只看 provider_id 是否存在，auth.json 兜底时也会谎报「来自 config.toml」。
+    config_key=$(hapi_codex_current_value "CONFIG_BEARER_TOKEN")
 
     if [ -z "${key}" ]; then
+        # 没有 Key 不一定是错：官方登录态本来就只有 auth.json，没有 OPENAI_API_KEY。
+        if [ -z "${provider_id}" ] && [ -f "${HOME}/.codex/auth.json" ]; then
+            echo -e "${yellow}自检: 未使用 API Key，走 auth.json 的官方登录态。${background}"
+            return 0
+        fi
         echo -e "${red}自检: 没有读到任何 OPENAI_API_KEY，Codex 启动后会拿不到凭据。${background}"
         return 1
     fi
-    echo -e "${green}自检: Codex 会使用以下 Key（来自 $( [ -n "${provider_id}" ] && printf 'config.toml 的 [model_providers.%s]' "${provider_id}" || printf 'auth.json' )）${background}"
+    if [ -n "${config_key}" ] && [ "${config_key}" = "${key}" ]; then
+        source_label="config.toml 的 [model_providers.${provider_id}]"
+    else
+        source_label="auth.json"
+    fi
+    echo -e "${green}自检: Codex 会使用以下 Key（来自 ${source_label}）${background}"
     echo "      ${key}"
     echo -e "${yellow}      长度 ${#key}${background}"
 }
@@ -3252,6 +3312,7 @@ NODE
     fi
     chmod 600 "${store_file}" 2>/dev/null
     echo -e "${yellow}新配置已保存，但未切换当前 Codex 配置。${background}"
+    echo -e "${yellow}      Key 已写进该配置的 [model_providers.custom].experimental_bearer_token（长度 ${#api_key}）。${background}"
 }
 
 # 把配置库里某个 profile 的 auth 抽成 JSON 文件，供 hapi_check_codex_auth_file 复用。
@@ -3382,13 +3443,18 @@ NODE
         return "${switch_status}"
     fi
     chmod 600 "${auth_file}" "${config_file}" 2>/dev/null
-    echo -e "${green}Codex 配置已切换: ${auth_file} / ${config_file}${background}"
-
     # 切过来的老配置可能还带着 env_key（Codex 只认环境变量，auth.json 不参与），
     # 在这里顺手迁移成段内 token；顺便把第三方模式下的 auth.json 移除/暂存。
+    # ⚠️ 先迁移、后报「已切换」：迁移会改 config.toml 并可能移除 auth.json，
+    #    先打绿字再失败会让人以为切换成功、只是迁移失手。
     if ! hapi_migrate_codex_provider_credential; then
-        echo -e "${red}迁移 [model_providers.*] 的旧 env_key 失败，请检查 ${config_file}。${background}"
+        echo -e "${red}配置已复制到 ${config_file}，但迁移 provider 凭据失败（auth.json 未按第三方模式处理）。${background}"
         return 1
+    fi
+    if [ -f "${auth_file}" ]; then
+        echo -e "${green}Codex 配置已切换: ${auth_file} / ${config_file}${background}"
+    else
+        echo -e "${green}Codex 配置已切换: ${config_file}（第三方模式，auth.json 已移除）${background}"
     fi
 
     # 切过来的配置也要收敛路由：旧配置可能是「官方登录 + 残留第三方 model_provider」，
@@ -3397,6 +3463,9 @@ NODE
         echo -e "${red}Codex 路由同步失败：当前路由可能与该配置不匹配，请检查 ${config_file}。${background}"
         return 1
     fi
+
+    # 与菜单 1 同一套自检：回读 Codex 实际会用的 Key（第三方配置在段内 token，官方登录走 auth.json）。
+    hapi_report_codex_credential || true
 }
 
 hapi_delete_codex_profile() {
@@ -3448,8 +3517,6 @@ NODE
     chmod 600 "${store_file}" 2>/dev/null
     echo -e "${green}配置已删除。${background}"
 }
-
-# 判断编辑器是否兼容 vim 的 -c 参数；vi 在多数发行版是 vim 的软链，但不能直接假定
 
 # 校验待写入 / 待写回的 Codex auth.json。
 # 分级原则（对齐 Codex 的 AuthDotJson 反序列化约束 + cc-switch 的判定函数）：
@@ -3799,12 +3866,10 @@ if (auth) {
 process.exit(errors.length > 0 ? 1 : 0);
 NODE
 }
-# 把已校验的内容规范化（去 BOM、统一两空格缩进）后写入目标文件
 
 # 只在正常返回路径删临时文件是不够的：Ctrl+C / 断线 / kill 都可能留下凭据副本，
 # 因此敏感临时文件统一用 mktemp 生成不可预测路径，并挂上退出清理
-# （见 hapi_edit_codex_official_auth / hapi_create_claude_profile /
-#   hapi_write_claude_settings_file 的 NUL 分隔取值文件）。
+# （hapi_create_claude_profile / hapi_write_claude_settings_file 的 NUL 分隔取值文件）。
 HAPI_CODEX_AUTH_TMP=""
 HAPI_CLAUDE_SETTINGS_TMP=""
 HAPI_CLAUDE_VALUES_TMP=""
@@ -3834,9 +3899,6 @@ hapi_install_sensitive_tmp_traps() {
     trap 'hapi_cleanup_sensitive_tmp_and_exit 143' TERM
     trap 'hapi_cleanup_sensitive_tmp_and_exit 129' HUP
 }
-
-# 路由状态报告。路由的自动收敛由 hapi_sync_codex_route / 写入器完成，这里只报告最终状态：
-# 还能留下第三方 model_provider 的情形只有「保留 id」「脚本无法判断的登录模式」「本轮判定为保持不变」。
 
 hapi_codex_config_menu() {
     local num

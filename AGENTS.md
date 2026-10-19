@@ -695,17 +695,28 @@ Codex 对自定义 provider 只认三种凭据来源（官方 config reference�
 - 现在第三方段一律写：
   `experimental_bearer_token = "<key>"` + `requires_openai_auth = false`，并**删掉已有的 `env_key` 行**
   （原位替换，保持字段顺序）。段内有 token 时必须显式 `false`：残留的 `true` 会让 ChatGPT 的 token 被发到第三方端点。
+  ⚠️ **迁移时必须先删 `env_key` 再写 token**：`env_key` 的优先级高于 `experimental_bearer_token`，
+  两者并存时刚写的 token 是死字段，Codex 仍旧报 Missing environment variable（2026-10-19 评审抓到，
+  I15-A 用「env_key 与 token 并存」的夹具钉住）。
 - Key 来源优先级（迁移时）：调用方传入 > 段内已有 token > auth.json 的 `OPENAI_API_KEY`。
-  三者都没有 → 只警告，**不删 `env_key`**（那可能是用户真在用的环境变量）。
-- `hapi_codex_current_value "OPENAI_API_KEY"` 读取顺序也是「段内 token 优先，auth.json 兜底」，
-  否则第三方模式下（auth.json 已移除）菜单 1 的「回车保留当前值」会变成空。
+  三者都没有 → 只警告，**不删 `env_key`**（那可能是用户真在用的环境变量），也**不动 auth.json**。
+- `hapi_codex_current_value` 有两个相关字段：`OPENAI_API_KEY`（段内 token 优先、auth.json 兜底）与
+  `CONFIG_BEARER_TOKEN`（只读段内 token）。自检用它区分「Key 到底从哪来」，**不要用 provider_id 是否存在来猜**。
 - **第三方模式下 auth.json 必须不存在**（对齐 cc-switch `preserve_codex_official_auth_on_switch = false`）：
   - 写盘完成后按「当前 `model_provider` 指向自定义段 + 段内有 token」判定第三方模式；
-  - 现有 auth.json 若带登录材料（`chatgpt` / `chatgptAuthTokens` / 有 `tokens`），整份存进
-    `~/.codex/hapi_login_stash.json`（0600）后再删；纯 apikey 的 auth 不暂存（Key 已在 config.toml）；
+  - 现有 auth.json 若是 **ChatGPT 登录态**（有 `tokens`，且 mode 为空/`chatgpt`/`chatgptAuthTokens`），整份存进
+    `~/.codex/hapi_login_stash.json`（0600）后再删；纯 apikey 的 auth **不暂存**（Key 已在 config.toml）。
+    ⚠️ 判定要用 `isChatgptLogin`，**不要用 `hasOfficialAccountMaterial`**——后者把 apikey 也算「官方材料」，
+    会把中转 Key 搬进登录暂存，之后切回官方时覆盖用户新绑定的登录态（D 组有反例断言）。
+  - 菜单 4 的迁移函数（`hapi_migrate_codex_provider_credential`）也有同一套「暂存 + 移除」逻辑：
+    它是同一规则的第二份实现（两个 node 进程无法共享函数），改一处要同步另一处。
+    并且它**不能**在「没有 env_key」时提前 exit——新式配置（只有 token）同样要移除 auth.json（I15-B 钉住）。
   - 切回官方（官方端点 + 没填 Key）时，**只在 auth.json 不存在时**把暂存放回，避免覆盖 cc-switch 刚绑定的新登录。
 - **判定目标的一处补充**：没有登录材料、没有新 Key、但 `base_url` 明确是官方端点 → 判 `official`
   （旧逻辑判 `legacy`，会建一个没有凭据的 custom 段，也就永远走不到「恢复登录态」）。
+- **写入后自检**：菜单 1 与菜单 4 都会调用 `hapi_report_codex_credential`，回读并打印
+  「Codex 会用的 Key（来源 + 长度）」。读不到 Key 且不是官方登录态时报红——这正是当年
+  「明明填了 Key 却报 Missing environment variable」时最缺的一条反馈。
 - 菜单 7（写入/编辑官方 auth.json）**已移除**：官方登录改由 cc-switch 的授权中心绑定。
   不要把编辑器流程再加回来——本脚本只负责「第三方直连 + 官方登录态暂存」，不负责登录本身。
 

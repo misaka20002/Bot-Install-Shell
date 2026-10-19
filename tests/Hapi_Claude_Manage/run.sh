@@ -487,11 +487,13 @@ log "==== harness 启动：ONLY='${ONLY}' 夹具=${FX_COUNT} ===="
 if group_on C; then
   head_ "C) auth_mode 解析优先级与两级校验"
   auth_check ok_absent_mode;  expect_rc "无 auth_mode（隐式 ChatGPT）按官方登录校验" 0 "$?"
+  auth_check c_partial_tokens official; expect_rc "official 级要求三件套齐备" 1 "$?"
   auth_check c_partial_tokens loadable; expect_rc "loadable 级也拒绝缺必需字段的 tokens" 1 "$?"
   expect_grep "缺字段说明是 TokenData 必需字段" "${WORK_DIR}/check.out" "都是必需字段"
   auth_check c_all_blank_tokens loadable; expect_rc "loadable 级拦住全空凭据" 1 "$?"
   auth_check c_apikey_ok loadable;    expect_rc "loadable 级放行 apikey 配置" 0 "$?"
   auth_check c_apikey_blank loadable; expect_rc "loadable 级拦住空 Key" 1 "$?"
+  auth_check c_apikey_blank;          expect_rc "official 级也拦住空 Key" 1 "$?"
   auth_check c_apikey_blank_mode;     expect_rc "auth_mode=apikey 空 Key 报错" 1 "$?"
   auth_check c_bad_date_number loadable; expect_rc "loadable 级同样拦类型错误" 1 "$?"
   auth_check c_unknown_mode;  expect_rc "拒绝无法识别的 auth_mode" 1 "$?"
@@ -585,6 +587,14 @@ model_provider = \"${reserved}\"
   expect_count "第三方模式下 auth.json 被移除" <(ls -A "${HOME}/.codex" 2>/dev/null) '^auth\.json$' 0
   expect_count "官方登录态被暂存（切回官方时会放回）" "$(hapi_codex_login_stash_file)" '"refresh_token"' 1
   expect_grep "提示 Key 已随第三方路由写进 config.toml" "${WORK_DIR}/d6.log" "experimental_bearer_token"
+
+  # 纯 apikey 的 auth 不该进登录暂存：它的 Key 已经写进 config.toml 的段内 token，
+  # 暂存它只会在「切回官方」时用旧的中转 Key 覆盖用户新绑定的登录态。
+  rm -f "$(hapi_codex_route_stash_file)" "$(hapi_codex_login_stash_file)"
+  seed_live c_apikey_ok
+  hapi_write_codex_current_config "sk-d6b" "https://api.example.com/v1" "gpt-5.5" > "${WORK_DIR}/d6b.log" 2>&1
+  expect_count "纯 apikey 的 auth 不写入登录暂存" <(ls -A "${HOME}/.codex" 2>/dev/null) '^hapi_login_stash\.json$' 0
+  expect_count "第三方模式下 auth.json 仍被移除" <(ls -A "${HOME}/.codex" 2>/dev/null) '^auth\.json$' 0
 
   # 官方登录 + 残留第三方路由 + 已有 token：路由整段剥离并暂存，token 不留在 config.toml
   seed_live ok_official 'model = "gpt-5.5"
@@ -1021,6 +1031,48 @@ query_params = { foo = "bar" }
   hapi_show_codex_config > "${WORK_DIR}/i14d.log" 2>&1
   expect_grep "对照：合法 stash 正常显示 provider id" "${WORK_DIR}/i14d.log" "provider id: myrelay"
   expect_count "对照：合法 stash 不报格式异常" "${WORK_DIR}/i14d.log" "格式异常" 0
+fi
+
+# ============================================================
+# I15) 菜单 4 的凭据迁移（hapi_migrate_codex_provider_credential）
+#   两个回归点都来自 2026-10-19 的 code-review：
+#   ① env_key 与 token 并存时，旧实现只改 token、不删 env_key —— env_key 优先级更高，token 等于死字段；
+#   ② 没有 env_key 时旧实现直接 exit，跳过了「第三方模式移除 auth.json」，切换后登录态会残留在 live 里。
+# ============================================================
+if group_on I; then
+  head_ "I15) 菜单 4 凭据迁移：env_key 必须删掉 / 无 env_key 也要处理 auth.json"
+  rm -f "$(hapi_codex_route_stash_file)" "$(hapi_codex_login_stash_file)"
+  seed_live ok_official 'model = "gpt-5.5"
+model_provider = "myrelay"
+
+[model_providers.myrelay]
+base_url = "https://relay.example.com/v1"
+env_key = "OPENAI_API_KEY"
+experimental_bearer_token = "sk-both"
+'
+  hapi_migrate_codex_provider_credential > "${WORK_DIR}/i15a.log" 2>&1
+  expect_rc "A 同时有 env_key 与 token 时迁移成功" 0 "$?"
+  expect_count "A env_key 已被删除（否则 token 无效）" "${HOME}/.codex/config.toml" "env_key" 0
+  expect_count "A 保留原有的段内 token" "${HOME}/.codex/config.toml" '^experimental_bearer_token = "sk-both"$' 1
+  expect_count "A 补上 requires_openai_auth = false" "${HOME}/.codex/config.toml" "^requires_openai_auth = false$" 1
+  expect_count "A 第三方模式下 auth.json 被移除" <(ls -A "${HOME}/.codex" 2>/dev/null) '^auth\.json$' 0
+  expect_count "A 登录态被暂存" "$(hapi_codex_login_stash_file)" '"refresh_token"' 1
+
+  # B：新式配置（只有 token、没有 env_key）——旧实现在这里提前 exit，auth.json 会留下来
+  rm -f "$(hapi_codex_login_stash_file)"
+  seed_live ok_official 'model = "gpt-5.5"
+model_provider = "myrelay"
+
+[model_providers.myrelay]
+base_url = "https://relay.example.com/v1"
+experimental_bearer_token = "sk-only-token"
+requires_openai_auth = false
+'
+  hapi_migrate_codex_provider_credential > "${WORK_DIR}/i15b.log" 2>&1
+  expect_rc "B 只有 token 时迁移成功（无 env_key）" 0 "$?"
+  expect_count "B 没有 env_key 也不留 auth.json" <(ls -A "${HOME}/.codex" 2>/dev/null) '^auth\.json$' 0
+  expect_count "B 登录态仍然被暂存" "$(hapi_codex_login_stash_file)" '"refresh_token"' 1
+  expect_count "B config.toml 的 token 未被改动" "${HOME}/.codex/config.toml" '^experimental_bearer_token = "sk-only-token"$' 1
 fi
 
 # ============================================================
