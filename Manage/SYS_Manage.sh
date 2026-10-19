@@ -450,10 +450,150 @@ install_fonts() {
     esac
 }
 
+cleanup_run() {
+    local label="$1"
+    shift
+    echo "${label}..."
+    if ! "$@"; then
+        echo "${label}失败"
+        cleanup_failed=1
+        return 1
+    fi
+}
+
+# 编译版 Hapi 将辅助资源展开到 HAPI_HOME/runtime/<版本>。
+cleanup_hapi_candidates() {
+    command -v node >/dev/null 2>&1 && command -v hapi >/dev/null 2>&1 || return 1
+    local version
+    version=$(timeout 15 hapi --version) || return 1
+    node - "$version" <<'NODE'
+const fs = require('fs'), path = require('path');
+const match = process.argv[2].trim().match(/^(?:hapi(?: version)?[:：]?\s+)?v?(\d+\.\d+\.\d+)$/i);
+if (!match) process.exit(1);
+const current = match[1];
+const home = (process.env.HAPI_HOME || path.join(process.env.HOME, '.hapi')).replace(/^~/, process.env.HOME);
+const root = path.join(home, 'runtime');
+try {
+    if (fs.realpathSync(root) !== root || !fs.statSync(path.join(root, current)).isDirectory()) process.exit(1);
+    for (const pid of fs.readdirSync('/proc').filter(x => /^\d+$/.test(x))) {
+        if (Number(pid) === process.pid) continue;
+        try {
+            const base = '/proc/' + pid;
+            const refs = [fs.readlinkSync(base + '/exe'), fs.readlinkSync(base + '/cwd'), ...fs.readFileSync(base + '/cmdline', 'utf8').split('\0')];
+            if (refs.some(x => x.startsWith(root + '/') || /(?:^|\/)hapi(?:$|[./-])/.test(x))) process.exit(1);
+        } catch (e) {
+            if (!['ENOENT', 'ESRCH'].includes(e.code)) process.exit(1);
+        }
+    }
+    const older = name => {
+        const a = name.split('.').map(Number), b = current.split('.').map(Number);
+        for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i];
+        return false;
+    };
+    const candidates = [];
+    for (const name of fs.readdirSync(root)) {
+        if (!/^\d+\.\d+\.\d+$/.test(name) || !older(name)) continue;
+        const dir = path.join(root, name);
+        if (fs.lstatSync(dir).isSymbolicLink() || !fs.statSync(dir).isDirectory()) continue;
+        if (fs.readFileSync(path.join(dir, '.runtime-version'), 'utf8').trim() !== name) continue;
+        candidates.push(dir);
+    }
+    for (const dir of candidates.sort()) console.log(dir);
+} catch { process.exit(1); }
+NODE
+}
+
+cleanup_confirm_dirs() {
+    local answer dir
+    [ "$#" -gt 0 ] || return 0
+    du -sh -- "$@" || return 1
+    read -rp "删除以上目录？[y/N]: " answer
+    case "$answer" in y|Y) ;; *) return 0 ;; esac
+    for dir in "$@"; do
+        [ -d "$dir" ] && [ ! -L "$dir" ] || continue
+        cleanup_run "清理 $dir" rm -rf --one-file-system -- "$dir" || return 1
+    done
+}
+
+cleanup_dev_environment() {
+    local cleanup_failed=0 before after answer dir candidates checked
+    local -a dirs=() temp_dirs=()
+    before=$(df -B1 --output=avail / | tail -n 1)
+    echo "清理包缓存、APT 索引与日志；Hapi、临时目录和 Docker 另行确认。"
+    read -rp "开始清理？[y/N]: " answer
+    case "$answer" in y|Y) ;; *) return 0 ;; esac
+    if command -v pnpm >/dev/null 2>&1; then
+        cleanup_run "清理 pnpm 孤儿包" pnpm store prune || :
+    fi
+    if command -v npm >/dev/null 2>&1; then
+        cleanup_run "清理 npm 缓存" npm cache clean --force || :
+    fi
+    for dir in "$HOME/.npm/_npx" "$HOME/.cache/pip" "$HOME/.cache/pnpm" "$HOME/.cache/node-gyp"; do
+        [ -d "$dir" ] && [ ! -L "$dir" ] || continue
+        cleanup_run "清理 $dir" rm -rf --one-file-system -- "$dir" || :
+    done
+    if command -v apt-get >/dev/null 2>&1; then
+        cleanup_run "清理 APT 缓存" apt-get clean || :
+        # distclean 由 APT 处理锁；旧版不支持时如实报错，不绕过锁删除。
+        cleanup_run "清理 APT 索引" apt-get distclean || :
+    fi
+    if command -v journalctl >/dev/null 2>&1; then
+        cleanup_run "轮转 journal" journalctl --rotate || :
+        cleanup_run "压缩 journal 至 50M" journalctl --vacuum-size=50M || :
+    fi
+    if candidates=$(cleanup_hapi_candidates); then
+        while IFS= read -r dir; do [ -n "$dir" ] && dirs+=("$dir"); done <<< "$candidates"
+        if [ "${#dirs[@]}" -gt 0 ]; then
+            echo "可删除的 Hapi 旧运行时："
+            if du -sh -- "${dirs[@]}"; then
+                read -rp "删除以上旧版本？[y/N]: " answer
+                case "$answer" in y|Y)
+                    if checked=$(cleanup_hapi_candidates) && [ "$checked" = "$candidates" ]; then
+                        for dir in "${dirs[@]}"; do cleanup_run "清理 $dir" rm -rf --one-file-system -- "$dir" || :; done
+                    else
+                        echo "Hapi 状态已变化，跳过旧版本清理。"
+                    fi ;;
+                esac
+            else
+                cleanup_failed=1
+            fi
+        else
+            echo "没有可清理的 Hapi 旧版本。"
+        fi
+    else
+        echo "Hapi 正在运行、未安装或版本/目录无法确认，跳过旧版本清理。"
+    fi
+    candidates=$(find /tmp -mindepth 1 -maxdepth 1 -type d -mtime +7 \( -name html-tool-chromium -o -name hapi-src -o -name 'clash-review.*' -o -name sf-douyin-test-venv -o -name 'at-graph-*' \) -print) || cleanup_failed=1
+    while IFS= read -r dir; do [ -n "$dir" ] && temp_dirs+=("$dir"); done <<< "$candidates"
+    cleanup_confirm_dirs "${temp_dirs[@]}" || cleanup_failed=1
+    if command -v docker >/dev/null 2>&1; then
+        echo "Docker 镜像（仅删除指定且未被容器引用的镜像）："
+        if docker image ls; then
+            read -rp "输入镜像 ID 或名称，回车跳过: " answer
+            if [ -n "$answer" ] && [[ "$answer" != -* ]] && [[ "$answer" != *[[:space:]]* ]]; then
+                cleanup_run "删除 Docker 镜像" docker image rm -- "$answer" || :
+            fi
+        else
+            cleanup_failed=1
+        fi
+    fi
+    after=$(df -B1 --output=avail / | tail -n 1)
+    if [[ "$before" =~ ^[[:space:]]*[0-9]+$ && "$after" =~ ^[[:space:]]*[0-9]+$ ]]; then
+        echo "根分区可用空间变化：$(( (after - before) / 1024 / 1024 )) MiB（含同期其他进程写入）。"
+    fi
+    if [ "$cleanup_failed" -ne 0 ]; then
+        echo "部分清理失败，请查看以上错误。"
+        return 1
+    fi
+    echo "开发环境清理完成，跳过项见上方提示。"
+}
+
+
 # 系统垃圾清理函数
 clean_system() {
     echo -e "${white}=====${green}系统管理-清理垃圾${white}=====${background}"
     echo -e "${green}1.  ${cyan}常规清理 (系统日志、Redis日志、系统缓存)${background}"
+    echo -e "${green}2.  ${cyan}云崽开发环境清理${background}"
     echo -e "${green}0.  ${cyan}返回主菜单${background}"
     echo "========================="
     echo -en "${green}请输入您的选项: ${background}";read num
@@ -487,6 +627,10 @@ clean_system() {
         fi
 
         echo -e "${green}常规清理完成！${background}"
+        pause
+        ;;
+    2)
+        cleanup_dev_environment
         pause
         ;;
     0) return ;;
