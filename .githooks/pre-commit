@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 提交前的机械检查（bash -n / heredoc 里的 node 语法 / 行尾一致性 / md 重复标题）。
+# 提交前的机械检查（bash -n / heredoc 里的 node 语法 / 行尾一致性 / md 重复标题 / AGENTS.md 体积）。
 # 启用一次即可：git config core.hooksPath .githooks
 # 关掉：git config --unset core.hooksPath
 # 单次跳过：git commit --no-verify（本仓库没有别的守卫，别养成习惯）

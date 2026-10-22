@@ -57,16 +57,21 @@ read_qq_target_version() {
     printf '%s\n' "$target_version"
 }
 
-# 查询和安装共用来源及校验，调用方必须传入本轮 mktemp 创建的文件。
+# 查询和安装共用下载逻辑。只做格式级检查：下载成功 + 非空 + 以 #! 开头 + bash -n，
+# 不校验上游脚本的内容形状。官方 install.sh 2026-10-22 把
+# `function install_linuxqq_rootless() {` 改成 `() (` 子 shell 写法后，任何形状匹配
+# 都会把完全正常的文件误报成「下载失败或校验未通过」（实测 bash -n 通过、版本行也读得到）。
+# 开头这两个字节只用来挡住 200 + 拦截页 / HTML 错误页这类「能跑但不是脚本」的东西，
+# 不随上游重构失效；版本行只在查询版本时按需读取，安装不依赖它。
 download_napcat_installer() {
-    local output_file="$1" url
+    local output_file="$1" require_version="${2:-0}" url
     for url in "$INSTALL_URL" "https://gh-proxy.com/${INSTALL_URL}"; do
         if curl -fLsS --connect-timeout 3 --max-time 10 --retry 1 \
             --output "$output_file" "$url" &&
             [ -s "$output_file" ] &&
+            [ "$(head -c 2 -- "$output_file" 2>/dev/null)" = '#!' ] &&
             bash -n "$output_file" 2>/dev/null &&
-            grep -qE '^function[[:space:]]+install_linuxqq_rootless\(\)[[:space:]]*\{' "$output_file" &&
-            read_qq_target_version "$output_file" >/dev/null; then
+            { [ "$require_version" != 1 ] || read_qq_target_version "$output_file" >/dev/null; }; then
             return 0
         fi
     done
@@ -166,7 +171,7 @@ install_NapCat() {
     fi
     if ! chmod 700 "$install_script" || ! download_napcat_installer "$install_script"; then
         rm -f -- "$install_script"
-        echo -e ${red}下载安装脚本失败或内容校验未通过，请检查网络连接后重试${background}
+        echo -e ${red}下载安装脚本失败（网络异常或返回内容不是有效脚本），请检查网络连接后重试${background}
         echo -en ${cyan}回车返回${background};read
         return 1
     fi
@@ -3551,7 +3556,7 @@ save_version_cache() {
 get_qq_target_version() {
     local installer_file target_version
     installer_file=$(mktemp) || return 1
-    if ! download_napcat_installer "$installer_file" ||
+    if ! download_napcat_installer "$installer_file" 1 ||
         ! target_version=$(read_qq_target_version "$installer_file"); then
         rm -f -- "$installer_file"
         return 1

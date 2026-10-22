@@ -6,13 +6,14 @@
 #   bash tests/static-checks.sh             # 检查全部受版本控制的 *.sh
 #   bash tests/static-checks.sh a.sh b.sh   # 只检查指定文件（pre-commit 用）
 #
-# 做四件事：
+# 做五件事：
 #   1) 每个 *.sh 的 `bash -n`；
 #   2) 每个 node heredoc 块的 `node --check` —— `bash -n` 看不到 heredoc 里的 JS。
 #      2026-10-19 两次改坏那个 4900 行脚本，真凶都在 JS 里，而 `bash -n` 只报了一个不相干的 `}`；
 #   3) 行尾混用检测：同一文件里既有 CRLF 又有 LF 时，Linux 上执行会在 \r 处炸。
 #      整份翻转型改写交给 `.gitattributes` 的 `* text=auto` 兜底（git 在 add 时归一化）。
-#   4) *.md 的重复同级标题：整段被写两遍的唯一可靠信号（见文件末尾注释）。
+#   4) *.md 的重复同级标题：整段被写两遍的唯一可靠信号（见文件末尾注释）；
+#   5) AGENTS.md 体积上限：超过 40KB 就一次读不完（见该段注释）。
 #
 # 退出码：0 = 全过；1 = 有问题（逐条打印 "文件: 原因"）。
 # ============================================================
@@ -177,9 +178,23 @@ JS
     fi
 fi
 
+# ---- 5) AGENTS.md 体积上限 ----
+# 2026-10-22：AGENTS.md 涨到 90KB / 831 行，`Read` 工具在 20000 token 处直接拒读，
+# 于是「推给每个 Agent 的规则」实际上没人能一次读完——当天只能拿 2KB 预览干活，靠 grep 补。
+# 解法不是删规则，是把「单个脚本的专属约定」外移到 docs/agents/（同 domain.md 的既有做法），
+# AGENTS.md 只留 1-2 行指针。40KB 是「还能一次读完」的经验上限（中文约 13k token）。
+AGENTS_MAX_BYTE=${AGENTS_MAX_BYTE:-40960}
+if [ -f AGENTS.md ]; then
+    ag_size=$(wc -c < AGENTS.md)
+    if [ "${ag_size}" -gt "${AGENTS_MAX_BYTE}" ]; then
+        say "AGENTS.md" "体积 ${ag_size}B 超过 ${AGENTS_MAX_BYTE}B：把某个脚本的专属约定外移到 docs/agents/，再用 1-2 行指针指回来"
+        fail=1
+    fi
+fi
+
 if [ "${fail}" -ne 0 ]; then
     echo
     echo "static-checks: FAIL（修好后再提交；只跑指定文件：bash tests/static-checks.sh 路径…）" >&2
     exit 1
 fi
-echo "static-checks: OK（${#sh_files[@]} 个 sh：bash -n / heredoc node --check / 行尾混用；${#md_files[@]} 个 md：重复标题）"
+echo "static-checks: OK（${#sh_files[@]} 个 sh：bash -n / heredoc node --check / 行尾混用；${#md_files[@]} 个 md：重复标题；AGENTS.md ${ag_size:-?}B ≤ ${AGENTS_MAX_BYTE}B）"

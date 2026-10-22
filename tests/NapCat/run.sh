@@ -6,9 +6,10 @@ if [ "${1:-}" != --worker ]; then
     command -v timeout >/dev/null || exit 2
     timeout 0.1 sleep 2
     [ "$?" -eq 124 ] || exit 2
-    timeout "${HARNESS_TIMEOUT:-30}" bash "$0" --worker "$@"
+    # 全量 41 条实测约 80s（2026-10-22，Win/MSYS）。默认给 300s，本机更慢就自己调大。
+    timeout "${HARNESS_TIMEOUT:-300}" bash "$0" --worker "$@"
     rc=$?
-    [ "$rc" -ne 124 ] || echo '错误：测试超时。' >&2
+    [ "$rc" -ne 124 ] || echo "错误：测试超时（HARNESS_TIMEOUT=${HARNESS_TIMEOUT:-300}s）。全量约 80s；本机更慢就调大或 --only 跑子集。" >&2
     exit "$rc"
 fi
 shift
@@ -20,7 +21,32 @@ if [ -n "${TMPDIR:-}" ] && command -v cygpath >/dev/null 2>&1; then
     TMPDIR=$(cygpath -u "$TMPDIR" 2>/dev/null) || TMPDIR=
     export TMPDIR
 fi
+# 本机 WorkBuddy 沙箱把 rm 包成 safe-delete 函数：实测 4.5s/次，33 条用例光删临时文件就要 150s，
+# 且并行不加速（8 个并行仍 6.3s）。被测行为是「清理后文件消失」，与用哪个 rm 无关，目标环境也没有
+# 这层包装，所以换回系统 rm（0.16s/次）。要保留包装跑（验证它本身）就 NAPCAT_KEEP_RM=1。
+# 换了 rm 就等于绕开宿主的 fail-closed，因此这里**同时收紧**：只允许删 $WORK、/tmp 与 --log 指定的文件，
+# 其它路径直接报错——比宿主包装更保守，harness 真出 bug 也删不到仓库或家目录。
+if [ -z "${NAPCAT_KEEP_RM:-}" ] && [ "$(type -t rm 2>/dev/null)" = "function" ]; then
+    for _cand in /usr/bin/rm /bin/rm; do
+        if [ -x "$_cand" ]; then REAL_RM=$_cand; break; fi
+    done
+    if [ -n "${REAL_RM:-}" ]; then
+        rm() {
+            local a
+            for a in "$@"; do
+                case "$a" in
+                    -*) continue ;;
+                    "$WORK"|"$WORK"/*|/tmp/*) continue ;;
+                    "${LOG_FILE:-}"|"${CACHE_FIXTURE:-}") continue ;;
+                    *) echo "run.sh 只删临时目录，拒绝：$a" >&2; return 1 ;;
+                esac
+            done
+            command "$REAL_RM" "$@"
+        }
+    fi
+fi
 WORK=$(mktemp -d) || exit 2
+T0=${EPOCHREALTIME//[!0-9]/}
 CACHE_FIXTURE=''
 trap 'if [ -n "$CACHE_FIXTURE" ]; then rm -rf -- "$CACHE_FIXTURE"; fi; rm -rf -- "$WORK"' EXIT
 
@@ -68,6 +94,14 @@ want_group() {
     return 1
 }
 
+# ---------------------------------------------------------------------------
+# 两条耗时约定（两组都算数，2026-10-22 实测）：
+#   · 断言只用内建：case/[[ ]] 匹配变量、$(<file) 读输出、mapfile 数行、glob 判空目录，
+#     不用 wc / grep / cat / find / basename 这类每处都起一个进程的写法（Win/MSYS fork ≈0.18s）
+#   · 宿主若把 rm 包装成 safe-delete（≈4.5s/次），整组会被拖成分钟级，见上面 REAL_RM 那段
+# 违反后的代价：version 组曾因这两条从 ~20s 涨到 190s。
+# ---------------------------------------------------------------------------
+
 # 只提取本次涉及的函数，绝不运行入口、安装系统依赖或启动真实 QQ。
 tr -d '\r' < "$SOURCE" > "$WORK/source.sh" || exit 2
 grep '^INSTALL_URL=' "$WORK/source.sh" > "$WORK/functions.sh" || exit 2
@@ -95,7 +129,11 @@ NAPCAT_CMD='fixture-qq'
 
 cat > "$WORK/valid.sh" <<'BASH'
 #!/bin/bash
-function install_linuxqq_rootless() { :; }
+# 官方 install.sh 从 2026-10-22 起是这个子 shell 写法（此前是 `{`）。
+# 旧的内容校验就是被它打成「下载失败或校验未通过」的，这里按原样复现。
+function install_linuxqq_rootless() (
+    :
+)
 linuxqq_target_version="3.2.32-52194"
 printf '%s\n' "$linuxqq_target_version" >> "$TEST_EXEC_LOG"
 exit "$TEST_INSTALL_RC"
@@ -103,11 +141,24 @@ BASH
 sed 's/3.2.32-52194/3.2.20-40990/' "$WORK/valid.sh" > "$WORK/older.sh"
 sed 's/3.2.32-52194/unknown/' "$WORK/valid.sh" > "$WORK/bad-version.sh"
 sed '/^linuxqq_target_version=/d' "$WORK/valid.sh" > "$WORK/no-version.sh"
-sed '/^function install_linuxqq_rootless/d' "$WORK/valid.sh" > "$WORK/no-marker.sh"
+# 只把函数名换掉 = 旧校验要找的那个标记不存在，其余（版本行、执行痕迹）与 valid.sh 同源。
+sed 's/^function install_linuxqq_rootless() ($/function install_something_else() (/' \
+    "$WORK/valid.sh" > "$WORK/no-marker.sh"
 cp "$WORK/valid.sh" "$WORK/bad-syntax.sh"
 printf 'if then\n' >> "$WORK/bad-syntax.sh"
 printf 'The content may contain violation information\n' > "$WORK/error-page.sh"
+# 200 但正文被截断（curl 正常退出）：只剩函数头就 EOF，靠 bash -n 拦。
+awk '{print} /^function install_linuxqq_rootless\(\) \($/{exit}' "$WORK/valid.sh" > "$WORK/truncated.sh"
 : > "$WORK/empty.sh"
+
+# 夹具自检：这三条夹具一旦退化（sed 没换到名 / 拦截页被改成 HTML / 截断点没落在语法里），
+# 对应用例就会静默退化成 happy path，看着还是绿的。
+[[ "$(< "$WORK/no-marker.sh")" == *install_linuxqq_rootless* ]] &&
+    { echo '夹具错误：no-marker.sh 里旧标记没换掉' >&2; exit 2; }
+bash -n "$WORK/error-page.sh" 2>/dev/null ||
+    { echo '夹具错误：error-page.sh 必须能通过 bash -n（只有首行 #! 能挡它）' >&2; exit 2; }
+bash -n "$WORK/truncated.sh" 2>/dev/null &&
+    { echo '夹具错误：truncated.sh 必须过不了 bash -n' >&2; exit 2; }
 
 # 所有网络、包管理与进程操作都有桩；下载到的也只能是上面的无害夹具。
 curl() {
@@ -181,27 +232,43 @@ reset_case() {
     : > "$INIT_LOG"
 }
 no_temporary_files() {
-    [ -z "$(find "$TMPDIR" -mindepth 1 -print -quit)" ]
+    # 覆盖隐藏文件：只用 * 时 mktemp 之类留下的点文件看不见，断言会静默变弱。
+    local -a left=("$TMPDIR"/* "$TMPDIR"/.[!.]*)
+    local p
+    for p in "${left[@]}"; do
+        [ -e "$p" ] && return 1
+    done
+    return 0
 }
 
 if want_group version; then
 
 reset_case
 actual=$(get_qq_target_version); rc=$?
+mapfile -t curl_calls < "$CURL_LOG"
 [ "$rc" -eq 0 ] && [ "$actual" = 3.2.32-52194 ] &&
-    [ "$(wc -l < "$CURL_LOG")" -eq 1 ] && [ ! -s "$TEST_EXEC_LOG" ] && no_temporary_files
+    [ "${#curl_calls[@]}" -eq 1 ] && [ ! -s "$TEST_EXEC_LOG" ] && no_temporary_files
 report "$?" '直连读取目标版本，不执行远端脚本，清理临时文件'
 
-for response in timeout http-error partial empty error-page bad-syntax bad-version no-version no-marker; do
+for response in timeout http-error partial empty error-page truncated bad-syntax bad-version no-version; do
     reset_case
     DIRECT_RESPONSE=$response
     actual=$(get_qq_target_version); rc=$?
+    mapfile -t curl_calls < "$CURL_LOG"
     [ "$rc" -eq 0 ] && [ "$actual" = 3.2.32-52194 ] &&
-        [ "$(wc -l < "$CURL_LOG")" -eq 2 ] && [ ! -s "$TEST_EXEC_LOG" ] && no_temporary_files
+        [ "${#curl_calls[@]}" -eq 2 ] && [ ! -s "$TEST_EXEC_LOG" ] && no_temporary_files
     report "$?" "直连返回 $response 时切换镜像"
 done
 
-for response in timeout http-error partial empty error-page bad-syntax bad-version no-version no-marker; do
+reset_case
+DIRECT_RESPONSE=no-marker
+actual=$(get_qq_target_version); rc=$?
+mapfile -t curl_calls < "$CURL_LOG"
+[ "$rc" -eq 0 ] && [ "$actual" = 3.2.32-52194 ] && [ "${#curl_calls[@]}" -eq 1 ] &&
+    [ ! -s "$TEST_EXEC_LOG" ] && no_temporary_files
+report "$?" '上游换写法（没有 rootless 函数）时照常读到版本，不再白切镜像'
+
+for response in timeout http-error partial empty error-page bad-syntax bad-version no-version; do
     reset_case
     DIRECT_RESPONSE=$response
     MIRROR_RESPONSE=$response
@@ -240,36 +307,48 @@ printf '用户自己的文件\n' > napcat.sh
 reset_case
 DIRECT_RESPONSE=timeout
 install_NapCat > "$WORK/output" 2>&1; rc=$?
-[ "$rc" -eq 0 ] && [ "$(cat "$TEST_EXEC_LOG")" = 3.2.32-52194 ] &&
-    [ "$(wc -l < "$CURL_LOG")" -eq 2 ] && [ -s "$INIT_LOG" ] &&
-    [ "$VERSION_INFO_CACHED" = false ] && grep -q 'NapCat安装完成' "$WORK/output" && no_temporary_files
+mapfile -t curl_calls < "$CURL_LOG"
+[ "$rc" -eq 0 ] && [ "$(< "$TEST_EXEC_LOG")" = 3.2.32-52194 ] &&
+    [ "${#curl_calls[@]}" -eq 2 ] && [ -s "$INIT_LOG" ] &&
+    [ "$VERSION_INFO_CACHED" = false ] && [[ "$(< "$WORK/output")" == *NapCat安装完成* ]] && no_temporary_files
 report "$?" '安装复用镜像兜底，执行成功后初始化并清除缓存'
-[ "$(cat napcat.sh)" = '用户自己的文件' ]
+[ "$(< napcat.sh)" = '用户自己的文件' ]
 report "$?" '安装不覆盖或删除当前目录已有的 napcat.sh'
 
 reset_case
 DIRECT_RESPONSE=older
 install_NapCat > "$WORK/output" 2>&1; rc=$?
-[ "$rc" -eq 0 ] && [ "$(cat "$TEST_EXEC_LOG")" = 3.2.20-40990 ] && no_temporary_files
+[ "$rc" -eq 0 ] && [ "$(< "$TEST_EXEC_LOG")" = 3.2.20-40990 ] && no_temporary_files
 report "$?" '安装允许执行上游提供的较低目标版本'
 
 reset_case
 TEST_INSTALL_RC=7
 install_NapCat > "$WORK/output" 2>&1; rc=$?
 [ "$rc" -ne 0 ] && [ -s "$TEST_EXEC_LOG" ] && [ ! -s "$INIT_LOG" ] &&
-    [ "$VERSION_INFO_CACHED" = false ] && grep -q '安装脚本执行失败' "$WORK/output" &&
-    ! grep -q 'NapCat安装完成' "$WORK/output" && no_temporary_files
+    [ "$VERSION_INFO_CACHED" = false ] && [[ "$(< "$WORK/output")" == *安装脚本执行失败* ]] &&
+    [[ "$(< "$WORK/output")" != *NapCat安装完成* ]] && no_temporary_files
 report "$?" '安装脚本执行失败时中止，不初始化或宣告成功'
 
-for response in timeout error-page bad-syntax no-version; do
+for response in timeout error-page bad-syntax; do
     reset_case
     DIRECT_RESPONSE=$response
     MIRROR_RESPONSE=$response
     install_NapCat > "$WORK/output" 2>&1; rc=$?
-    [ "$rc" -ne 0 ] && [ ! -s "$TEST_EXEC_LOG" ] && [ ! -s "$INIT_LOG" ] &&
-        grep -q '下载安装脚本失败或内容校验未通过' "$WORK/output" &&
-        ! grep -q 'NapCat安装完成' "$WORK/output" && no_temporary_files
+    [[ "$(< "$WORK/output")" == *下载安装脚本失败* ]] &&
+        [[ "$(< "$WORK/output")" != *NapCat安装完成* ]] &&
+        [ "$rc" -ne 0 ] && [ ! -s "$TEST_EXEC_LOG" ] && [ ! -s "$INIT_LOG" ] && no_temporary_files
     report "$?" "安装下载遇到 $response 时中止并清理临时文件"
+done
+
+# 上游脚本的内容形状与版本行都不是安装的前提：只要下到的是能解析的 bash 就直接执行。
+for response in no-marker no-version; do
+    reset_case
+    DIRECT_RESPONSE=$response
+    install_NapCat > "$WORK/output" 2>&1; rc=$?
+    mapfile -t curl_calls < "$CURL_LOG"
+    [ "$rc" -eq 0 ] && [ -s "$TEST_EXEC_LOG" ] && [ "${#curl_calls[@]}" -eq 1 ] &&
+        [ -s "$INIT_LOG" ] && [[ "$(< "$WORK/output")" == *NapCat安装完成* ]] && no_temporary_files
+    report "$?" "上游脚本没有关键标记或版本行（$response）时仍然正常安装"
 done
 
 fi # version 组
@@ -279,11 +358,7 @@ if want_group cache; then
 # ---------------------------------------------------------------------------
 # QQ 缓存 / NapCat 日志：查看与清理（决策见 docs/adr/0001-napcat-cache-cleanup.md）
 # 夹具放在 /tmp：本组会真的删文件，不能落在只读断言用的 cwd 里。
-# 本组三条性能约定（Win/MSYS 上 fork ≈0.25s、rm -rf 走安全网关 ≈3.7s）：
-#   · 断言只用内建：case/[[ ]] 匹配变量、$(<file) 读输出、mapfile 数行，
-#     不用 grep -c / wc / basename 这类每个都起一个进程的写法
-#   · 夹具由 mktemp 新建即为空，除 EXIT trap 外不做 rm -rf
-#   · 只有主流程遍历完整 9 个目录，校验类用例用最小夹具
+# 性能约定见文件头「两条耗时约定」。
 # ---------------------------------------------------------------------------
 CACHE_FIXTURE=$(mktemp -d "${CACHE_TMP_ROOT:-/tmp}/napcat-cache.XXXXXX") || exit 2
 CACHE_A="$CACHE_FIXTURE/qq/nt_qq_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -406,8 +481,17 @@ QQ_DATA_ROOT="$CACHE_TMP_QQ"
 
 fi # cache 组
 
-printf 'TOTAL: pass=%s fail=%s\n' "$pass" "$fail"
-printf 'TOTAL: pass=%s fail=%s\n' "$pass" "$fail" >> "$LOG_FILE" || exit 2
+TOTAL_SUMMARY="TOTAL: pass=$pass fail=$fail"
+if [ -n "$T0" ]; then
+    TOTAL_SECOND=$(( (${EPOCHREALTIME//[!0-9]/} - T0) / 1000000 ))
+    TOTAL_SUMMARY="$TOTAL_SUMMARY 用时=${TOTAL_SECOND}s"
+fi
+printf '%s\n' "$TOTAL_SUMMARY"
+printf '%s\n' "$TOTAL_SUMMARY" >> "$LOG_FILE" || exit 2
+if [ "${TOTAL_SECOND:-0}" -gt 150 ]; then
+    echo "提示：超过 150s（全量实测约 80s）。① 别设 NAPCAT_KEEP_RM——设了会保留宿主的慢 rm（≈4.5s/次）；"
+    echo "      ② 看断言是否退回 wc/find/grep/cat 这类每处起进程的写法（约定见文件头）。"
+fi
 if [ "$fail" -eq 0 ]; then
     $KEEP_LOG || rm -f -- "$LOG_FILE"
     exit 0
