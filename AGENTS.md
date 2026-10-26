@@ -279,6 +279,7 @@ Codex `auth.json` / Claude `settings.json` 语义、两套配置库、凭据与�
 - tmux 会话使用独立 socket（`tmux -L <name>`）；清理时要连 `kill-server` 和 `/tmp/tmux-$(id -u)/<name>` 一起处理，否则会留下坏 socket。
 - `git_clone` / `git_update` 失败后可能留下半成品目录（有目录无 `.git`）——**只能清理由本轮操作创建的目录**；已存在的目录不得按"半成品"推断后删除。
 - **`SYS_Manage.sh` 的「安装常用字体」各发行版包名不同，别照抄**：CJK 是 `fonts-noto-cjk`（apt）/ `google-noto-sans-cjk-fonts`（yum、dnf）/ `noto-fonts-cjk`（pacman）；emoji 是 `fonts-noto-color-emoji`（apt）/ `noto-fonts-emoji`（pacman）。RPM 系**改过名**：EL9 及更早是 `google-noto-emoji-color-fonts`，EL10 起是 `google-noto-color-emoji-fonts`，要写成 `dnf install A || dnf install B` 两条命令试——写进一条里时只要有一个包不存在，dnf 会 `Unable to find a match` 让**整条事务失败**。⚠️ **`google-noto-emoji-fonts` 是黑白 emoji**，装错包不报错但表情仍是方块。装完必须按 `fc-list :lang=zh` / `fc-list | grep -i emoji` 复核：字体装失败是**静默**的，只有 fc-list 能戳破（2026-09-14：`chatgpt-plugin` 的列表图在服务器上整片中文变方块，根因就是宿主没装 CJK 字体）。
+- **云崽日志清理只 truncate，不删 `error.log`**：`cleanup_yunzai_logs` 处理 `$HOME/{TRSS,Miao}-Yunzai/logs`，`command.<日期>.log[.zst|.gz]` 按**文件名日期**保留 7 天；`error.log` 用 `truncate -s 0` 原地清空（log4js `file` appender 持有 append 流，`rm` 后 bot 会一直写已删除的 inode），文件不存在时**不要新建**。细节与回归命令见 `docs/开发环境清理.md`。
 - `Linux/Bot-Install-*.sh` 那批系统安装脚本只装文泉驿（CentOS 走 `groupinstall fonts`），**没有 Noto 系列**——需要 CJK/emoji 覆盖时记得同步这四处。
 
 - **`tests/<脚本>/run.sh` 只抽函数体，顶层的 `VAR="..."` 不会跟着走**：它用 awk 按 `name() {` 到 `^}$` 逐段抽取，

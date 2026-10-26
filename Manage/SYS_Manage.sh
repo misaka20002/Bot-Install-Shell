@@ -519,7 +519,7 @@ cleanup_dev_environment() {
     local cleanup_failed=0 before after answer dir candidates checked
     local -a dirs=() temp_dirs=()
     before=$(df -B1 --output=avail / | tail -n 1)
-    echo "清理包缓存、APT 索引与日志；Hapi、临时目录和 Docker 另行确认。"
+    echo "清理包缓存、APT 索引、journal 与云崽日志（logs 保留 7 天，error.log 清空但保留文件）；Hapi、临时目录和 Docker 另行确认。"
     read -rp "开始清理？[y/N]: " answer
     case "$answer" in y|Y) ;; *) return 0 ;; esac
     if command -v pnpm >/dev/null 2>&1; then
@@ -541,6 +541,7 @@ cleanup_dev_environment() {
         cleanup_run "轮转 journal" journalctl --rotate || :
         cleanup_run "压缩 journal 至 50M" journalctl --vacuum-size=50M || :
     fi
+    cleanup_run "清理云崽日志" cleanup_yunzai_logs || :
     if candidates=$(cleanup_hapi_candidates); then
         while IFS= read -r dir; do [ -n "$dir" ] && dirs+=("$dir"); done <<< "$candidates"
         if [ "${#dirs[@]}" -gt 0 ]; then
@@ -586,6 +587,145 @@ cleanup_dev_environment() {
         return 1
     fi
     echo "开发环境清理完成，跳过项见上方提示。"
+}
+
+# 从 command.YYYY-MM-DD.log[.zst|.gz] 里取日期。命名不符（插件自己的日志、
+# 未按日滚动的 command.log、手工备份）返回 1，调用方一律保持不动。
+# 2026-02-30 这类「长得像日期但不是日期」的名字同样按未识别处理：
+# date 回读比对能戳破它，纯数字比较会把它们当合法日期删掉。
+cleanup_log_date() {
+    local base=${1##*/} day
+    [[ $base =~ ^command\.([0-9]{4}-[0-9]{2}-[0-9]{2})\.log(\.(zst|gz))?$ ]] || return 1
+    day=${BASH_REMATCH[1]}
+    [ "$(date -d "$day" +%F 2>/dev/null)" = "$day" ] || return 1
+    printf '%s\n' "$day"
+}
+
+# 字节数转人类可读，纯 bash 内建（日志条数少，但测试机每个 fork 都不便宜）
+cleanup_human_size() {
+    local bytes=${1:-0}
+    case "$bytes" in
+        ''|*[!0-9]*) bytes=0 ;;
+    esac
+    if [ "$bytes" -ge 1073741824 ]; then
+        printf '%d GiB\n' "$((bytes / 1073741824))"
+    elif [ "$bytes" -ge 1048576 ]; then
+        printf '%d MiB\n' "$((bytes / 1048576))"
+    elif [ "$bytes" -ge 1024 ]; then
+        printf '%d KiB\n' "$((bytes / 1024))"
+    else
+        printf '%d B\n' "$bytes"
+    fi
+}
+
+# 云崽日志清理：$HOME/{TRSS,Miao}-Yunzai/logs 下的 command 日志只留 7 天内，
+# error.log 原地清空但保留文件。
+#   · 日期取文件名而不是 mtime：迁移 / rsync 会改 mtime，文件名才代表日志真实日期；
+#     保留「今天 + 前 6 天」，解析不出日期的文件不动（可能是插件日志或手工备份）。
+#   · error.log 是 log4js 的 `type: "file"` appender：bot 进程持有 append 流，删掉文件后
+#     它会一直往已删除的 inode 写，直到重启才恢复；truncate 保留 inode / 属主 / 权限，
+#     运行中的 bot 立刻继续可写。所以只能 truncate，绝不能 rm 后重建。
+#   · error.log 不存在时只提示、不新建：root 建出来的 0644 会挡住非 root 运行的 bot。
+#   · 天数写在函数体里：测试只抽取函数体，顶层变量不会跟着走（同 NapCat 缓存清理）。
+cleanup_yunzai_logs() {
+    local keep_days=7
+    local cutoff dir file day size err_size err_known err_msg total_bytes freed_bytes
+    local removed kept i failed=0
+    local -a dirs=() stale=() sizes=()
+    cutoff=$(date -d "$((keep_days - 1)) days ago" +%Y-%m-%d) || {
+        echo "云崽日志：无法计算保留日期，跳过"
+        return 1
+    }
+    for dir in "$HOME/TRSS-Yunzai/logs" "$HOME/Miao-Yunzai/logs"; do
+        if [ -L "$dir" ]; then
+            echo "云崽日志：跳过 $dir（符号链接，不读不删）"
+        elif [ -d "$dir" ]; then
+            dirs+=("$dir")
+        else
+            echo "云崽日志：未找到 $dir，跳过"
+        fi
+    done
+    [ "${#dirs[@]}" -gt 0 ] || return 0
+    echo "云崽日志：保留 $keep_days 天内（$cutoff 及之后），error.log 只清空不删除"
+    for dir in "${dirs[@]}"; do
+        stale=()
+        sizes=()
+        kept=0
+        total_bytes=0
+        for file in "$dir"/command.*; do
+            if [ ! -f "$file" ] || [ -L "$file" ]; then
+                continue
+            fi
+            day=$(cleanup_log_date "$file") || continue
+            if [ "${day//-/}" -ge "${cutoff//-/}" ]; then
+                kept=$((kept + 1))
+                continue
+            fi
+            size=$(stat -c %s -- "$file" 2>/dev/null) || size=0
+            stale+=("$file")
+            sizes+=("$size")
+            total_bytes=$((total_bytes + size))
+        done
+        err_size=0
+        err_known=1
+        if [ -f "$dir/error.log" ] && [ ! -L "$dir/error.log" ]; then
+            if ! err_size=$(stat -c %s -- "$dir/error.log" 2>/dev/null); then
+                err_size=0
+                err_known=0
+            fi
+        fi
+        echo "  $dir"
+        if [ "${#stale[@]}" -eq 0 ]; then
+            echo "    没有早于 $cutoff 的 command 日志（保留 $kept 个）"
+        else
+            echo "    将删除 ${#stale[@]} 个早于 $cutoff 的 command 日志（约 $(cleanup_human_size "$total_bytes")），保留 $kept 个"
+        fi
+        if [ "$err_known" -eq 0 ]; then
+            echo "    error.log 大小无法读取，仍将尝试原地清空"
+        elif [ "$err_size" -gt 0 ]; then
+            echo "    error.log 当前 $(cleanup_human_size "$err_size")，将原地清空"
+        fi
+        removed=0
+        freed_bytes=0
+        for i in "${!stale[@]}"; do
+            file=${stale[$i]}
+            if rm -f -- "$file"; then
+                removed=$((removed + 1))
+                freed_bytes=$((freed_bytes + ${sizes[$i]:-0}))
+            else
+                echo "    删除失败：$file"
+                failed=1
+            fi
+        done
+        if [ "$removed" -gt 0 ]; then
+            echo "    已删除 $removed 个 command 日志（约 $(cleanup_human_size "$freed_bytes")）"
+        fi
+        if [ -L "$dir/error.log" ]; then
+            echo "    error.log 是符号链接，跳过"
+        elif [ ! -e "$dir/error.log" ]; then
+            echo "    error.log 不存在，跳过（不新建：属主 / 权限不对会让 bot 写不进去）"
+        elif [ ! -f "$dir/error.log" ]; then
+            echo "    error.log 不是普通文件，跳过"
+        elif [ "$err_known" -eq 1 ] && [ "$err_size" -eq 0 ]; then
+            echo "    error.log 已经是空的"
+        elif err_msg=$(truncate -s 0 -- "$dir/error.log" 2>&1); then
+            if [ "$err_known" -eq 1 ]; then
+                echo "    error.log 已原地清空（原 $(cleanup_human_size "$err_size")，文件保留）"
+            else
+                echo "    error.log 已原地清空（原大小未知，文件保留）"
+            fi
+        else
+            # 不用 `: > file` 兜底：文件若在这几行之间消失，重定向会以 root 0644 把它建回来，
+            # 等于违反「缺失时不新建」，还会把 truncate 的失败伪装成成功。
+            echo "    error.log 清空失败${err_msg:+：$err_msg}"
+            failed=1
+        fi
+    done
+    if [ "$failed" -ne 0 ]; then
+        echo "云崽日志：部分清理失败"
+        return 1
+    fi
+    return 0
 }
 
 

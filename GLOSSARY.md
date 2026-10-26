@@ -36,6 +36,14 @@ _Avoid_: QQ 日志、运行日志
 在 QQ 数据根下（`~/.config/QQ/NapCat/temp`），不是安装目录里的 `temp`——后者通常不存在。
 _Avoid_: 缓存目录、安装目录临时文件
 
+### 云崽侧
+
+**云崽日志（`logs`）**:
+Yunzai 自身的运行日志，写在 `$HOME/<BotName>/logs`（`TRSS-Yunzai` / `Miao-Yunzai`）。
+`command.<YYYY-MM-DD>.log[.zst|.gz]` 按天滚动（TRSS 压成 `.zst`，Miao 不压），`error.log` 是**单个、不轮转**的文件。
+与 NapCat 日志、QQ 的 `log` 不同源。`error.log` 只能原地 truncate：删掉后运行中的 bot 会继续写已删除的 inode。
+_Avoid_: QQ 日志、NapCat 日志
+
 ### 清理动作
 
 **整清**:
@@ -45,8 +53,8 @@ _Avoid_: 清空、全清
 
 **保留天数**:
 以文件 `mtime` 判定「旧到可以删」的天数（默认 7，另有 30 与自定义）。只作用于媒体缓存
-（`Pic`、`Ptt`、`Video`、`File`）；日志类不受它影响，始终整清。
-判定维度是**文件时间**，不是目录名里的日期——目录命名一变也不会整片误删。
+（`Pic`、`Ptt`、`Video`、`File`），判定维度是**文件时间**而不是目录名里的日期——目录命名一变也不会整片误删。
+日志类不走这条规则：QQ / NapCat 的日志始终整清，云崽日志固定按**文件名里的日期**保留 7 天（见「云崽日志」）。
 _Avoid_: 过期时间、TTL
 
 ## 系统管理
